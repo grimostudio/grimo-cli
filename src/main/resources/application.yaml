@@ -1,3 +1,6 @@
 spring:
   application:
     name: grimo
+
+grimo:
+  workspace: ${user.home}/grimo-workspace
