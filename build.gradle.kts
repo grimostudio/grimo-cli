@@ -81,3 +81,10 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
 	standardInput = System.`in`
 	jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
+
+// FFM terminal provider 需要 native access，寫入 jar manifest 讓 java -jar 自動啟用
+tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
+	manifest {
+		attributes("Enable-Native-Access" to "ALL-UNNAMED")
+	}
+}
