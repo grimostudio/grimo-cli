@@ -53,23 +53,70 @@ Reference:
 - [Taskwarrior Syntax](https://taskwarrior.org/docs/syntax/)
 - [GitHub CLI Manual](https://cli.github.com/manual/)
 
+### Smart Defaults 規則
+
+所有指令統一套用：
+
+1. **裸指令 = list**：`/xxx` 等同 `/xxx list`，顯示該類別的列表
+2. **缺少必要參數 = 互動式提問**：`/xxx create` 缺少參數時互動式詢問（if TTY）
+3. **完整參數 = 直接執行**：`/xxx create --flag value` 無需互動，可用於自動化
+
 ### 指令對照表
+
+#### /task — 任務管理
 
 | 輸入 | 行為 |
 |------|------|
-| `/task` | 顯示任務列表（等同 `/task list`） |
+| `/task` | 顯示任務列表 |
 | `/task create` | 互動式建立任務（提問描述、cron 等） |
-| `/task create --desc "檢查 API" --cron "0 9 * * *"` | 直接建立，無需互動 |
+| `/task create --desc "檢查 API" --cron "0 9 * * *"` | 直接建立 |
 | `/task show <id>` | 顯示任務詳情 |
 | `/task cancel <id>` | 取消任務 |
-| `/agent` | 顯示 agent 列表（等同 `/agent list`） |
+
+#### /agent — Agent 管理
+
+| 輸入 | 行為 |
+|------|------|
+| `/agent` | 顯示 agent 列表及狀態 |
 | `/agent use <id>` | 切換預設 agent |
-| `/mcp` | 顯示 MCP 連線列表 |
+| `/agent model <name>` | 切換預設模型 |
+| `/agent add` | 互動式新增 agent（選擇 type、輸入 API key 等） |
+| `/agent add --type api --id openai --key sk-...` | 直接新增 |
+| `/agent remove <id>` | 移除 agent |
+
+#### /mcp — MCP 連線管理
+
+| 輸入 | 行為 |
+|------|------|
+| `/mcp` | 顯示 MCP 連線列表及工具數 |
+| `/mcp add` | 互動式新增連線（選擇 transport、輸入 command 等） |
+| `/mcp add --name github --transport stdio --command "npx @modelcontextprotocol/server-github"` | 直接新增 |
+| `/mcp remove <name>` | 移除連線 |
+
+#### /skill — Skill 管理
+
+| 輸入 | 行為 |
+|------|------|
 | `/skill` | 顯示已載入 skill 列表 |
-| `/channel` | 顯示 channel 列表 |
-| `/config` | 進入設定模式（互動式選擇預設 agent、model 等） |
+| `/skill install <url>` | 從 Git repo 安裝 skill |
+| `/skill remove <name>` | 移除 skill |
+
+#### /channel — Channel 管理
+
+| 輸入 | 行為 |
+|------|------|
+| `/channel` | 顯示 channel 列表及狀態 |
+| `/channel add` | 互動式新增 channel（選擇 type、輸入 token 等） |
+| `/channel add --type telegram --token "..."` | 直接新增 |
+| `/channel remove <type>` | 移除 channel |
+
+#### 全域指令
+
+| 輸入 | 行為 |
+|------|------|
+| `/config` | 進入互動式設定（預設 agent、model、workspace 等） |
 | `/status` | 系統狀態總覽 |
-| `/grimoire` | 進入全螢幕監控模式 |
+| `/grimoire` | 進入全螢幕 Grimoire 監控模式 |
 | `/exit` | 結束程式 |
 | 自然語言 | 路由到預設 agent 處理 |
 
