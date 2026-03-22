@@ -67,11 +67,12 @@ public class GrimoStartupRunner {
 
     /**
      * 自訂 Shell 提示符 bean，顯示目前可用的 Agent ID，
+     * 優先採用 config.yaml 設定的預設 agent，
      * 讓使用者在互動時能即時知道目前連線的 AI provider。
      */
     @Bean
-    GrimoPromptProvider grimoPromptProvider(AgentProviderRegistry registry) {
-        return new GrimoPromptProvider(registry);
+    GrimoPromptProvider grimoPromptProvider(AgentProviderRegistry registry, GrimoConfig grimoConfig) {
+        return new GrimoPromptProvider(registry, grimoConfig);
     }
 
     @Bean
