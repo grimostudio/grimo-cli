@@ -16,7 +16,7 @@ import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import io.github.samzhu.grimo.task.store.MarkdownTaskStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
@@ -130,7 +130,10 @@ public class GrimoStartupRunner {
     }
 
     /**
-     * 有序啟動流程，以 @Bean 方法定義 ApplicationRunner：
+     * 有序啟動流程，以 @Bean 方法定義 CommandLineRunner：
+     * 使用 CommandLineRunner 而非 ApplicationRunner，避免與 Spring Shell 的
+     * springShellApplicationRunner 衝突（它有 @ConditionalOnMissingBean(ApplicationRunner.class)）。
+     *
      * 1. 初始化 workspace 目錄結構
      * 2. 自動偵測可用的 agent provider（CLI 工具、API key、本地服務）
      * 3. 從 workspace/skills/ 載入所有 SKILL.md 並註冊
@@ -138,7 +141,7 @@ public class GrimoStartupRunner {
      * 5. 恢復先前已排定的 cron 任務
      */
     @Bean
-    ApplicationRunner grimoStartup(WorkspaceManager workspaceManager,
+    CommandLineRunner grimoStartup(WorkspaceManager workspaceManager,
                                     GrimoConfig grimoConfig,
                                     AgentDetector agentDetector,
                                     SkillLoader skillLoader,
