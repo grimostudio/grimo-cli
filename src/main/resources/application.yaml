@@ -1,6 +1,9 @@
 spring:
   application:
     name: grimo
+  shell:
+    interactive:
+      enabled: true
 
 management:
   endpoints:
