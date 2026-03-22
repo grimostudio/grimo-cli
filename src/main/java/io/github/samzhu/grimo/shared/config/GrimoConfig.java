@@ -34,6 +34,39 @@ public class GrimoConfig {
         }
     }
 
+    public String getDefaultAgent() {
+        return getNestedString("agents", "default");
+    }
+
+    public String getDefaultModel() {
+        return getNestedString("agents", "model");
+    }
+
+    public void setDefaultAgent(String agentId) {
+        setNestedValue("agents", "default", agentId);
+    }
+
+    public void setDefaultModel(String model) {
+        setNestedValue("agents", "model", model);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String getNestedString(String section, String key) {
+        var data = load();
+        var sectionMap = (Map<String, Object>) data.get(section);
+        if (sectionMap == null) return null;
+        var value = sectionMap.get(key);
+        return value != null ? value.toString() : null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void setNestedValue(String section, String key, String value) {
+        var data = load();
+        var sectionMap = (Map<String, Object>) data.computeIfAbsent(section, k -> new LinkedHashMap<>());
+        sectionMap.put(key, value);
+        save(data);
+    }
+
     public void save(Map<String, Object> data) {
         var options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);

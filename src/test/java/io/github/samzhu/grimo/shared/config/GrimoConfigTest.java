@@ -51,6 +51,40 @@ class GrimoConfigTest {
     }
 
     @Test
+    void getDefaultAgentShouldReturnConfiguredValue() throws IOException {
+        var configFile = tempDir.resolve("config.yaml");
+        Files.writeString(configFile, """
+            agents:
+              default: anthropic
+              model: claude-sonnet-4
+            """);
+
+        var config = new GrimoConfig(configFile);
+        assertThat(config.getDefaultAgent()).isEqualTo("anthropic");
+        assertThat(config.getDefaultModel()).isEqualTo("claude-sonnet-4");
+    }
+
+    @Test
+    void getDefaultAgentShouldReturnNullWhenNotConfigured() {
+        var config = new GrimoConfig(tempDir.resolve("config.yaml"));
+        assertThat(config.getDefaultAgent()).isNull();
+        assertThat(config.getDefaultModel()).isNull();
+    }
+
+    @Test
+    void setDefaultAgentShouldPersist() {
+        var configFile = tempDir.resolve("config.yaml");
+        var config = new GrimoConfig(configFile);
+
+        config.setDefaultAgent("openai");
+        config.setDefaultModel("gpt-4o");
+
+        var reloaded = new GrimoConfig(configFile);
+        assertThat(reloaded.getDefaultAgent()).isEqualTo("openai");
+        assertThat(reloaded.getDefaultModel()).isEqualTo("gpt-4o");
+    }
+
+    @Test
     void shouldSetFilePermissionsTo600() throws IOException {
         var configFile = tempDir.resolve("config.yaml");
         var config = new GrimoConfig(configFile);
