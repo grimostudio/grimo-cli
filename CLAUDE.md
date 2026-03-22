@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+你上網查證一下比在那邊試要快
+
+了解功能需求或是目的後, 或是為什麼考慮這樣處理, 要記得寫設計說明註解
+
+需要的開發資訊 SDK 都上網再確認過一次
+
+參考資料要附上來源
+
+plan 中 畫出流程或循序圖 來確認正確性
+
+log 不足以確認根本問題時, 請嘗試多加 log, 重新測試後, 再來釐清問題, 才做修改計劃提高正確性
+
+套件都要使用到最新的
+
 ## Project Overview
 
 Grimo is a locally-hosted AI assistant platform built as a Spring Shell CLI. It provides pluggable communication channels (Telegram, LINE), task scheduling with Markdown persistence, and a unified agent provider model that treats LLM APIs and CLI tools equally. Design spec: `docs/superpowers/specs/2026-03-22-grimo-openclaw-design-zh-TW.md`.
