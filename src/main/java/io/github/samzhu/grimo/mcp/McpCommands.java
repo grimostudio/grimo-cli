@@ -22,6 +22,15 @@ public class McpCommands {
         this.registry = registry;
     }
 
+    /**
+     * 裸指令別名：輸入 /mcp 等同 /mcp list，符合漸進式揭露原則。
+     * Smart Default: bare 'mcp' command delegates to 'mcp list'.
+     */
+    @Command(name = "mcp", description = "List MCP server connections (alias for 'mcp list')")
+    public String mcpDefault() {
+        return list();
+    }
+
     @Command(name = {"mcp", "list"}, description = "List MCP server connections")
     public String list() {
         var connections = registry.listAll();

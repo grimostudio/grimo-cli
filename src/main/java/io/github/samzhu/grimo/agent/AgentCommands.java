@@ -22,6 +22,15 @@ public class AgentCommands {
         this.registry = registry;
     }
 
+    /**
+     * 裸指令別名：輸入 /agent 等同 /agent list，符合漸進式揭露原則。
+     * Smart Default: bare 'agent' command delegates to 'agent list'.
+     */
+    @Command(name = "agent", description = "List all configured agent providers (alias for 'agent list')")
+    public String agentDefault() {
+        return list();
+    }
+
     @Command(name = {"agent", "list"}, description = "List all configured agent providers")
     public String list() {
         var providers = registry.listAll();

@@ -28,6 +28,15 @@ public class SkillCommands {
         this.skillsDir = skillsDir;
     }
 
+    /**
+     * 裸指令別名：輸入 /skill 等同 /skill list，符合漸進式揭露原則。
+     * Smart Default: bare 'skill' command delegates to 'skill list'.
+     */
+    @Command(name = "skill", description = "List all loaded skills (alias for 'skill list')")
+    public String skillDefault() {
+        return list();
+    }
+
     @Command(name = {"skill", "list"}, description = "List all loaded skills")
     public String list() {
         var skills = registry.listAll();

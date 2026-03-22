@@ -20,6 +20,15 @@ public class ChannelCommands {
         this.registry = registry;
     }
 
+    /**
+     * 裸指令別名：輸入 /channel 等同 /channel list，符合漸進式揭露原則。
+     * Smart Default: bare 'channel' command delegates to 'channel list'.
+     */
+    @Command(name = "channel", description = "List configured communication channels (alias for 'channel list')")
+    public String channelDefault() {
+        return list();
+    }
+
     @Command(name = {"channel", "list"}, description = "List configured communication channels")
     public String list() {
         var adapters = registry.listAll();

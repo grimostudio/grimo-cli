@@ -72,6 +72,15 @@ public class TaskCommands {
     }
 
     /**
+     * 裸指令別名：輸入 /task 等同 /task list，符合漸進式揭露原則。
+     * Smart Default: bare 'task' command delegates to 'task list'.
+     */
+    @Command(name = "task", description = "List all tasks (alias for 'task list')")
+    public String taskDefault() {
+        return list();
+    }
+
+    /**
      * 列出所有任務，以表格格式顯示 ID、類型、狀態與描述。
      */
     @Command(name = {"task", "list"}, description = "List all tasks")
