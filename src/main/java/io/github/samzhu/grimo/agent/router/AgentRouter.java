@@ -3,21 +3,30 @@ package io.github.samzhu.grimo.agent.router;
 import io.github.samzhu.grimo.agent.provider.AgentProvider;
 import io.github.samzhu.grimo.agent.provider.AgentType;
 import io.github.samzhu.grimo.agent.registry.AgentProviderRegistry;
+import io.github.samzhu.grimo.shared.config.GrimoConfig;
 
 import java.util.Comparator;
 
 /**
  * 路由器負責根據指定的 agent ID 或自動選擇策略來決定使用哪個 AgentProvider。
  *
- * <p>自動選擇策略：優先選擇 CLI 類型的 provider（因為 CLI 通常具有更完整的上下文處理能力），
- * 若無可用的 CLI provider 則回退到 API 類型。</p>
+ * <p>自動選擇策略：
+ * 1. 優先使用 config.yaml 中 agents.default 指定的 provider（若已設定且可用）
+ * 2. Fallback: 優先選擇 CLI 類型的 provider（因為 CLI 通常具有更完整的上下文處理能力），
+ *    若無可用的 CLI provider 則回退到 API 類型。</p>
  */
 public class AgentRouter {
 
     private final AgentProviderRegistry registry;
+    private final GrimoConfig config;
 
     public AgentRouter(AgentProviderRegistry registry) {
+        this(registry, null);
+    }
+
+    public AgentRouter(AgentProviderRegistry registry, GrimoConfig config) {
         this.registry = registry;
+        this.config = config;
     }
 
     /**
@@ -39,9 +48,23 @@ public class AgentRouter {
 
     /**
      * 自動選擇最佳可用的 AgentProvider。
-     * 排序邏輯：CLI 類型排在 API 類型前面，取第一個。
+     * 1. 嘗試 config.yaml 中的預設 agent（agents.default）
+     * 2. Fallback: CLI 類型排在 API 類型前面，取第一個
      */
     private AgentProvider autoSelect() {
+        // 1. 嘗試 config.yaml 中的預設 agent
+        if (config != null) {
+            String defaultAgent = config.getDefaultAgent();
+            if (defaultAgent != null) {
+                var configured = registry.get(defaultAgent)
+                    .filter(AgentProvider::isAvailable);
+                if (configured.isPresent()) {
+                    return configured.get();
+                }
+            }
+        }
+
+        // 2. Fallback: CLI 優先，再 API
         return registry.listAvailable().stream()
             .sorted(Comparator.comparingInt(p -> p.type() == AgentType.CLI ? 0 : 1))
             .findFirst()

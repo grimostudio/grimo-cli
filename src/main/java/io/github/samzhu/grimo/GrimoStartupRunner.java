@@ -80,8 +80,8 @@ public class GrimoStartupRunner {
     }
 
     @Bean
-    AgentRouter agentRouter(AgentProviderRegistry registry) {
-        return new AgentRouter(registry);
+    AgentRouter agentRouter(AgentProviderRegistry registry, GrimoConfig grimoConfig) {
+        return new AgentRouter(registry, grimoConfig);
     }
 
     @Bean
