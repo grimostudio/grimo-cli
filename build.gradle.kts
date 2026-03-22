@@ -29,6 +29,7 @@ dependencies {
     implementation("org.springframework.modulith:spring-modulith-starter-core")
     implementation("org.springframework.modulith:spring-modulith-events-api")
     implementation("org.springframework.shell:spring-shell-starter")
+    implementation("org.springframework.shell:spring-shell-starter-ffm")
 
     // Observability
     implementation("org.springframework.boot:spring-boot-micrometer-tracing-brave")
@@ -74,4 +75,9 @@ dependencyManagement {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+}
+
+tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
+	standardInput = System.`in`
+	jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
