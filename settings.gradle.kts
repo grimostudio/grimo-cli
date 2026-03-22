@@ -1,1 +1,1 @@
-rootProject.name = "grimo-cli"
+rootProject.name = "grimo"

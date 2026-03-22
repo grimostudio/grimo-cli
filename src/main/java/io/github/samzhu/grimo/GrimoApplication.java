@@ -1,13 +1,13 @@
-package io.github.grimostudio.grimo;
+package io.github.samzhu.grimo;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class GrimoCliApplication {
+public class GrimoApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(GrimoCliApplication.class, args);
+		SpringApplication.run(GrimoApplication.class, args);
 	}
 
 }
