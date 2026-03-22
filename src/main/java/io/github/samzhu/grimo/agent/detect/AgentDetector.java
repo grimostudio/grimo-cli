@@ -1,5 +1,6 @@
 package io.github.samzhu.grimo.agent.detect;
 
+import io.github.samzhu.grimo.agent.provider.AnthropicAgentProvider;
 import io.github.samzhu.grimo.agent.registry.AgentProviderRegistry;
 
 import java.io.IOException;
@@ -44,6 +45,13 @@ public class AgentDetector {
         results.add(detectEnvKey("anthropic", "ANTHROPIC_API_KEY", "Anthropic API"));
         results.add(detectEnvKey("openai", "OPENAI_API_KEY", "OpenAI API"));
         results.add(detectOllama());
+
+        // Auto-register detected API-based providers into the registry
+        // so they are immediately usable without manual CLI registration.
+        if (results.stream().anyMatch(r -> r.id().equals("anthropic") && r.available())) {
+            String key = System.getenv("ANTHROPIC_API_KEY");
+            registry.register("anthropic", new AnthropicAgentProvider(key, "claude-sonnet-4"));
+        }
 
         return results;
     }
