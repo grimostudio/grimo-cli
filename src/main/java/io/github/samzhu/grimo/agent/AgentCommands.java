@@ -2,6 +2,7 @@ package io.github.samzhu.grimo.agent;
 
 import io.github.samzhu.grimo.agent.provider.AgentProvider;
 import io.github.samzhu.grimo.agent.registry.AgentProviderRegistry;
+import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
 
@@ -17,9 +18,11 @@ import org.springframework.stereotype.Component;
 public class AgentCommands {
 
     private final AgentProviderRegistry registry;
+    private final GrimoConfig config;
 
-    public AgentCommands(AgentProviderRegistry registry) {
+    public AgentCommands(AgentProviderRegistry registry, GrimoConfig config) {
         this.registry = registry;
+        this.config = config;
     }
 
     /**
@@ -45,5 +48,28 @@ public class AgentCommands {
             sb.append(String.format("  %-15s %-6s %-8s%n", p.id(), p.type(), status));
         }
         return sb.toString();
+    }
+
+    /**
+     * 切換預設 agent provider，設定持久化至 workspace config.yaml。
+     * Switch default agent provider and persist to config.
+     */
+    @Command(name = {"agent", "use"}, description = "Switch default agent provider")
+    public String use(String agentId) {
+        if (registry.get(agentId).isEmpty()) {
+            return "Agent not found: " + agentId + ". Run 'agent' to see available agents.";
+        }
+        config.setDefaultAgent(agentId);
+        return "Default agent switched to: " + agentId;
+    }
+
+    /**
+     * 切換預設模型名稱，設定持久化至 workspace config.yaml。
+     * Switch default model and persist to config.
+     */
+    @Command(name = {"agent", "model"}, description = "Switch default model")
+    public String model(String modelName) {
+        config.setDefaultModel(modelName);
+        return "Default model switched to: " + modelName;
     }
 }
