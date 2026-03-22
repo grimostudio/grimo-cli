@@ -28,7 +28,6 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.modulith:spring-modulith-starter-core")
     implementation("org.springframework.modulith:spring-modulith-events-api")
-    implementation("org.springframework.shell:spring-shell-starter")
     implementation("org.springframework.shell:spring-shell-starter-ffm")
 
     // Observability
@@ -77,12 +76,8 @@ tasks.withType<Test> {
 	useJUnitPlatform()
 }
 
-tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
-	standardInput = System.`in`
-	jvmArgs("--enable-native-access=ALL-UNNAMED")
-}
-
 // FFM terminal provider 需要 native access，寫入 jar manifest 讓 java -jar 自動啟用
+// Reference: https://docs.spring.io/spring-shell/reference/building.html
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
 	manifest {
 		attributes("Enable-Native-Access" to "ALL-UNNAMED")
