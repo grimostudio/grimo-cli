@@ -59,11 +59,31 @@ Phase 5 (2.5s) — 定格
 - 每幀間 `Thread.sleep(50-100ms)` 控制節奏
 - 動畫在 virtual thread 上執行，不阻塞其他初始化
 
+### 非 ANSI 終端 Fallback
+
+啟動時檢查 `System.console() == null` 或 `TERM=dumb`，若為非互動終端則跳過動畫，直接用純文字輸出 banner。
+
 ### 與載入流程同步
 
-- 動畫渲染與實際載入流程同步 — agent 偵測完成時動畫剛好顯示到對應步驟
-- 如果載入比動畫快，動畫照常播完
-- 如果載入比較慢，動畫等待載入完成再推進到下一步
+動畫渲染與實際載入流程透過 `CompletableFuture` 協調：
+
+```
+CommandLineRunner 中的執行流程：
+
+1. 啟動動畫 thread（virtual thread），播放 Phase 1-3（星光 → logo）
+2. 主線程開始實際載入：
+   - agentFuture  = CompletableFuture.runAsync(() -> detectAgents())
+   - skillFuture  = CompletableFuture.runAsync(() -> loadSkills())
+   - mcpFuture    = CompletableFuture.runAsync(() -> connectMcp())
+   - taskFuture   = CompletableFuture.runAsync(() -> restoreTasks())
+3. 動畫 Phase 4 逐行顯示載入步驟：
+   - 每一步 wait 對應的 future 完成後才顯示 ✓
+   - 例：agentFuture.join() → 顯示 "Detecting agents... claude-cli ✓"
+4. 所有 future 完成 + 動畫播完 → Phase 5 定格 banner
+```
+
+- 如果載入比動畫快，動畫照常播完最小動畫時長
+- 如果載入比較慢，動畫等待對應 future 完成再推進
 
 ## 2. 像素風 Logo + 環境狀態 Banner
 
@@ -160,31 +180,69 @@ public class SlashCommandCompleter implements Completer {
 }
 ```
 
-### JLine 設定
+### `/` 鍵自訂 Widget
 
-透過自訂 `LineReader` 配置（`@Bean` 或 `BeanPostProcessor`）：
+建立自訂 JLine Widget，綁定到 `/` 鍵，使輸入 `/` 的同時自動觸發 completion menu：
 
-| 選項 | 值 | 說明 |
-|------|----|------|
-| `AUTO_MENU` | `true` | 自動顯示候選選單 |
-| `AUTO_LIST` | `true` | 自動列出所有候選 |
-| `LIST_MAX` | `20` | 最多顯示 20 項 |
+```java
+/**
+ * 自訂 widget：插入 / 字元後自動觸發 completion。
+ * 只在輸入框為空（游標位置 0）時觸發，避免干擾一般輸入（如檔案路徑 /foo/bar）。
+ */
+Widget slashAndComplete = () -> {
+    // 只在行首觸發自動完成，其他位置正常插入 /
+    if (reader.getBuffer().cursor() == 0) {
+        reader.getBuffer().write('/');
+        reader.callWidget(LineReader.COMPLETE);
+    } else {
+        reader.getBuffer().write('/');
+    }
+    return true;
+};
 
-另外需綁定自訂 widget 到 `/` 鍵：輸入 `/` 字元的同時自動觸發 completion。
+reader.getWidgets().put("slash-complete", slashAndComplete);
+reader.getKeyMaps().get(LineReader.MAIN).bind(slashAndComplete, "/");
+```
 
-### 與 Spring Shell 整合
+關鍵 API：
+- `reader.getBuffer().write(char)` — 在游標位置插入字元
+- `reader.callWidget(LineReader.COMPLETE)` — 程式化觸發 completion popup
+- `reader.getWidgets().put(name, widget)` — 註冊自訂 widget
+- `reader.getKeyMaps().get(LineReader.MAIN).bind(widget, key)` — 綁定按鍵
 
-- Spring Shell 4.0 的 `CompletionProvider` 是 command-level 的，無法做到全域 `/` 觸發
-- 需要在 JLine 層直接操作：透過 `JLineShellAutoConfiguration` 暴露的 `LineReader` 掛載自訂 `Completer` 和 key binding
-- `SlashCommandCompleter` 作為 `@Bean` 註冊
+### JLine 設定與 Spring Shell 整合
+
+Spring Shell 4.0 的 `DefaultJLineShellConfiguration` 將 `LineReader` 和 `Terminal` 暴露為 Spring bean
+（[原始碼](https://github.com/spring-projects/spring-shell/blob/main/spring-shell-jline/src/main/java/org/springframework/shell/jline/DefaultJLineShellConfiguration.java)），
+因此可直接在 `CommandLineRunner` 中注入 `LineReader` bean 來設定自訂 widget 和 key binding。
+
+具體整合方式：在 `GrimoStartupRunner` 的 `CommandLineRunner` bean 中，於載入完成後執行：
+
+```
+1. 注入 LineReader bean
+2. 設定 LineReader options：
+   - AUTO_MENU = true   — 自動顯示候選選單
+   - AUTO_LIST = true   — 自動列出所有候選
+   - LIST_MAX  = 20     — 最多顯示 20 項
+3. 註冊 SlashCommandCompleter 到 LineReader 的 completer（透過 AggregateCompleter 與既有 completer 組合）
+4. 註冊 slash-complete widget 並綁定到 / 鍵
+```
+
+注意：Spring Shell 4.0 的 `CompletionProvider` 是 command-level 的，無法做到全域 `/` 觸發，
+因此必須在 JLine 層操作。`LineReader` 的 widgets 和 key maps 支援建立後修改。
 
 ## 新增元件總覽
 
+元件放在根套件 `io.github.samzhu.grimo`（與 `GrimoStartupRunner`、`GrimoPromptProvider` 同層），
+因為 `SlashCommandCompleter` 需要存取 `skill` 模組的 `SkillRegistry`。
+根據 Spring Modulith 的依賴規則，`shared` 套件不應反向依賴 `skill`，
+而根套件作為 application 主套件可以存取所有模組。
+
 | 元件 | 套件 | 職責 |
 |------|------|------|
-| `StartupAnimationRenderer` | `io.github.samzhu.grimo.shared.ui` | 啟動動畫渲染 |
-| `BannerRenderer` | `io.github.samzhu.grimo.shared.ui` | 靜態 banner 渲染 |
-| `SlashCommandCompleter` | `io.github.samzhu.grimo.shared.ui` | `/` 命令選單補全 |
+| `StartupAnimationRenderer` | `io.github.samzhu.grimo` | 啟動動畫渲染 |
+| `BannerRenderer` | `io.github.samzhu.grimo` | 靜態 banner 渲染 |
+| `SlashCommandCompleter` | `io.github.samzhu.grimo` | `/` 命令選單補全 |
 
 ## 修改既有檔案
 
@@ -192,6 +250,12 @@ public class SlashCommandCompleter implements Completer {
 |------|------|
 | `GrimoStartupRunner` | 整合 `StartupAnimationRenderer` + `BannerRenderer` 到 `CommandLineRunner` |
 | JLine 配置 | 新增 `@Bean` 掛載 `SlashCommandCompleter` + `AUTO_MENU` + `/` key binding |
+
+## 實作注意事項
+
+- **Completer 組合**：`LineReader` 可能已有既有 completer，實作時需用 `reader.getCompleter()` 確認，再透過 `AggregateCompleter` 組合
+- **載入失敗顯示**：Phase 4 中若某步驟失敗（如 MCP 連線失敗），顯示紅色 `✗` + 錯誤摘要，不中斷動畫流程
+- **終端偵測**：除了 `System.console() == null`，也檢查 JLine `Terminal` bean 的 `terminal.getType()` 是否為 `dumb`，避免 IDE / DevTools 環境誤判
 
 ## 不做的事項（YAGNI）
 
