@@ -308,11 +308,10 @@ public class GrimoStartupRunner {
                 }
             }
 
-            // 7. 等待 800ms 讓使用者看到 Phase 4 載入結果
-            Thread.sleep(800);
-
-            // 8. Phase 5: 清除動畫，輸出靜態 banner
+            // 7. Phase 4 → 5 過渡：等一下讓使用者看到載入結果
             if (animated) {
+                Thread.sleep(800);
+                // 8. Phase 5: 清除動畫殘留
                 animator.clearAnimation();
             }
 
@@ -322,12 +321,11 @@ public class GrimoStartupRunner {
                 version = "dev";
             }
 
-            // 從 GrimoConfig 取得 agent/model 設定
-            var configMap = grimoConfig.load();
-            @SuppressWarnings("unchecked")
-            var agentConfig = (java.util.Map<String, String>) configMap.getOrDefault("agent", java.util.Map.of());
-            String agentId = agentConfig.getOrDefault("default", "none");
-            String model = agentConfig.getOrDefault("model", "-");
+            // 從 GrimoConfig 取得 agent/model 設定（使用既有 API，避免直接操作 config map）
+            String agentId = grimoConfig.getDefaultAgent();
+            if (agentId == null) agentId = "no agent";
+            String model = grimoConfig.getDefaultModel();
+            if (model == null) model = "unknown";
 
             // workspace 路徑以 ~ 取代 home 目錄
             String workspacePath = workspaceManager.root().toString()
