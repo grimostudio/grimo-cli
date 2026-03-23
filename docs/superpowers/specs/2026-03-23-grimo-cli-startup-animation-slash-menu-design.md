@@ -100,10 +100,18 @@ CommandLineRunner 中的執行流程：
   ▀▀▀▀▀▀          3 skills · 2 mcp · 1 task
 ```
 
-**左側 — 像素風 Logo（4 行高）：**
-- 用 `█▀▄▐▌▗▖` 等 Unicode block characters 拼出簡化的魔導書意象
-- 顏色用 ANSI 256 色的青色系（與品牌色一致）
-- 具體圖案在實作階段微調，目標是「一眼能認出是書 + 魔法元素」
+**左側 — 可愛方塊生物吉祥物（5 行高）：**
+- 魔法小幽靈造型：頭頂星光 ✦、白色圓眼 ●、底部波浪邊緣有飄浮感
+- 用 `█▀▄▐▌` 等 Unicode block characters 拼出
+- 顏色用 ANSI 256 色的青色系（與品牌色一致），星光用金色
+
+```
+    ✦          （金色星光）
+  ▄████▄       （青色頭部）
+  █●██●█       （白色圓眼）
+  ██████       （青色身體）
+  ▀▄▀▀▄▀       （波浪底部，飄浮感）
+```
 
 **右側 — 環境狀態（4 行）：**
 
@@ -145,15 +153,21 @@ CommandLineRunner 中的執行流程：
 
 ### 顯示格式
 
-左側命令名（青色）+ 右側簡短說明（灰色），利用 JLine `Candidate` 的 `displ` + `descr` 欄位：
+左側命令名（青色）+ 右側簡短說明（灰色），利用 JLine `Candidate` 的 `displ` + `descr` 欄位。
+
+`/chat` 不列入選單 — 用戶直接輸入文字即為對話，不需要顯式命令。
+選單只列管理/操作類命令：
 
 ```
-/chat              Send a message to the agent
 /status            Show system status
 /agent list        List available agents
 /agent use         Set default agent
+/agent model       Set default model
 /skill list        List all loaded skills
-/summarize         Summarize text content
+/skill install     Install a skill from Git
+/skill remove      Remove a loaded skill
+/task list         List scheduled tasks
+/mcp list          List MCP servers
 ```
 
 ### 技術實現
