@@ -151,6 +151,11 @@ public class GrimoStartupRunner {
         return new BannerRenderer();
     }
 
+    @Bean
+    StatusLineRenderer statusLineRenderer(Terminal terminal) {
+        return new StatusLineRenderer(terminal);
+    }
+
     /**
      * 覆蓋 Spring Shell 自動配置的 CommandCompleter bean。
      * JLineShellAutoConfiguration 的 CommandCompleter 標註 @ConditionalOnMissingBean，
@@ -205,6 +210,7 @@ public class GrimoStartupRunner {
                                     McpClientManager mcpClientManager,
                                     McpClientRegistry mcpClientRegistry,
                                     BannerRenderer bannerRenderer,
+                                    StatusLineRenderer statusLineRenderer,
                                     CommandRegistry commandRegistry,
                                     Terminal terminal,
                                     LineReader lineReader) {
@@ -329,6 +335,13 @@ public class GrimoStartupRunner {
                     taskSchedulerService.getScheduledTaskIds().size()));
             terminal.writer().println();
             terminal.writer().flush();
+
+            // 8. 初始化底部狀態列
+            statusLineRenderer.update(agentId, model, workspacePath,
+                    (int) agentCount,
+                    skillRegistry.listAll().size(),
+                    mcpClientRegistry.listAll().size(),
+                    taskSchedulerService.getScheduledTaskIds().size());
 
             // 7. 註冊 / 鍵 widget：游標在行首時啟動自製互動式選單
             // 取代 JLine 內建的醜陋補全 UI，改用 SlashMenuRenderer 實現
