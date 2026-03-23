@@ -74,13 +74,12 @@ public class GrimoStartupRunner {
     }
 
     /**
-     * 自訂 Shell 提示符 bean，顯示目前可用的 Agent ID，
-     * 優先採用 config.yaml 設定的預設 agent，
-     * 讓使用者在互動時能即時知道目前連線的 AI provider。
+     * 極簡 Shell 提示符 bean：只顯示 ❯ 箭頭符號。
+     * 狀態資訊（agent、model、workspace）改由 StatusLineRenderer 在終端底部顯示。
      */
     @Bean
-    GrimoPromptProvider grimoPromptProvider(AgentProviderRegistry registry, GrimoConfig grimoConfig) {
-        return new GrimoPromptProvider(registry, grimoConfig);
+    GrimoPromptProvider grimoPromptProvider() {
+        return new GrimoPromptProvider();
     }
 
     @Bean
@@ -206,6 +205,7 @@ public class GrimoStartupRunner {
                                     McpClientManager mcpClientManager,
                                     McpClientRegistry mcpClientRegistry,
                                     BannerRenderer bannerRenderer,
+                                    CommandRegistry commandRegistry,
                                     Terminal terminal,
                                     LineReader lineReader) {
         return args -> {
@@ -330,20 +330,21 @@ public class GrimoStartupRunner {
             terminal.writer().println();
             terminal.writer().flush();
 
-            // 7. JLine 設定：AUTO_MENU、AUTO_LIST、LIST_MAX
-            // LIST_MAX 設高避免 "do you wish to see all N possibilities?" 提示吃掉使用者輸入
-            lineReader.setOpt(LineReader.Option.AUTO_MENU);
-            lineReader.setOpt(LineReader.Option.AUTO_LIST);
-            lineReader.setOpt(LineReader.Option.AUTO_MENU_LIST);
-            lineReader.setVariable(LineReader.LIST_MAX, 100);
-
-            // 8. 註冊 / 鍵 widget：游標在行首時插入 / 並觸發補全
-            // Candidate value 含 / 前綴（如 "/agent list"），JLine 會依輸入 /ag
-            // 進行前綴匹配過濾。LIST_MAX=100 避免 "do you wish to see" 提示。
+            // 7. 註冊 / 鍵 widget：游標在行首時啟動自製互動式選單
+            // 取代 JLine 內建的醜陋補全 UI，改用 SlashMenuRenderer 實現
+            // Claude Code 風格的乾淨單欄下拉選單（即時過濾、方向鍵導航）
+            var menuItems = buildMenuItems(commandRegistry, skillRegistry);
             Widget slashAndComplete = () -> {
                 if (lineReader.getBuffer().cursor() == 0) {
                     lineReader.getBuffer().write('/');
-                    lineReader.callWidget(LineReader.EXPAND_OR_COMPLETE);
+                    var menu = new SlashMenuRenderer(terminal);
+                    String selected = menu.show(menuItems);
+                    // 清除 buffer 中的 / 和過濾文字
+                    lineReader.getBuffer().clear();
+                    if (selected != null) {
+                        lineReader.getBuffer().write("/" + selected);
+                    }
+                    lineReader.callWidget(LineReader.REDISPLAY);
                 } else {
                     lineReader.getBuffer().write('/');
                 }
@@ -355,6 +356,29 @@ public class GrimoStartupRunner {
 
             log.debug("Grimo is ready.");
         };
+    }
+
+    /**
+     * 從 CommandRegistry 和 SkillRegistry 建立選單項目清單。
+     * 排除 chat 命令（直接輸入文字即為對話）。
+     */
+    private static java.util.List<SlashMenuRenderer.MenuItem> buildMenuItems(
+            CommandRegistry commandRegistry,
+            SkillRegistry skillRegistry) {
+        var items = new java.util.ArrayList<SlashMenuRenderer.MenuItem>();
+        var excluded = java.util.Set.of("chat");
+
+        commandRegistry.getCommandsByPrefix("").stream()
+            .filter(cmd -> !excluded.contains(cmd.getName()))
+            .sorted((a, b) -> a.getName().compareTo(b.getName()))
+            .forEach(cmd -> items.add(new SlashMenuRenderer.MenuItem(
+                cmd.getName(), cmd.getDescription())));
+
+        for (var skill : skillRegistry.listAll()) {
+            items.add(new SlashMenuRenderer.MenuItem(
+                "skill " + skill.name(), skill.description()));
+        }
+        return java.util.List.copyOf(items);
     }
 
     /**
