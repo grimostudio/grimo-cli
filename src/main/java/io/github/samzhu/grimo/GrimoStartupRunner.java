@@ -350,7 +350,7 @@ public class GrimoStartupRunner {
             Widget slashAndComplete = () -> {
                 if (lineReader.getBuffer().cursor() == 0) {
                     lineReader.getBuffer().write('/');
-                    var menu = new SlashMenuRenderer(terminal);
+                    var menu = new SlashMenuRenderer(terminal, statusLineRenderer);
                     String selected = menu.show(menuItems);
                     // 清除 buffer 中的 / 和過濾文字
                     lineReader.getBuffer().clear();
