@@ -16,6 +16,8 @@ log 不足以確認根本問題時, 請嘗試多加 log, 重新測試後, 再來
 
 套件都要使用到最新的
 
+開發過程中整理 docs/glossary.md, 這樣比較好跟用戶對焦 跟釐清
+
 ## Project Overview
 
 Grimo is a locally-hosted AI assistant platform built as a Spring Shell CLI. It provides pluggable communication channels (Telegram, LINE), task scheduling with Markdown persistence, and a unified agent provider model that treats LLM APIs and CLI tools equally. Design spec: `docs/superpowers/specs/2026-03-22-grimo-openclaw-design-zh-TW.md`.

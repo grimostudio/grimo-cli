@@ -34,8 +34,18 @@ public class StatusLineRenderer {
     private volatile String lastProvider, lastModel, lastWorkspace;
     private volatile int lastAgentCount, lastSkillCount, lastMcpCount, lastTaskCount;
 
+    /**
+     * 建構子：取得 JLine Status 單例並啟用 border（分隔線）。
+     * setBorder(true) 讓 JLine 自動在 status 上方渲染 ─ 分隔線，
+     * 仿 Claude Code 的輸入框視覺效果。
+     *
+     * @see <a href="https://github.com/jline/jline3/blob/master/terminal/src/main/java/org/jline/utils/Status.java">Status.setBorder</a>
+     */
     public StatusLineRenderer(Terminal terminal) {
         this.status = (terminal != null) ? Status.getStatus(terminal) : null;
+        if (this.status != null) {
+            this.status.setBorder(true);
+        }
     }
 
     /**

@@ -336,14 +336,25 @@ public class GrimoStartupRunner {
             terminal.writer().println();
             terminal.writer().flush();
 
-            // 8. 初始化底部狀態列
+            // 8. 初始化底部狀態列（分隔線 + 狀態資訊共 2 行）
             statusLineRenderer.update(agentId, model, workspacePath,
                     (int) agentCount,
                     skillRegistry.listAll().size(),
                     mcpClientRegistry.listAll().size(),
                     taskSchedulerService.getScheduledTaskIds().size());
 
-            // 7. 註冊 / 鍵 widget：游標在行首時啟動自製互動式選單
+            // 9. 填充空行，把 prompt 推到分隔線正上方（仿 Claude Code 固定輸入框 layout）
+            // banner 5 行 + println 1 行 = 6 行；setBorder status 佔 2 行（border + info）；prompt 佔 1 行
+            int bannerLines = 6;
+            int statusLines = 2; // setBorder 分隔線 + 狀態列
+            int promptLine = 1;
+            int fillLines = terminal.getHeight() - bannerLines - statusLines - promptLine;
+            for (int i = 0; i < fillLines; i++) {
+                terminal.writer().println();
+            }
+            terminal.writer().flush();
+
+            // 10. 註冊 / 鍵 widget：游標在行首時啟動自製互動式選單
             // 取代 JLine 內建的醜陋補全 UI，改用 SlashMenuRenderer 實現
             // Claude Code 風格的乾淨單欄下拉選單（即時過濾、方向鍵導航）
             var menuItems = buildMenuItems(commandRegistry, skillRegistry);
