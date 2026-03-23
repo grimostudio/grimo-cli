@@ -32,23 +32,25 @@ class GrimoCommandCompleterTest {
     }
 
     @Test
-    void slashPrefixShouldProvideSkillCandidates() {
+    void slashPrefixShouldProvideSkillCandidatesWithSlashInValue() {
         skillRegistry.register(new SkillDefinition("healthcheck", "Check health", "1.0.0",
             "grimo-builtin", "api", List.of("cron"), "# HC"));
         var candidates = new ArrayList<Candidate>();
         var line = mockParsedLine("/", List.of("/"));
         completer.complete(mock(LineReader.class), line, candidates);
-        assertThat(candidates).anyMatch(c -> c.value().contains("healthcheck"));
+        // Candidate value 包含 / 前綴，讓 JLine 能正確過濾
+        assertThat(candidates).anyMatch(c -> c.value().equals("/skill healthcheck"));
     }
 
     @Test
-    void slashPrefixShouldFilterByTypedText() {
+    void slashPrefixShouldReturnAllCandidatesForJLineFiltering() {
         skillRegistry.register(new SkillDefinition("healthcheck", "Check health", "1.0.0",
             "grimo-builtin", "api", List.of(), "# HC"));
         var candidates = new ArrayList<Candidate>();
         var line = mockParsedLine("/hea", List.of("/hea"));
         completer.complete(mock(LineReader.class), line, candidates);
-        assertThat(candidates).anyMatch(c -> c.value().contains("healthcheck"));
+        // 返回所有候選項，由 JLine 負責依 /hea 過濾
+        assertThat(candidates).anyMatch(c -> c.value().startsWith("/skill"));
     }
 
     @Test

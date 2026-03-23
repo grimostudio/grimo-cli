@@ -8,9 +8,9 @@ import java.util.Random;
  * 啟動動畫渲染器：5 階段 ANSI 動畫，與實際載入流程透過 CompletableFuture 同步。
  *
  * 設計說明：
- * - Phase 1: 星光 ✦ ✧ · 隨機散落螢幕
- * - Phase 2: 星光往中心聚集
- * - Phase 3: 幽靈吉祥物 logo 從中心逐行浮現
+ * - Phase 1: 星光 ✦ ✧ · 在左上區域隨機散落
+ * - Phase 2: 星光往左上聚集（與最終 banner 位置一致，避免視覺跳動）
+ * - Phase 3: 幽靈吉祥物 logo 從左上逐行浮現
  * - Phase 4: 載入進度逐行顯示（由外部 CompletableFuture 驅動）
  * - Phase 5: 清除動畫殘留，只留最終 banner
  * - 非 ANSI 終端（dumb/null）跳過動畫，直接輸出 banner
@@ -41,6 +41,10 @@ public class StartupAnimationRenderer {
     };
 
     private static final long FRAME_DELAY_MS = 80;
+
+    // 動畫定位在左上角，與最終 banner 位置一致，避免動畫結束時視覺跳動
+    private static final int MASCOT_ROW = 3;
+    private static final int MASCOT_COL = 4;
 
     private final Terminal terminal;
     private final PrintWriter writer;
@@ -89,11 +93,13 @@ public class StartupAnimationRenderer {
         writer.print(CLEAR_SCREEN);
         writer.flush();
 
-        // Phase 1: star particles scatter
+        // Phase 1: 星光在左上區域散落（限制在 row 1-12, col 1-40 的範圍內）
         int[][] starPositions = new int[15][2];
+        int scatterHeight = Math.min(12, height - 2);
+        int scatterWidth = Math.min(40, width - 2);
         for (int i = 0; i < starPositions.length; i++) {
-            starPositions[i][0] = random.nextInt(height - 2) + 1;
-            starPositions[i][1] = random.nextInt(width - 2) + 1;
+            starPositions[i][0] = random.nextInt(scatterHeight) + 1;
+            starPositions[i][1] = random.nextInt(scatterWidth) + 1;
         }
         for (int frame = 0; frame < 6; frame++) {
             int starsToShow = (frame + 1) * 3;
@@ -105,15 +111,13 @@ public class StartupAnimationRenderer {
             sleep(FRAME_DELAY_MS);
         }
 
-        // Phase 2: stars gather toward center
-        int centerRow = height / 2 - 2;
-        int centerCol = width / 2 - 4;
+        // Phase 2: 星光往左上角 mascot 位置聚集
         for (int frame = 0; frame < 6; frame++) {
             writer.print(CLEAR_SCREEN);
             float progress = (frame + 1) / 6.0f;
             for (int i = 0; i < starPositions.length; i++) {
-                int targetRow = centerRow + (i % 5) - 2;
-                int targetCol = centerCol + (i % 8) - 4;
+                int targetRow = MASCOT_ROW + (i % 5);
+                int targetCol = MASCOT_COL + (i % 8);
                 int row = starPositions[i][0] + (int)((targetRow - starPositions[i][0]) * progress);
                 int col = starPositions[i][1] + (int)((targetCol - starPositions[i][1]) * progress);
                 moveCursor(Math.max(1, row), Math.max(1, col));
@@ -123,12 +127,12 @@ public class StartupAnimationRenderer {
             sleep(FRAME_DELAY_MS);
         }
 
-        // Phase 3: Logo appears line by line
+        // Phase 3: Logo 在左上角逐行浮現
         writer.print(CLEAR_SCREEN);
         writer.flush();
         for (int i = 0; i < MASCOT_LINES.length; i++) {
-            int row = centerRow + i;
-            moveCursor(row, centerCol);
+            int row = MASCOT_ROW + i;
+            moveCursor(row, MASCOT_COL);
             String color = (i == 0) ? GOLD : CYAN;
             String line = MASCOT_LINES[i];
             if (line.contains("●")) {
@@ -148,9 +152,8 @@ public class StartupAnimationRenderer {
      * @param text      已格式化的步驟文字（通常由 formatLoadingStep 產生）
      */
     public void showLoadingStep(int stepIndex, String text) {
-        int centerRow = height / 2 - 2;
-        int row = centerRow + MASCOT_LINES.length + 1 + stepIndex;
-        moveCursor(row, width / 2 - 20);
+        int row = MASCOT_ROW + MASCOT_LINES.length + 1 + stepIndex;
+        moveCursor(row, MASCOT_COL);
         writer.print(text);
         writer.flush();
     }

@@ -29,8 +29,10 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.shell.core.command.CommandRegistry;
 
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+
 import java.nio.file.Path;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * 核心啟動配置類別，負責兩件事：
@@ -166,22 +168,35 @@ public class GrimoStartupRunner {
     }
 
     /**
+     * 覆蓋 Spring Shell 自動配置的 CommandParser bean。
+     * 去除使用者輸入的 / 前綴後再交給預設 parser 解析，
+     * 使 /agent list → agent list，讓 Spring Shell 正確找到命令。
+     * 搭配 GrimoCommandCompleter 的 / 前綴候選值使用。
+     *
+     * @see SlashStrippingCommandParser
+     * @see GrimoCommandCompleter
+     */
+    @Bean
+    org.springframework.shell.core.command.CommandParser commandParser(CommandRegistry commandRegistry) {
+        return new SlashStrippingCommandParser(
+                new org.springframework.shell.core.command.DefaultCommandParser(commandRegistry));
+    }
+
+    /**
      * 有序啟動流程，以 @Bean 方法定義 CommandLineRunner：
      * 使用 CommandLineRunner 而非 ApplicationRunner，避免與 Spring Shell 的
      * springShellApplicationRunner 衝突（它有 @ConditionalOnMissingBean(ApplicationRunner.class)）。
      *
-     * 啟動分為 5 個階段：
-     * Phase 1-3: 動畫開場（虛擬執行緒）＋ 後端並行載入（CompletableFuture）
-     * Phase 4:   動畫下方逐行顯示載入結果
-     * Phase 5:   清除動畫、輸出靜態 banner
-     * 最後設定 JLine（AUTO_MENU、/ 鍵 widget）
-     *
      * 設計說明：
-     * - 動畫與載入並行，利用虛擬執行緒與 CompletableFuture 達成非同步
+     * - @Order(HIGHEST_PRECEDENCE) 確保此 runner 在 Spring Shell 的 ApplicationRunner 之前執行
+     *   （Spring Shell 的 REPL 是阻塞式 while(true) 迴圈，一旦啟動就不會讓出執行緒）
+     * - 全程同步執行（不使用 CompletableFuture），避免 log 與動畫 ANSI 輸出交錯
+     * - 動畫順序：Phase 1-3 開場 → 同步載入 + Phase 4 逐行顯示 → Phase 5 定格 banner
      * - 非 ANSI 終端（dumb/null）跳過動畫，直接輸出 banner
      * - / 鍵 widget 在游標位置 0 時觸發補全選單，否則正常輸入
      */
     @Bean
+    @Order(Ordered.HIGHEST_PRECEDENCE)
     CommandLineRunner grimoStartup(WorkspaceManager workspaceManager,
                                     GrimoConfig grimoConfig,
                                     AgentDetector agentDetector,
@@ -195,157 +210,136 @@ public class GrimoStartupRunner {
                                     LineReader lineReader) {
         return args -> {
             // 1. Initialize workspace（同步，後續步驟依賴）
-            log.info("Loading workspace: {}", workspaceManager.root());
             if (!workspaceManager.isInitialized()) {
                 workspaceManager.initialize();
-                log.info("Workspace initialized at {}", workspaceManager.root());
             }
 
             // 2. 判斷終端是否支援 ANSI 動畫
             boolean animated = StartupAnimationRenderer.isAnimationSupported(terminal.getType());
             StartupAnimationRenderer animator = animated ? new StartupAnimationRenderer(terminal) : null;
 
-            // 3. Phase 1-3: 在虛擬執行緒播放開場動畫
-            Thread animationThread = null;
+            // 3. Phase 1-3: 播放開場動畫（同步，避免與 log 輸出交錯）
             if (animated) {
-                animationThread = Thread.ofVirtual().name("startup-animation").start(() -> {
-                    animator.playIntroAnimation();
-                });
+                animator.playIntroAnimation();
             }
 
-            // 4. 並行執行 4 項載入任務（與動畫同時進行）
-            CompletableFuture<String> agentFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    var results = agentDetector.detect();
-                    results.forEach(r -> log.info("  {} — {}", r.id(), r.detail()));
-                    return results.size() + " agents found";
-                } catch (Exception e) {
-                    log.error("Agent detection failed", e);
-                    throw new RuntimeException(e);
-                }
-            });
+            // 4. 同步執行載入任務 + Phase 4 逐行顯示結果
+            // Step 1: Detect agents（保留偵測結果供 banner 使用）
+            String agentDetail;
+            boolean agentSuccess;
+            java.util.List<io.github.samzhu.grimo.agent.detect.AgentDetector.DetectionResult> agentResults = java.util.List.of();
+            try {
+                agentResults = agentDetector.detect();
+                long available = agentResults.stream().filter(r -> r.available()).count();
+                agentDetail = available + " available";
+                agentSuccess = true;
+            } catch (Exception e) {
+                agentDetail = e.getMessage();
+                agentSuccess = false;
+            }
+            showStep(animated, animator, terminal, 0, "Detecting agents", agentDetail, agentSuccess);
 
-            CompletableFuture<String> skillFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    var skills = skillLoader.loadAll();
-                    skills.forEach(skillRegistry::register);
-                    return skills.size() + " skills loaded";
-                } catch (Exception e) {
-                    log.error("Skill loading failed", e);
-                    throw new RuntimeException(e);
-                }
-            });
+            // Step 2: Load skills
+            String skillDetail;
+            boolean skillSuccess;
+            try {
+                var skills = skillLoader.loadAll();
+                skills.forEach(skillRegistry::register);
+                skillDetail = skills.size() + " loaded";
+                skillSuccess = true;
+            } catch (Exception e) {
+                skillDetail = e.getMessage();
+                skillSuccess = false;
+            }
+            showStep(animated, animator, terminal, 1, "Loading skills", skillDetail, skillSuccess);
 
-            CompletableFuture<String> mcpFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    var config = grimoConfig.load();
-                    int count = 0;
-                    if (config.containsKey("mcp")) {
-                        @SuppressWarnings("unchecked")
-                        var mcpServers = (java.util.Map<String, java.util.Map<String, String>>) config.get("mcp");
-                        for (var entry : mcpServers.entrySet()) {
-                            try {
-                                String transport = entry.getValue().get("transport");
-                                String command = entry.getValue().get("command");
-                                if ("stdio".equals(transport)) {
-                                    mcpClientManager.addStdio(entry.getKey(), command);
-                                    log.info("  Connected MCP server: {}", entry.getKey());
-                                    count++;
-                                }
-                            } catch (Exception e) {
-                                log.warn("  Failed to connect MCP server {}: {}", entry.getKey(), e.getMessage());
+            // Step 3: Connect MCP servers
+            String mcpDetail;
+            boolean mcpSuccess;
+            try {
+                var config = grimoConfig.load();
+                int count = 0;
+                if (config.containsKey("mcp")) {
+                    @SuppressWarnings("unchecked")
+                    var mcpServers = (java.util.Map<String, java.util.Map<String, String>>) config.get("mcp");
+                    for (var entry : mcpServers.entrySet()) {
+                        try {
+                            String transport = entry.getValue().get("transport");
+                            String command = entry.getValue().get("command");
+                            if ("stdio".equals(transport)) {
+                                mcpClientManager.addStdio(entry.getKey(), command);
+                                count++;
                             }
+                        } catch (Exception e) {
+                            // 個別 MCP server 連線失敗不中斷流程
                         }
                     }
-                    return count + " mcp connected";
-                } catch (Exception e) {
-                    log.error("MCP connection failed", e);
-                    throw new RuntimeException(e);
                 }
-            });
-
-            CompletableFuture<String> taskFuture = CompletableFuture.supplyAsync(() -> {
-                try {
-                    taskSchedulerService.restoreAll();
-                    int size = taskSchedulerService.getScheduledTaskIds().size();
-                    return size + " tasks restored";
-                } catch (Exception e) {
-                    log.error("Task restoration failed", e);
-                    throw new RuntimeException(e);
-                }
-            });
-
-            // 5. 等待動畫執行緒完成（Phase 1-3 結束）
-            if (animationThread != null) {
-                animationThread.join();
+                mcpDetail = count + " servers";
+                mcpSuccess = true;
+            } catch (Exception e) {
+                mcpDetail = e.getMessage();
+                mcpSuccess = false;
             }
+            showStep(animated, animator, terminal, 2, "Connecting MCP", mcpDetail, mcpSuccess);
 
-            // 6. Phase 4: 逐行顯示載入結果
-            record LoadingStep(String label, CompletableFuture<String> future) {}
-            var steps = new LoadingStep[] {
-                new LoadingStep("Detecting agents", agentFuture),
-                new LoadingStep("Loading skills", skillFuture),
-                new LoadingStep("Connecting MCP", mcpFuture),
-                new LoadingStep("Restoring tasks", taskFuture)
-            };
-
-            for (int i = 0; i < steps.length; i++) {
-                String detail;
-                boolean success;
-                try {
-                    detail = steps[i].future().join();
-                    success = true;
-                } catch (Exception e) {
-                    detail = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-                    success = false;
-                }
-                String text = StartupAnimationRenderer.formatLoadingStep(steps[i].label(), detail, success);
-                if (animated) {
-                    animator.showLoadingStep(i, text);
-                } else {
-                    terminal.writer().println(text);
-                    terminal.writer().flush();
-                }
+            // Step 4: Restore tasks
+            String taskDetail;
+            boolean taskSuccess;
+            try {
+                taskSchedulerService.restoreAll();
+                int count = taskSchedulerService.getScheduledTaskIds().size();
+                taskDetail = count + " active";
+                taskSuccess = true;
+            } catch (Exception e) {
+                taskDetail = e.getMessage();
+                taskSuccess = false;
             }
+            showStep(animated, animator, terminal, 3, "Restoring tasks", taskDetail, taskSuccess);
 
-            // 7. Phase 4 → 5 過渡：等一下讓使用者看到載入結果
+            // 5. Phase 4 → 5 過渡：等一下讓使用者看到載入結果
             if (animated) {
                 Thread.sleep(800);
-                // 8. Phase 5: 清除動畫殘留
                 animator.clearAnimation();
             }
 
-            // 取得版本號（注意：lambda 中不可用 getClass()，必須用類別名稱）
+            // 6. 輸出靜態 banner
             String version = GrimoStartupRunner.class.getPackage().getImplementationVersion();
-            if (version == null) {
-                version = "dev";
-            }
+            if (version == null) version = "dev";
 
-            // 從 GrimoConfig 取得 agent/model 設定（使用既有 API，避免直接操作 config map）
+            // Agent/Model：優先用 config 設定，fallback 到偵測到的第一個可用 agent
             String agentId = grimoConfig.getDefaultAgent();
-            if (agentId == null) agentId = "no agent";
+            if (agentId == null) {
+                agentId = agentResults.stream()
+                    .filter(r -> r.available())
+                    .map(r -> r.id())
+                    .findFirst().orElse("no agent");
+            }
             String model = grimoConfig.getDefaultModel();
             if (model == null) model = "unknown";
-
-            // workspace 路徑以 ~ 取代 home 目錄
             String workspacePath = workspaceManager.root().toString()
                     .replace(System.getProperty("user.home"), "~");
 
-            String banner = bannerRenderer.render(
+            long agentCount = agentResults.stream().filter(r -> r.available()).count();
+            terminal.writer().print(bannerRenderer.render(
                     version, agentId, model, workspacePath,
+                    (int) agentCount,
                     skillRegistry.listAll().size(),
                     mcpClientRegistry.listAll().size(),
-                    taskSchedulerService.getScheduledTaskIds().size()
-            );
-            terminal.writer().print(banner);
+                    taskSchedulerService.getScheduledTaskIds().size()));
+            terminal.writer().println();
             terminal.writer().flush();
 
-            // 9. JLine 設定：AUTO_MENU、AUTO_LIST、LIST_MAX
+            // 7. JLine 設定：AUTO_MENU、AUTO_LIST、LIST_MAX
+            // LIST_MAX 設高避免 "do you wish to see all N possibilities?" 提示吃掉使用者輸入
             lineReader.setOpt(LineReader.Option.AUTO_MENU);
             lineReader.setOpt(LineReader.Option.AUTO_LIST);
-            lineReader.setVariable(LineReader.LIST_MAX, 20);
+            lineReader.setOpt(LineReader.Option.AUTO_MENU_LIST);
+            lineReader.setVariable(LineReader.LIST_MAX, 100);
 
-            // 10. 註冊 / 鍵 widget：游標在行首時插入 / 並觸發補全選單
+            // 8. 註冊 / 鍵 widget：游標在行首時插入 / 並觸發補全
+            // Candidate value 含 / 前綴（如 "/agent list"），JLine 會依輸入 /ag
+            // 進行前綴匹配過濾。LIST_MAX=100 避免 "do you wish to see" 提示。
             Widget slashAndComplete = () -> {
                 if (lineReader.getBuffer().cursor() == 0) {
                     lineReader.getBuffer().write('/');
@@ -359,7 +353,22 @@ public class GrimoStartupRunner {
             lineReader.getKeyMaps().get(LineReader.MAIN)
                     .bind(new Reference("slash-complete"), "/");
 
-            log.info("Grimo is ready.");
+            log.debug("Grimo is ready.");
         };
+    }
+
+    /**
+     * 顯示單一載入步驟結果：動畫模式用 ANSI 定位，非動畫模式用 println。
+     */
+    private static void showStep(boolean animated, StartupAnimationRenderer animator,
+                                  Terminal terminal, int index,
+                                  String label, String detail, boolean success) {
+        String text = StartupAnimationRenderer.formatLoadingStep(label, detail, success);
+        if (animated) {
+            animator.showLoadingStep(index, text);
+        } else {
+            terminal.writer().println(text);
+            terminal.writer().flush();
+        }
     }
 }

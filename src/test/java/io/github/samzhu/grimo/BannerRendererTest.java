@@ -9,13 +9,13 @@ class BannerRendererTest {
     void renderShouldContainVersionAndAgentInfo() {
         var renderer = new BannerRenderer();
         String banner = renderer.render("0.1.0", "claude-cli", "sonnet",
-            "~/workspace/grimo-cli", 3, 2, 1);
+            "~/workspace/grimo-cli", 1, 3, 2, 1);
         assertThat(banner).contains("Grimo");
         assertThat(banner).contains("0.1.0");
         assertThat(banner).contains("claude-cli");
-        assertThat(banner).contains("sonnet");
         assertThat(banner).contains("~/workspace/grimo-cli");
-        assertThat(banner).contains("3 skills");
+        assertThat(banner).contains("1 agent");
+        assertThat(banner).contains("3 skill");
         assertThat(banner).contains("2 mcp");
         assertThat(banner).contains("1 task");
     }
@@ -23,7 +23,7 @@ class BannerRendererTest {
     @Test
     void renderShouldContainMascotCharacters() {
         var renderer = new BannerRenderer();
-        String banner = renderer.render("dev", "none", "none", "~/test", 0, 0, 0);
+        String banner = renderer.render("dev", "none", "none", "~/test", 0, 0, 0, 0);
         assertThat(banner).contains("▄");
         assertThat(banner).contains("█");
         assertThat(banner).contains("▀");
@@ -33,7 +33,7 @@ class BannerRendererTest {
     @Test
     void renderShouldHandleDevVersion() {
         var renderer = new BannerRenderer();
-        String banner = renderer.render("dev", "no agent", "unknown", "~/test", 0, 0, 0);
+        String banner = renderer.render("dev", "no agent", "unknown", "~/test", 0, 0, 0, 0);
         assertThat(banner).contains("dev");
         assertThat(banner).contains("no agent");
     }

@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 擴充 Spring Shell 的 CommandCompleter，增加兩項功能：
+ * 擴充 Spring Shell 的 CommandCompleter，增加斜線命令選單功能：
  * 1. 當輸入以 / 開頭時，提供所有管理命令 + Skills 的候選項（排除 chat）
  * 2. 非 / 開頭時，委派給原始 CommandCompleter 處理正常命令補全
  *
@@ -20,10 +20,12 @@ import java.util.Set;
  * - 繼承 CommandCompleter 而非獨立 Completer，因為 JLineShellAutoConfiguration
  *   的 lineReader bean 明確接收 CommandCompleter 類型參數
  * - 利用 @ConditionalOnMissingBean 機制覆蓋自動配置的 CommandCompleter bean
- * - Candidate 的 value 不含 / 前綴，讓 JLine 替換時自動去除 /
+ * - Candidate value 包含 / 前綴（如 "/agent list"），讓 JLine 能正確比對
+ *   使用者輸入的 /ag 與候選項 /agent list 進行前綴匹配過濾
+ * - 搭配 SlashStrippingCommandParser 在命令執行前去除 / 前綴
  *
- * @see <a href="https://github.com/spring-projects/spring-shell/blob/main/spring-shell-core-autoconfigure/src/main/java/org/springframework/shell/core/autoconfigure/JLineShellAutoConfiguration.java">JLineShellAutoConfiguration</a>
- * @see CommandCompleter
+ * @see SlashStrippingCommandParser
+ * @see <a href="https://github.com/jline/jline3/wiki/Completion">JLine 3 Completion Wiki</a>
  */
 public class GrimoCommandCompleter extends CommandCompleter {
 
@@ -50,26 +52,27 @@ public class GrimoCommandCompleter extends CommandCompleter {
     }
 
     /**
-     * 產生斜線命令選單的候選項：
-     * 1. 從 CommandRegistry 取得所有已註冊命令（排除 chat）
-     * 2. 從 SkillRegistry 取得所有已載入的 Skills
+     * 產生斜線命令選單的候選項。
+     * Candidate value 包含 / 前綴（如 "/agent list"），使 JLine 能依使用者輸入
+     * （如 /ag）進行前綴過濾，只顯示匹配的命令。
+     * 執行時由 SlashStrippingCommandParser 去除 / 前綴。
      */
     private void completeSlashCommands(List<Candidate> candidates) {
         // 1. 從 CommandRegistry 取得所有命令（prefix="" 表示全部）
         commandRegistry.getCommandsByPrefix("").stream()
             .filter(cmd -> !EXCLUDED_COMMANDS.contains(cmd.getName()))
             .forEach(cmd -> candidates.add(new Candidate(
-                cmd.getName(),
-                "/" + cmd.getName(),
-                null,
-                cmd.getDescription(),
+                "/" + cmd.getName(),                // value — 含 / 以利 JLine 過濾
+                "/" + cmd.getName(),                // display
+                null,                               // group
+                cmd.getDescription(),               // description
                 null, null, true
             )));
 
         // 2. 從 SkillRegistry 取得所有 Skills
         for (SkillDefinition skill : skillRegistry.listAll()) {
             candidates.add(new Candidate(
-                "skill " + skill.name(),
+                "/skill " + skill.name(),
                 "/skill " + skill.name(),
                 null,
                 skill.description(),
