@@ -12,6 +12,13 @@ management:
     web:
       exposure:
         include: health,info,modulith
+  otlp:
+    metrics:
+      export:
+        enabled: false
+    tracing:
+      export:
+        enabled: false
 
 grimo:
   workspace: ${user.home}/grimo-workspace
