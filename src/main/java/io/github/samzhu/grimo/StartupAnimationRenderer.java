@@ -30,6 +30,10 @@ public class StartupAnimationRenderer {
     private static final String HIDE_CURSOR = "\033[?25l";
     private static final String SHOW_CURSOR = "\033[?25h";
     private static final String CLEAR_SCREEN = "\033[H\033[2J";
+    /** 進入 alternate screen buffer，動畫不污染 scrollback（同 vim, less, htop） */
+    private static final String ENTER_ALT_SCREEN = "\033[?1049h";
+    /** 離開 alternate screen buffer，回到 main buffer */
+    private static final String EXIT_ALT_SCREEN = "\033[?1049l";
 
     private static final String[] STAR_CHARS = {"✦", "✧", "·", "✦", "✧"};
     private static final String[] MASCOT_LINES = {
@@ -89,6 +93,7 @@ public class StartupAnimationRenderer {
      * 播放 Phase 1-3 的開場動畫：星光散落、聚集、logo 浮現。
      */
     public void playIntroAnimation() {
+        writer.print(ENTER_ALT_SCREEN);
         writer.print(HIDE_CURSOR);
         writer.print(CLEAR_SCREEN);
         writer.flush();
@@ -162,7 +167,7 @@ public class StartupAnimationRenderer {
      * 清除動畫畫面並恢復游標（Phase 5）。
      */
     public void clearAnimation() {
-        writer.print(CLEAR_SCREEN);
+        writer.print(EXIT_ALT_SCREEN);  // 切回 main buffer，動畫完全不留痕跡
         writer.print(SHOW_CURSOR);
         writer.flush();
     }

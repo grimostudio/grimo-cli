@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!-- 互動式 CLI 不需要 console 日誌，所有 UI 由 JLine Terminal 直接處理 -->
+    <!-- 日誌只寫入檔案，console 完全靜音 -->
+    <!-- 參考：https://docs.spring.io/spring-boot/reference/features/logging.html -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${user.home}/grimo-workspace/logs/grimo.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${user.home}/grimo-workspace/logs/grimo-%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <root level="WARN">
+        <appender-ref ref="FILE"/>
+    </root>
+
+    <!-- 自己的 package 用 DEBUG，方便開發除錯（只寫入檔案，不影響 console） -->
+    <logger name="io.github.samzhu.grimo" level="DEBUG"/>
+</configuration>
