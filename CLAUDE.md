@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+遵循 First Principles Thinking 思考根本問題, 不是只解決表面狀況
+
 你上網查證一下比在那邊試要快
 
 了解功能需求或是目的後, 或是為什麼考慮這樣處理, 要記得寫設計說明註解
