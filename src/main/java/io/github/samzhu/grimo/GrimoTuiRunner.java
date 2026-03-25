@@ -147,11 +147,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 + mcpCount + " mcp · " + taskCount + " task";
         var statusBar = new StatusBarView(List.of(StatusItem.of(statusText)));
 
-        // 三區 GridView：content(flex) + input(3行, 含 border) + status(1行)
-        // GrimoInputView 的 setShowBorder(true) 在上下繪製 ─ 分隔線，需要 3 行高
+        // 三區 GridView：content(flex) + input(3行: ─+❯+─) + status(1行)
         var root = new GridView();
         root.setColumnSize(0);     // 1 欄 flex（佔滿終端寬度）
-        root.setRowSize(0, 3, 1);  // row 0=flex, row 1=3行(border+input+border), row 2=1行
+        root.setRowSize(0, 3, 1);  // row 0=flex, row 1=3行(separator+input+separator), row 2=1行
         root.addItem(contentView, 0, 0, 1, 1, 0, 0);
         root.addItem(inputView, 1, 0, 1, 1, 0, 0);
         root.addItem(statusBar, 2, 0, 1, 1, 0, 0);
@@ -177,8 +176,13 @@ public class GrimoTuiRunner implements ApplicationRunner {
         // === Phase 5: 註冊鍵盤事件處理（含斜線選單） ===
         registerKeyHandlers(ui, inputView, contentView, slashCommandListView, slashCommandDialog, sessionWriter);
 
-        // 啟用滑鼠追蹤（含滾輪事件），退出前關閉
-        terminal.trackMouse(Terminal.MouseTracking.Any);
+        // 啟用 alternate scroll mode：終端機把觸控板/滑鼠滾動轉為 ↑↓ 方向鍵
+        // 同 vim、less、htop 的做法。不需要 mouse tracking（SGR parsing 有問題）。
+        // \033[?1007h = enable alternate scroll mode（xterm 標準）
+        terminal.writer().write("\033[?1007h");
+        terminal.writer().flush();
+        // 關閉 mouse tracking，避免 SGR escape sequences 亂碼
+        terminal.trackMouse(Terminal.MouseTracking.Off);
 
         log.debug("Grimo TUI setup complete, starting TerminalUI event loop.");
 
@@ -186,7 +190,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
         try {
             ui.run();
         } finally {
-            terminal.trackMouse(Terminal.MouseTracking.Off);
+            // 退出時關閉 alternate scroll mode
+            terminal.writer().write("\033[?1007l");
+            terminal.writer().flush();
         }
     }
 
@@ -216,17 +222,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
             ui.redraw();
         });
 
-        // 滑鼠/觸控板滾動事件 → Content 區滾動
-        // xterm mouse protocol: button 64 = WheelUp, button 65 = WheelDown
-        eventLoop.mouseEvents().subscribe(mouseEvent -> {
-            if (mouseEvent.has(64)) {
-                contentView.scrollUp(3);
-                ui.redraw();
-            } else if (mouseEvent.has(65)) {
-                contentView.scrollDown(3);
-                ui.redraw();
-            }
-        });
+        // TODO: 滑鼠滾動功能暫時停用
+        // TerminalUI 的 mouse event parsing 無法正確處理 scroll wheel SGR sequences，
+        // 導致 [<65;72;22M 等原始 escape codes 被當作鍵盤輸入。
+        // 待研究 TerminalUI mouse 支援後再啟用。
     }
 
     /**
@@ -302,7 +301,14 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 processInput(text, contentView, ui, sessionWriter);
             }
         } else if (event.isKey(Key.CursorUp)) {
-            // ↑：歷史瀏覽 — 上一筆
+            // ↑：觸控板滾動（alternate scroll mode）也會產生 CursorUp
+            // Content 區上滾 1 行
+            contentView.scrollUp(1);
+        } else if (event.isKey(Key.CursorDown)) {
+            // ↓：Content 區下滾 1 行
+            contentView.scrollDown(1);
+        } else if (event.hasCtrl() && event.getPlainKey() == Key.p) {
+            // Ctrl+P：歷史瀏覽 — 上一筆
             if (!history.isEmpty() && historyIndex > 0) {
                 if (historyIndex == history.size()) {
                     savedInput = inputView.getText();
@@ -310,8 +316,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 historyIndex--;
                 inputView.setText(history.get(historyIndex));
             }
-        } else if (event.isKey(Key.CursorDown)) {
-            // ↓：歷史瀏覽 — 下一筆
+        } else if (event.hasCtrl() && event.getPlainKey() == Key.n) {
+            // Ctrl+N：歷史瀏覽 — 下一筆
             if (historyIndex < history.size()) {
                 historyIndex++;
                 if (historyIndex == history.size()) {

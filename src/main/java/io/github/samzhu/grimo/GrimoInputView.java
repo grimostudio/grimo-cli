@@ -29,7 +29,8 @@ public class GrimoInputView extends BoxView {
     private int cursorPos = 0;
 
     public GrimoInputView() {
-        setShowBorder(true);
+        // 不用 setShowBorder(true)（會畫完整方框含左右邊框）
+        // 上方分隔線在 drawInput 中手動繪製
         setDrawFunction(this::drawInput);
     }
 
@@ -141,21 +142,29 @@ public class GrimoInputView extends BoxView {
      * 自訂繪製：顯示 ❯ 前綴 + 文字 + 游標位置。
      */
     private Rectangle drawInput(Screen screen, Rectangle rect) {
-        var writer = screen.writerBuilder().color(67).build();
+        var separatorWriter = screen.writerBuilder().color(245).build();  // gray
+        var brandWriter = screen.writerBuilder().color(67).build();       // brand color
         var defaultWriter = screen.writerBuilder().build();
 
-        // 繪製 ❯ 前綴
-        writer.text(PROMPT, rect.x(), rect.y());
+        String separator = "─".repeat(rect.width());
 
-        // 繪製使用者輸入文字
+        // 上方分隔線
+        separatorWriter.text(separator, rect.x(), rect.y());
+
+        // ❯ 前綴 + 輸入文字（第二行）
+        int inputRow = rect.y() + 1;
+        brandWriter.text(PROMPT, rect.x(), inputRow);
         String text = buffer.toString();
         if (!text.isEmpty()) {
-            defaultWriter.text(text, rect.x() + PROMPT.length(), rect.y());
+            defaultWriter.text(text, rect.x() + PROMPT.length(), inputRow);
         }
 
-        // 設定游標位置（❯ 佔 2 字元寬度 + cursorPos）
+        // 下方分隔線（第三行）
+        separatorWriter.text(separator, rect.x(), rect.y() + 2);
+
+        // 游標位置
         screen.setShowCursor(true);
-        screen.setCursorPosition(new Position(rect.x() + PROMPT.length() + cursorPos, rect.y()));
+        screen.setCursorPosition(new Position(rect.x() + PROMPT.length() + cursorPos, inputRow));
 
         return rect;
     }
