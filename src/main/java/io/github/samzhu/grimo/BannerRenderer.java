@@ -14,7 +14,7 @@ package io.github.samzhu.grimo;
 public class BannerRenderer {
 
     // ANSI 256 色碼
-    private static final String CYAN = "\033[38;5;37m";     // 青色（品牌色 #5ba3b5）
+    private static final String BRAND = "\033[38;5;67m";    // 品牌色 steel blue（#5F87AF）
     private static final String GOLD = "\033[38;5;178m";    // 金色（星光 #e8c44a）
     private static final String WHITE = "\033[1;37m";       // 白色粗體
     private static final String GRAY = "\033[38;5;245m";    // 灰色
@@ -45,23 +45,23 @@ public class BannerRenderer {
           .append(WHITE).append("Grimo").append(RESET)
           .append(" ").append(GRAY).append("v").append(version).append(RESET)
           .append("\n");
-        sb.append(CYAN).append("     ▄████▄").append(RESET)
+        sb.append(BRAND).append("     ▄████▄").append(RESET)
           .append(gap)
           .append(GRAY).append(agentId).append(" · ").append(model).append(RESET)
           .append("\n");
-        sb.append(CYAN).append("     █").append(WHITE).append("●").append(CYAN).append("██")
-          .append(WHITE).append("●").append(CYAN).append("█").append(RESET)
+        sb.append(BRAND).append("     █").append(WHITE).append("●").append(BRAND).append("██")
+          .append(WHITE).append("●").append(BRAND).append("█").append(RESET)
           .append(gap)
           .append(GRAY).append(workspacePath).append(RESET)
           .append("\n");
-        sb.append(CYAN).append("     ██████").append(RESET)
+        sb.append(BRAND).append("     ██████").append(RESET)
           .append(gap)
           .append(GRAY).append(agentCount).append(" agent · ")
           .append(skillCount).append(" skill · ")
           .append(mcpCount).append(" mcp · ")
           .append(taskCount).append(" task").append(RESET)
           .append("\n");
-        sb.append(CYAN).append("     ▀▄▀▀▄▀").append(RESET).append("\n");
+        sb.append(BRAND).append("     ▀▄▀▀▄▀").append(RESET).append("\n");
         return sb.toString();
     }
 }

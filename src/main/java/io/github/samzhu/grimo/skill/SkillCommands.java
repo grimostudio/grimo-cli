@@ -29,15 +29,10 @@ public class SkillCommands {
     }
 
     /**
-     * 裸指令別名：輸入 /skill 等同 /skill list，符合漸進式揭露原則。
-     * Smart Default: bare 'skill' command delegates to 'skill list'.
+     * 列出所有已載入的 skills。
+     * kebab-case 扁平命令：/skill-list
      */
-    @Command(name = "skill", description = "List all loaded skills (alias for 'skill list')")
-    public String skillDefault() {
-        return list();
-    }
-
-    @Command(name = {"skill", "list"}, description = "List all loaded skills")
+    @Command(name = "skill-list", description = "List all loaded skills")
     public String list() {
         var skills = registry.listAll();
         if (skills.isEmpty()) return "No skills loaded.";
@@ -51,7 +46,7 @@ public class SkillCommands {
         return sb.toString();
     }
 
-    @Command(name = {"skill", "remove"}, description = "Remove a loaded skill")
+    @Command(name = "skill-remove", description = "Remove a loaded skill")
     public String remove(String name) {
         if (registry.get(name).isEmpty()) {
             return "Skill not found: " + name;
@@ -65,7 +60,7 @@ public class SkillCommands {
      * then loads and registers the SKILL.md definition found in the cloned repo.
      * Convention: repository name prefix 'grimo-skill-' is stripped for the skill directory name.
      */
-    @Command(name = {"skill", "install"}, description = "Install a skill from a Git repository URL")
+    @Command(name = "skill-install", description = "Install a skill from a Git repository URL")
     public String install(String url) {
         String skillName = url.substring(url.lastIndexOf('/') + 1)
             .replace("grimo-skill-", "");

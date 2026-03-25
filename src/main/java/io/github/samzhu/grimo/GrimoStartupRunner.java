@@ -21,6 +21,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.shell.core.command.CommandExecutor;
 import org.springframework.shell.core.command.CommandRegistry;
 
 import java.nio.file.Path;
@@ -57,14 +58,7 @@ public class GrimoStartupRunner {
         return new AgentProviderRegistry();
     }
 
-    /**
-     * 極簡 Shell 提示符 bean：只顯示 ❯ 箭頭符號。
-     * 狀態資訊（agent、model、workspace）改由 StatusLineRenderer 在終端底部顯示。
-     */
-    @Bean
-    GrimoPromptProvider grimoPromptProvider(Terminal terminal) {
-        return new GrimoPromptProvider(terminal);
-    }
+    // GrimoPromptProvider 已移除 — TerminalUI 不使用 LineReader/PromptProvider
 
     @Bean
     AgentDetector agentDetector(AgentProviderRegistry registry) {
@@ -135,8 +129,14 @@ public class GrimoStartupRunner {
         return new BannerRenderer();
     }
 
-    // StatusLineRenderer 已移除 — JLine Status API 的 scroll region 機制
-    // 與手動佈局控制衝突，改用 GrimoTuiRunner 的 ANSI scroll region 手動管理底部欄
+    /**
+     * CommandExecutor：執行解析後的命令。
+     * TerminalUI 模式下由 GrimoTuiRunner 手動呼叫（取代 ShellRunner 的自動執行）。
+     */
+    @Bean
+    CommandExecutor commandExecutor(CommandRegistry commandRegistry) {
+        return new CommandExecutor(commandRegistry);
+    }
 
     /**
      * 覆蓋 Spring Shell 自動配置的 CommandCompleter bean。

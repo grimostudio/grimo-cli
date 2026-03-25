@@ -26,15 +26,10 @@ public class AgentCommands {
     }
 
     /**
-     * 裸指令別名：輸入 /agent 等同 /agent list，符合漸進式揭露原則。
-     * Smart Default: bare 'agent' command delegates to 'agent list'.
+     * 列出所有已註冊的 agent provider 及其狀態。
+     * kebab-case 扁平命令：/agent-list
      */
-    @Command(name = "agent", description = "List all configured agent providers (alias for 'agent list')")
-    public String agentDefault() {
-        return list();
-    }
-
-    @Command(name = {"agent", "list"}, description = "List all configured agent providers")
+    @Command(name = "agent-list", description = "List all configured agent providers")
     public String list() {
         var providers = registry.listAll();
         if (providers.isEmpty()) {
@@ -54,7 +49,7 @@ public class AgentCommands {
      * 切換預設 agent provider，設定持久化至 workspace config.yaml。
      * Switch default agent provider and persist to config.
      */
-    @Command(name = {"agent", "use"}, description = "Switch default agent provider")
+    @Command(name = "agent-use", description = "Switch default agent provider")
     public String use(String agentId) {
         if (registry.get(agentId).isEmpty()) {
             return "Agent not found: " + agentId + ". Run 'agent' to see available agents.";
@@ -67,7 +62,7 @@ public class AgentCommands {
      * 切換預設模型名稱，設定持久化至 workspace config.yaml。
      * Switch default model and persist to config.
      */
-    @Command(name = {"agent", "model"}, description = "Switch default model")
+    @Command(name = "agent-model", description = "Switch default model")
     public String model(String modelName) {
         config.setDefaultModel(modelName);
         return "Default model switched to: " + modelName;

@@ -9,9 +9,6 @@ import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
-import org.jline.reader.LineReader;
-import org.jline.reader.Reference;
-import org.jline.reader.Widget;
 import org.jline.terminal.Terminal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,31 +16,37 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.shell.core.ShellRunner;
+import org.springframework.shell.core.command.CommandContext;
+import org.springframework.shell.core.command.CommandExecutor;
+import org.springframework.shell.core.command.CommandParser;
+import org.springframework.shell.core.command.CommandRegistry;
+import org.springframework.shell.jline.tui.component.view.TerminalUI;
+import org.springframework.shell.jline.tui.component.view.control.DialogView;
+import org.springframework.shell.jline.tui.component.view.control.GridView;
+import org.springframework.shell.jline.tui.component.view.control.StatusBarView;
+import org.springframework.shell.jline.tui.component.view.control.StatusBarView.StatusItem;
+import org.springframework.shell.jline.tui.component.view.event.KeyEvent.Key;
 import org.springframework.stereotype.Component;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 自建 TUI Runner：取代 Spring Shell 的 InteractiveShellApplicationRunner。
+ * 自建 TUI Runner：使用 Spring Shell TerminalUI 框架建構完整 TUI 介面。
  *
  * 設計說明：
- * - 實作 ApplicationRunner → Spring Shell 的 springShellApplicationRunner 有
- *   {@code @ConditionalOnMissingBean(ApplicationRunner.class)}，當此 bean 存在時
- *   Spring Shell 不會建立自己的 ApplicationRunner wrapper
- * - 啟動流程（動畫、偵測、banner、status line）在此完成
- * - fill-lines 在 readLine() 之前執行，不會與 LineReader 的顯示管理衝突
- * - JLine LineReader options 和 / widget 在 readLine() 之前配置
- * - 最終委派給 JLineShellRunner.run() 執行 REPL loop
+ * - 取代舊版 JLine LineReader + 手動 ANSI scroll region 的做法
+ * - 使用 GridView 三區佈局：content(flex) + input(1行) + status(1行)
+ * - GrimoContentView 負責 banner 顯示和對話紀錄（底部對齊 + 滾動）
+ * - GrimoInputView 自建輸入元件（InputView 缺少 setText()）
+ * - StatusBarView 顯示 agent/model/workspace/計數資訊
+ * - TerminalUI.run() 阻塞式事件迴圈，取代 shellRunner.run()
  *
- * 為什麼不用 CommandLineRunner？
- * - CommandLineRunner 不會抑制 Spring Shell 的 ApplicationRunner
- * - 舊架構中 Spring Shell 的 REPL 控制 LineReader，與我們的 terminal.writer() 衝突
- * - 新架構中我們完全控制啟動順序：setup → shellRunner.run()
- *
- * @see <a href="https://docs.spring.io/spring-shell/reference/execution.html">Spring Shell Execution</a>
- * @see <a href="https://github.com/jline/jline3/wiki/Completion">JLine 3 Completion</a>
+ * @see <a href="https://docs.spring.io/spring-shell/reference/tui/intro/terminalui.html">TerminalUI :: Spring Shell</a>
+ * @see <a href="https://docs.spring.io/spring-shell/reference/tui/views/grid.html">GridView :: Spring Shell</a>
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -51,9 +54,13 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(GrimoTuiRunner.class);
 
-    private final ShellRunner shellRunner;
+    /** 輸入歷史紀錄（自建，因不使用 JLine LineReader） */
+    private final List<String> history = new ArrayList<>();
+    private int historyIndex = 0;
+    /** 歷史瀏覽前暫存目前輸入，離開歷史模式時恢復 */
+    private String savedInput = "";
+
     private final Terminal terminal;
-    private final LineReader lineReader;
     private final WorkspaceManager workspaceManager;
     private final GrimoConfig grimoConfig;
     private final AgentDetector agentDetector;
@@ -63,10 +70,11 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final McpClientManager mcpClientManager;
     private final McpClientRegistry mcpClientRegistry;
     private final BannerRenderer bannerRenderer;
+    private final CommandParser commandParser;
+    private final CommandExecutor commandExecutor;
+    private final CommandRegistry commandRegistry;
 
-    public GrimoTuiRunner(ShellRunner shellRunner,
-                           Terminal terminal,
-                           LineReader lineReader,
+    public GrimoTuiRunner(Terminal terminal,
                            WorkspaceManager workspaceManager,
                            GrimoConfig grimoConfig,
                            AgentDetector agentDetector,
@@ -75,10 +83,11 @@ public class GrimoTuiRunner implements ApplicationRunner {
                            TaskSchedulerService taskSchedulerService,
                            McpClientManager mcpClientManager,
                            McpClientRegistry mcpClientRegistry,
-                           BannerRenderer bannerRenderer) {
-        this.shellRunner = shellRunner;
+                           BannerRenderer bannerRenderer,
+                           CommandParser commandParser,
+                           CommandExecutor commandExecutor,
+                           CommandRegistry commandRegistry) {
         this.terminal = terminal;
-        this.lineReader = lineReader;
         this.workspaceManager = workspaceManager;
         this.grimoConfig = grimoConfig;
         this.agentDetector = agentDetector;
@@ -88,6 +97,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
         this.mcpClientManager = mcpClientManager;
         this.mcpClientRegistry = mcpClientRegistry;
         this.bannerRenderer = bannerRenderer;
+        this.commandParser = commandParser;
+        this.commandExecutor = commandExecutor;
+        this.commandRegistry = commandRegistry;
     }
 
     @Override
@@ -97,30 +109,13 @@ public class GrimoTuiRunner implements ApplicationRunner {
             workspaceManager.initialize();
         }
 
-        // === Phase 2: 動畫 ===
-        boolean animated = StartupAnimationRenderer.isAnimationSupported(terminal.getType());
-        StartupAnimationRenderer animator = animated ? new StartupAnimationRenderer(terminal) : null;
+        // === Phase 2: 同步載入（靜默，無動畫）===
+        List<DetectionResult> agentResults = detectAgents();
+        loadSkills();
+        connectMcp();
+        restoreTasks();
 
-        if (animated) {
-            animator.playIntroAnimation();
-        }
-
-        // === Phase 3: 同步載入 + 動畫步驟顯示 ===
-        List<DetectionResult> agentResults = detectAgents(animated, animator);
-        loadSkills(animated, animator);
-        connectMcp(animated, animator);
-        restoreTasks(animated, animator);
-
-        // === Phase 4: 動畫結束過渡 ===
-        if (animated) {
-            Thread.sleep(800);
-            animator.clearAnimation();
-            // 清除 main buffer 殘留，確保 banner 從終端頂部開始完整顯示
-            terminal.writer().print("\033[H\033[2J");
-            terminal.writer().flush();
-        }
-
-        // === Phase 5: 靜態 banner ===
+        // === Phase 3: 準備環境資訊 ===
         String version = getClass().getPackage().getImplementationVersion();
         if (version == null) version = "dev";
         String agentId = resolveAgentId(agentResults);
@@ -129,143 +124,335 @@ public class GrimoTuiRunner implements ApplicationRunner {
         String workspacePath = workspaceManager.root().toString()
                 .replace(System.getProperty("user.home"), "~");
         long agentCount = agentResults.stream().filter(DetectionResult::available).count();
-
-        terminal.writer().print(bannerRenderer.render(
-                version, agentId, model, workspacePath,
-                (int) agentCount,
-                skillRegistry.listAll().size(),
-                mcpClientRegistry.listAll().size(),
-                taskSchedulerService.getScheduledTaskIds().size()));
-        terminal.writer().println();
-        terminal.writer().flush();
-
-        // === Phase 6: 手動 ANSI scroll region + 底部固定欄 ===
-        // 不使用 JLine Status API（其 scroll region 與手動佈局衝突）。
-        // 手動設定 scroll region 排除底部 2 行，在 scroll region 外繪製分隔線 + 狀態。
-        // LineReader 在 scroll region 內操作，不會覆蓋底部欄。
-        int h = terminal.getHeight();
-        int w = terminal.getWidth();
-        String sep = "─".repeat(w);
         int skillCount = skillRegistry.listAll().size();
         int mcpCount = mcpClientRegistry.listAll().size();
         int taskCount = taskSchedulerService.getScheduledTaskIds().size();
-        String statusText = " " + agentId + " · " + model + " │ " + workspacePath
+
+        // === Phase 4: 建構 TerminalUI ===
+        TerminalUI ui = new TerminalUI(terminal);
+
+        // Content 區：banner + 對話紀錄
+        var contentView = new GrimoContentView();
+        String bannerText = bannerRenderer.render(
+                version, agentId, model, workspacePath,
+                (int) agentCount, skillCount, mcpCount, taskCount);
+        contentView.setBannerText(bannerText);
+
+        // Input 區：自建輸入元件
+        var inputView = new GrimoInputView();
+
+        // Status 區
+        String statusText = agentId + " · " + model + " │ " + workspacePath
                 + " │ " + (int) agentCount + " agent · " + skillCount + " skill · "
                 + mcpCount + " mcp · " + taskCount + " task";
+        var statusBar = new StatusBarView(List.of(StatusItem.of(statusText)));
 
-        // 1. 設定 scroll region：rows 1 to H-2（排除底部 2 行）
-        terminal.writer().printf("\033[1;%dr", h - 2);
-        // 2. 在 scroll region 外繪製底部欄
-        terminal.writer().printf("\033[%d;1H\033[38;5;245m%s\033[0m", h - 1, sep);
-        terminal.writer().printf("\033[%d;1H\033[38;5;37m%s\033[0m", h, statusText);
-        // 3. 游標回到 scroll region 底部（readLine 從這裡開始）
-        terminal.writer().printf("\033[%d;1H", h - 2);
-        terminal.writer().flush();
+        // 三區 GridView：content(flex) + input(3行, 含 border) + status(1行)
+        // GrimoInputView 的 setShowBorder(true) 在上下繪製 ─ 分隔線，需要 3 行高
+        var root = new GridView();
+        root.setColumnSize(0);     // 1 欄 flex（佔滿終端寬度）
+        root.setRowSize(0, 3, 1);  // row 0=flex, row 1=3行(border+input+border), row 2=1行
+        root.addItem(contentView, 0, 0, 1, 1, 0, 0);
+        root.addItem(inputView, 1, 0, 1, 1, 0, 0);
+        root.addItem(statusBar, 2, 0, 1, 1, 0, 0);
 
-        // === Phase 8: 配置 JLine LineReader ===
-        configureLineReader();
-        registerSlashWidget();
+        // 斜線指令選單：從 CommandRegistry + SkillRegistry 建構候選項
+        var menuItems = buildMenuItems();
+        var slashCommandListView = new GrimoSlashCommandListView(menuItems);
+        var slashCommandDialog = new DialogView(slashCommandListView);
 
-        log.debug("Grimo TUI setup complete, delegating to ShellRunner REPL.");
+        ui.configure(contentView);
+        ui.configure(inputView);
+        ui.configure(statusBar);
+        ui.configure(slashCommandListView);
+        ui.setRoot(root, true);  // fullscreen 模式
 
-        // === Phase 9: 委派給 JLineShellRunner 執行 REPL loop ===
-        // ShellRunner.run() 內部呼叫 JLineInputProvider.readInput() → lineReader.readLine(prompt)
-        // 所有 readLine() 呼叫都在此之後，fill-lines 和 LineReader 狀態不會衝突
-        shellRunner.run(args.getSourceArgs());
+        // === Session 對話存檔 ===
+        String cwd = System.getProperty("user.dir");
+        String encodedCwd = cwd.replaceAll("[^a-zA-Z0-9]", "-");
+        var sessionsDir = workspaceManager.root().resolve("projects").resolve(encodedCwd).resolve("sessions");
+        var sessionWriter = new SessionWriter(sessionsDir);
+        sessionWriter.writeSystemMessage(cwd, version, "Grimo TUI session");
+
+        // === Phase 5: 註冊鍵盤事件處理（含斜線選單） ===
+        registerKeyHandlers(ui, inputView, contentView, slashCommandListView, slashCommandDialog, sessionWriter);
+
+        // 啟用滑鼠追蹤（含滾輪事件），退出前關閉
+        terminal.trackMouse(Terminal.MouseTracking.Any);
+
+        log.debug("Grimo TUI setup complete, starting TerminalUI event loop.");
+
+        // === Phase 6: 啟動 TUI 事件迴圈（阻塞） ===
+        try {
+            ui.run();
+        } finally {
+            terminal.trackMouse(Terminal.MouseTracking.Off);
+        }
     }
 
     /**
-     * 配置 JLine LineReader 補全選項和選單樣式。
+     * 註冊鍵盤事件處理器。
      *
      * 設計說明：
-     * - AUTO_MENU_LIST + AUTO_LIST：輸入 / 後自動顯示候選清單
-     * - MENU_LIST_MAX=5：限制顯示 5 項，仿 Claude Code 的簡潔選單
-     * - 樣式配置去除 JLine 預設的洋紅色背景，改為透明底 + cyan/gray 配色
-     * - 選中項使用 inverse（反色）高亮
-     *
-     * @see <a href="https://github.com/jline/jline3/wiki/Completion">JLine Completion Options</a>
-     * @see <a href="https://github.com/jline/jline3/wiki/Theme-System">JLine Theme System</a>
+     * - 斜線指令選單模式（modal 可見）：↑↓ 選擇、Tab/Enter 填入、Esc 關閉
+     * - 一般模式：字元輸入、Enter 送出、Ctrl+C 清空、Ctrl+D 退出
+     * - 輸入「行首/」或「空格+/」時自動開啟斜線指令選單
      */
-    private void configureLineReader() {
-        // 補全行為
-        lineReader.setOpt(LineReader.Option.AUTO_MENU_LIST);
-        lineReader.setOpt(LineReader.Option.AUTO_LIST);
-        lineReader.setOpt(LineReader.Option.LIST_ROWS_FIRST);
+    private void registerKeyHandlers(TerminalUI ui, GrimoInputView inputView,
+                                      GrimoContentView contentView,
+                                      GrimoSlashCommandListView slashCommandListView,
+                                      DialogView slashCommandDialog,
+                                      SessionWriter sessionWriter) {
+        var eventLoop = ui.getEventLoop();
 
-        // 選單樣式：透明底 + cyan/gray 配色（取代預設的醜陋洋紅色）
-        lineReader.setVariable(LineReader.COMPLETION_STYLE_LIST_BACKGROUND, "bg:default");
-        lineReader.setVariable(LineReader.COMPLETION_STYLE_STARTING, "fg:cyan");
-        lineReader.setVariable(LineReader.COMPLETION_STYLE_DESCRIPTION, "fg:bright-black");
-        lineReader.setVariable(LineReader.COMPLETION_STYLE_SELECTION, "fg:cyan,bold,inverse");
-        lineReader.setVariable(LineReader.COMPLETION_STYLE_GROUP, "fg:cyan,bold");
+        eventLoop.keyEvents().subscribe(event -> {
+            if (ui.getModal() != null) {
+                // === 斜線指令選單模式（modal 可見）===
+                handleSlashMenuKey(event, ui, inputView, slashCommandListView, slashCommandDialog);
+            } else {
+                // === 一般模式 ===
+                handleNormalKey(event, ui, inputView, contentView, slashCommandListView, slashCommandDialog, sessionWriter);
+            }
+            ui.redraw();
+        });
 
-        // 限制選單最多顯示 5 項，不佔滿螢幕
-        lineReader.setVariable(LineReader.MENU_LIST_MAX, 5);
+        // 滑鼠/觸控板滾動事件 → Content 區滾動
+        // xterm mouse protocol: button 64 = WheelUp, button 65 = WheelDown
+        eventLoop.mouseEvents().subscribe(mouseEvent -> {
+            if (mouseEvent.has(64)) {
+                contentView.scrollUp(3);
+                ui.redraw();
+            } else if (mouseEvent.has(65)) {
+                contentView.scrollDown(3);
+                ui.redraw();
+            }
+        });
     }
 
     /**
-     * 註冊 / 鍵 widget：游標在行首時輸入 / 並觸發 JLine 內建補全。
-     * 使用 LineReader.callWidget(COMPLETE) 觸發補全，由 JLine 自己管理選單渲染，
-     * 不會破壞 LineReader 的內部狀態（解決舊 SlashMenuRenderer 的根本問題）。
-     *
-     * @see <a href="https://github.com/jline/jline3/wiki/Using-line-readers">JLine Widgets</a>
+     * 斜線指令選單模式的鍵盤處理。
      */
-    private void registerSlashWidget() {
-        Widget slashAndComplete = () -> {
-            if (lineReader.getBuffer().cursor() == 0) {
-                lineReader.getBuffer().write('/');
-                lineReader.callWidget(LineReader.MENU_COMPLETE);
-            } else {
-                lineReader.getBuffer().write('/');
+    private void handleSlashMenuKey(org.springframework.shell.jline.tui.component.view.event.KeyEvent event,
+                                     TerminalUI ui, GrimoInputView inputView,
+                                     GrimoSlashCommandListView slashCommandListView,
+                                     DialogView slashCommandDialog) {
+        if (event.isKey(Key.CursorUp)) {
+            slashCommandListView.moveUp();
+        } else if (event.isKey(Key.CursorDown)) {
+            slashCommandListView.moveDown();
+        } else if (event.isKey(Key.Tab) || event.isKey(Key.Enter)) {
+            // 填入選中斜線指令到 input
+            String selected = slashCommandListView.getSelected();
+            if (selected != null) {
+                inputView.insertSlashCommand(selected);
             }
-            return true;
-        };
-        lineReader.getWidgets().put("slash-complete", slashAndComplete);
-        lineReader.getKeyMaps().get(LineReader.MAIN)
-                .bind(new Reference("slash-complete"), "/");
-    }
-
-    // === 載入步驟方法 ===
-
-    private List<DetectionResult> detectAgents(boolean animated, StartupAnimationRenderer animator) {
-        String detail;
-        boolean success;
-        List<DetectionResult> results = List.of();
-        try {
-            results = agentDetector.detect();
-            long available = results.stream().filter(DetectionResult::available).count();
-            detail = available + " available";
-            success = true;
-        } catch (Exception e) {
-            detail = e.getMessage();
-            success = false;
+            ui.setModal(null);
+        } else if (event.isKey(Key.Backspace)) {
+            inputView.deleteChar();
+            String slashToken = inputView.getCurrentSlashToken();
+            if (slashToken == null) {
+                ui.setModal(null);
+            } else {
+                slashCommandListView.filter(slashToken.substring(1));
+                if (!slashCommandListView.hasItems()) {
+                    ui.setModal(null);
+                }
+            }
+        } else if (event.hasCtrl() && event.getPlainKey() == Key.c) {
+            // Ctrl+C 在選單模式也關閉選單
+            ui.setModal(null);
+        } else {
+            // 普通字元：插入字元並更新過濾
+            insertCharFromEvent(event, inputView);
+            String slashToken = inputView.getCurrentSlashToken();
+            if (slashToken != null) {
+                slashCommandListView.filter(slashToken.substring(1));
+                if (!slashCommandListView.hasItems()) {
+                    ui.setModal(null);
+                }
+            } else {
+                ui.setModal(null);
+            }
         }
-        showStep(animated, animator, 0, "Detecting agents", detail, success);
-        return results;
     }
 
-    private void loadSkills(boolean animated, StartupAnimationRenderer animator) {
-        String detail;
-        boolean success;
+    /**
+     * 一般模式的鍵盤處理（含 ↑↓ 歷史瀏覽）。
+     *
+     * 設計說明：
+     * - ↑ 鍵：瀏覽前一筆歷史（首次按下時暫存目前輸入）
+     * - ↓ 鍵：瀏覽下一筆歷史（到最底恢復暫存的輸入）
+     * - Enter 時加入 history
+     */
+    private void handleNormalKey(org.springframework.shell.jline.tui.component.view.event.KeyEvent event,
+                                  TerminalUI ui, GrimoInputView inputView,
+                                  GrimoContentView contentView,
+                                  GrimoSlashCommandListView slashCommandListView,
+                                  DialogView slashCommandDialog,
+                                  SessionWriter sessionWriter) {
+        if (event.isKey(Key.Enter)) {
+            String text = inputView.getText().trim();
+            if (!text.isEmpty()) {
+                history.add(text);
+                historyIndex = history.size();
+                savedInput = "";
+                contentView.appendUserInput(text);
+                inputView.clear();
+                sessionWriter.writeUserMessage(text);
+                processInput(text, contentView, ui, sessionWriter);
+            }
+        } else if (event.isKey(Key.CursorUp)) {
+            // ↑：歷史瀏覽 — 上一筆
+            if (!history.isEmpty() && historyIndex > 0) {
+                if (historyIndex == history.size()) {
+                    savedInput = inputView.getText();
+                }
+                historyIndex--;
+                inputView.setText(history.get(historyIndex));
+            }
+        } else if (event.isKey(Key.CursorDown)) {
+            // ↓：歷史瀏覽 — 下一筆
+            if (historyIndex < history.size()) {
+                historyIndex++;
+                if (historyIndex == history.size()) {
+                    inputView.setText(savedInput);
+                } else {
+                    inputView.setText(history.get(historyIndex));
+                }
+            }
+        } else if (event.hasCtrl() && event.getPlainKey() == Key.c) {
+            inputView.clear();
+            historyIndex = history.size();
+            savedInput = "";
+        } else if (event.hasCtrl() && event.getPlainKey() == Key.d) {
+            System.exit(0);
+        } else if (event.isKey(Key.Backspace)) {
+            inputView.deleteChar();
+        } else if (event.isKey(Key.Delete)) {
+            inputView.deleteForward();
+        } else if (event.isKey(Key.CursorLeft)) {
+            inputView.moveCursorLeft();
+        } else if (event.isKey(Key.CursorRight)) {
+            inputView.moveCursorRight();
+        } else {
+            // 普通字元輸入
+            insertCharFromEvent(event, inputView);
+            // 偵測是否應開啟斜線指令選單
+            if (inputView.shouldOpenSlashMenu()) {
+                slashCommandListView.filterAll();
+                int h = terminal.getHeight();
+                int w = terminal.getWidth();
+                int menuHeight = slashCommandListView.getVisibleCount();
+                slashCommandDialog.setRect(0, h - 4 - menuHeight, w, menuHeight);
+                ui.setModal(slashCommandDialog);
+            }
+        }
+    }
+
+    /**
+     * 從 KeyEvent 插入字元到 inputView。
+     */
+    private void insertCharFromEvent(org.springframework.shell.jline.tui.component.view.event.KeyEvent event,
+                                      GrimoInputView inputView) {
+        if (event.isKey() && event.data() != null && !event.data().isEmpty()) {
+            for (char c : event.data().toCharArray()) {
+                inputView.insertChar(c);
+            }
+        } else {
+            int key = event.key();
+            if (key >= 32 && key < 127) {
+                inputView.insertChar((char) key);
+            }
+        }
+    }
+
+    /**
+     * 從 CommandRegistry + SkillRegistry 建構斜線指令選單項目。
+     */
+    private List<GrimoSlashCommandListView.MenuItem> buildMenuItems() {
+        var items = new java.util.ArrayList<GrimoSlashCommandListView.MenuItem>();
+
+        // 從 CommandRegistry 取得所有命令（排除 chat）
+        commandRegistry.getCommandsByPrefix("").stream()
+                .filter(cmd -> !"chat".equals(cmd.getName()))
+                .forEach(cmd -> items.add(new GrimoSlashCommandListView.MenuItem(
+                        cmd.getName(), cmd.getDescription())));
+
+        // 從 SkillRegistry 取得所有 Skills
+        skillRegistry.listAll().forEach(skill ->
+                items.add(new GrimoSlashCommandListView.MenuItem(
+                        skill.name(), skill.description())));
+
+        return items;
+    }
+
+    /**
+     * 處理使用者輸入：判斷是斜線指令還是對話。
+     *
+     * 設計說明：
+     * - /exit 直接退出
+     * - 以 / 開頭 → CommandParser.parse() → CommandContext → CommandExecutor.execute()
+     * - 命令輸出透過 StringWriter 捕獲，轉發到 contentView
+     * - 其他文字 → AI 對話（Phase 2+ 完整實作）
+     */
+    private void processInput(String text, GrimoContentView contentView, TerminalUI ui,
+                               SessionWriter sessionWriter) {
+        if (text.equals("/exit")) {
+            System.exit(0);
+            return;
+        }
+
+        if (text.startsWith("/")) {
+            try {
+                var parsed = commandParser.parse(text);
+                var stringWriter = new StringWriter();
+                var printWriter = new PrintWriter(stringWriter);
+                var ctx = new CommandContext(parsed, commandRegistry, printWriter, null);
+                commandExecutor.execute(ctx);
+                printWriter.flush();
+                String output = stringWriter.toString().trim();
+                if (!output.isEmpty()) {
+                    contentView.appendCommandOutput(output);
+                    sessionWriter.writeCommandMessage(text, output);
+                }
+            } catch (Exception e) {
+                String errorMsg = "Error: " + e.getMessage();
+                contentView.appendError(errorMsg);
+                sessionWriter.writeCommandMessage(text, errorMsg);
+            }
+        } else {
+            // 一般文字：AI 對話（Phase 2+ 實作）
+            String reply = "（對話功能尚在開發中）";
+            contentView.appendAiReply(reply);
+            sessionWriter.writeAssistantMessage(reply);
+        }
+        ui.redraw();
+    }
+
+    // === 載入步驟方法（靜默執行，無動畫）===
+
+    private List<DetectionResult> detectAgents() {
+        try {
+            return agentDetector.detect();
+        } catch (Exception e) {
+            log.warn("Agent detection failed: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private void loadSkills() {
         try {
             var skills = skillLoader.loadAll();
             skills.forEach(skillRegistry::register);
-            detail = skills.size() + " loaded";
-            success = true;
         } catch (Exception e) {
-            detail = e.getMessage();
-            success = false;
+            log.warn("Skill loading failed: {}", e.getMessage());
         }
-        showStep(animated, animator, 1, "Loading skills", detail, success);
     }
 
     @SuppressWarnings("unchecked")
-    private void connectMcp(boolean animated, StartupAnimationRenderer animator) {
-        String detail;
-        boolean success;
+    private void connectMcp() {
         try {
             var config = grimoConfig.load();
-            int count = 0;
             if (config.containsKey("mcp")) {
                 var mcpServers = (Map<String, Map<String, String>>) config.get("mcp");
                 for (var entry : mcpServers.entrySet()) {
@@ -274,45 +461,22 @@ public class GrimoTuiRunner implements ApplicationRunner {
                         String command = entry.getValue().get("command");
                         if ("stdio".equals(transport)) {
                             mcpClientManager.addStdio(entry.getKey(), command);
-                            count++;
                         }
                     } catch (Exception e) {
-                        // 個別 MCP server 連線失敗不中斷流程
+                        log.warn("MCP server {} connection failed: {}", entry.getKey(), e.getMessage());
                     }
                 }
             }
-            detail = count + " servers";
-            success = true;
         } catch (Exception e) {
-            detail = e.getMessage();
-            success = false;
+            log.warn("MCP config loading failed: {}", e.getMessage());
         }
-        showStep(animated, animator, 2, "Connecting MCP", detail, success);
     }
 
-    private void restoreTasks(boolean animated, StartupAnimationRenderer animator) {
-        String detail;
-        boolean success;
+    private void restoreTasks() {
         try {
             taskSchedulerService.restoreAll();
-            int count = taskSchedulerService.getScheduledTaskIds().size();
-            detail = count + " active";
-            success = true;
         } catch (Exception e) {
-            detail = e.getMessage();
-            success = false;
-        }
-        showStep(animated, animator, 3, "Restoring tasks", detail, success);
-    }
-
-    private void showStep(boolean animated, StartupAnimationRenderer animator,
-                           int index, String label, String detail, boolean success) {
-        String text = StartupAnimationRenderer.formatLoadingStep(label, detail, success);
-        if (animated) {
-            animator.showLoadingStep(index, text);
-        } else {
-            terminal.writer().println(text);
-            terminal.writer().flush();
+            log.warn("Task restoration failed: {}", e.getMessage());
         }
     }
 

@@ -23,15 +23,10 @@ public class McpCommands {
     }
 
     /**
-     * 裸指令別名：輸入 /mcp 等同 /mcp list，符合漸進式揭露原則。
-     * Smart Default: bare 'mcp' command delegates to 'mcp list'.
+     * 列出所有 MCP server 連線。
+     * kebab-case 扁平命令：/mcp-list
      */
-    @Command(name = "mcp", description = "List MCP server connections (alias for 'mcp list')")
-    public String mcpDefault() {
-        return list();
-    }
-
-    @Command(name = {"mcp", "list"}, description = "List MCP server connections")
+    @Command(name = "mcp-list", description = "List MCP server connections")
     public String list() {
         var connections = registry.listAll();
         if (connections.isEmpty()) {
@@ -46,7 +41,7 @@ public class McpCommands {
         return sb.toString();
     }
 
-    @Command(name = {"mcp", "remove"}, description = "Remove an MCP server connection")
+    @Command(name = "mcp-remove", description = "Remove an MCP server connection")
     public String remove(String name) {
         if (registry.get(name).isEmpty()) {
             return "MCP connection not found: " + name;

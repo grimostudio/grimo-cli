@@ -45,7 +45,7 @@ public class TaskCommands {
      * @param cron        可選的 cron 表達式（Spring 6 欄位格式，如 "0 0 9 * * *"）
      * @return 建立確認訊息，包含生成的 task ID
      */
-    @Command(name = {"task", "create"}, description = "Create a new task")
+    @Command(name = "task-create", description = "Create a new task")
     public String create(
             @Option(longName = "description", shortName = 'd', description = "Task description", required = true)
             String description,
@@ -72,18 +72,10 @@ public class TaskCommands {
     }
 
     /**
-     * 裸指令別名：輸入 /task 等同 /task list，符合漸進式揭露原則。
-     * Smart Default: bare 'task' command delegates to 'task list'.
-     */
-    @Command(name = "task", description = "List all tasks (alias for 'task list')")
-    public String taskDefault() {
-        return list();
-    }
-
-    /**
      * 列出所有任務，以表格格式顯示 ID、類型、狀態與描述。
+     * kebab-case 扁平命令：/task-list
      */
-    @Command(name = {"task", "list"}, description = "List all tasks")
+    @Command(name = "task-list", description = "List all tasks")
     public String list() {
         var tasks = store.loadAll();
         if (tasks.isEmpty()) return "No tasks found.";
@@ -102,7 +94,7 @@ public class TaskCommands {
      *
      * @param taskId 任務 ID
      */
-    @Command(name = {"task", "show"}, description = "Show task details")
+    @Command(name = "task-show", description = "Show task details")
     public String show(
             @Option(longName = "id", description = "Task ID", required = true)
             String taskId) {
@@ -132,7 +124,7 @@ public class TaskCommands {
      *
      * @param taskId 任務 ID
      */
-    @Command(name = {"task", "cancel"}, description = "Cancel a task")
+    @Command(name = "task-cancel", description = "Cancel a task")
     public String cancel(
             @Option(longName = "id", description = "Task ID", required = true)
             String taskId) {
