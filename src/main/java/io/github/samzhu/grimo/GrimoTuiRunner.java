@@ -179,6 +179,17 @@ public class GrimoTuiRunner implements ApplicationRunner {
         log.debug("Grimo TUI setup complete, starting TerminalUI event loop.");
 
         // === Phase 6: 啟動 TUI 事件迴圈（阻塞） ===
+        // 已知問題：Spring Shell TerminalUI 的 mouse event parsing 未完成。
+        // TerminalUI.run() 內部啟用 mouse tracking，但 EventLoop 從未呼叫
+        // reader.readMouseEvent() 解析 SGR sequences，導致 raw bytes 漏到 keyEvents。
+        // 參考：https://github.com/spring-projects/spring-shell/discussions/760
+        //       https://github.com/spring-projects/spring-shell/issues/1045
+        // 解法：在 run() 啟動後立即關閉所有 mouse tracking modes。
+        Thread.ofVirtual().name("grimo-mouse-disable").start(() -> {
+            try { Thread.sleep(50); } catch (InterruptedException e) { return; }
+            terminal.writer().write("\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l");
+            terminal.writer().flush();
+        });
         ui.run();
     }
 
@@ -187,8 +198,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
      *
      * 設計說明：
      * - 斜線指令選單模式（modal 可見）：↑↓ 選擇、Tab/Enter 填入、Esc 關閉
-     * - 一般模式：字元輸入、Enter 送出、Ctrl+C 清空、Ctrl+D 退出
+     * - 一般模式：字元輸入、Enter 送出、Ctrl+C 清空、Ctrl+U/D 翻頁
      * - 輸入「行首/」或「空格+/」時自動開啟斜線指令選單
+     * - 退出：輸入 /exit
      */
     private void registerKeyHandlers(TerminalUI ui, GrimoInputView inputView,
                                       GrimoContentView contentView,
@@ -198,11 +210,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
         var eventLoop = ui.getEventLoop();
 
         eventLoop.keyEvents().subscribe(event -> {
-            // 過濾 mouse SGR escape sequences（TerminalUI 內部啟用 mouse tracking，
-            // 但無法正確解析 scroll wheel 事件，raw sequences 漏到 keyEvents）
-            String data = event.data();
-            if (data != null && data.contains("[<")) return;
-
             if (ui.getModal() != null) {
                 // === 斜線指令選單模式（modal 可見）===
                 handleSlashMenuKey(event, ui, inputView, slashCommandListView, slashCommandDialog);
@@ -212,6 +219,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
             }
             ui.redraw();
         });
+
     }
 
     /**
@@ -288,12 +296,18 @@ public class GrimoTuiRunner implements ApplicationRunner {
             }
         } else if (event.isKey(Key.CursorUp) || event.isKey(Key.CursorDown)) {
             // ↑/↓ 在一般模式不處理（僅在斜線指令選單模式用於選擇指令）
+        } else if (event.hasCtrl() && event.getPlainKey() == Key.u) {
+            // Ctrl+U：Content 區上翻半頁
+            int halfPage = Math.max(1, (terminal.getHeight() - 4) / 2);
+            contentView.scrollUp(halfPage);
+        } else if (event.hasCtrl() && event.getPlainKey() == Key.d) {
+            // Ctrl+D：Content 區下翻半頁（覆蓋原本的「退出」功能，退出改用 /exit）
+            int halfPage = Math.max(1, (terminal.getHeight() - 4) / 2);
+            contentView.scrollDown(halfPage);
         } else if (event.hasCtrl() && event.getPlainKey() == Key.c) {
             inputView.clear();
             historyIndex = history.size();
             savedInput = "";
-        } else if (event.hasCtrl() && event.getPlainKey() == Key.d) {
-            System.exit(0);
         } else if (event.isKey(Key.Backspace)) {
             inputView.deleteChar();
         } else if (event.isKey(Key.Delete)) {
