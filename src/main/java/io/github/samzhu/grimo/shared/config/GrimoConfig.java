@@ -67,6 +67,35 @@ public class GrimoConfig {
         save(data);
     }
 
+    /**
+     * 取得指定 agent 的選項值（從 agent-options.<agentId>.<key>）。
+     *
+     * 設計說明：
+     * - 支援 per-agent 設定（每個 CLI agent 有自己的 model、timeout 等）
+     * - 取代原本全域的 agents.model 設定
+     */
+    @SuppressWarnings("unchecked")
+    public String getAgentOption(String agentId, String key) {
+        var data = load();
+        var agentOptions = (Map<String, Object>) data.get("agent-options");
+        if (agentOptions == null) return null;
+        var agentSection = (Map<String, Object>) agentOptions.get(agentId);
+        if (agentSection == null) return null;
+        var value = agentSection.get(key);
+        return value != null ? value.toString() : null;
+    }
+
+    /**
+     * 取得所有 MCP server 定義（從 mcp 區段）。
+     * 回傳格式：Map<serverName, Map<configKey, configValue>>
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Map<String, Object>> getMcpServers() {
+        var data = load();
+        var mcp = (Map<String, Map<String, Object>>) data.get("mcp");
+        return mcp != null ? mcp : Map.of();
+    }
+
     public void save(Map<String, Object> data) {
         var options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
