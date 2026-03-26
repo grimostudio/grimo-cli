@@ -156,9 +156,29 @@ public class GrimoInputView {
 
     /**
      * 取得游標在 input 行中的欄位置（含 prompt 寬度）。
+     *
+     * 設計說明：
+     * - 使用 WCWidth 計算實際顯示寬度，而非字元數
+     * - CJK 全形字元佔 2 columns，半形字元佔 1 column
+     * - 修正中文輸入後游標位置偏移的問題
      */
     public int getCursorCol() {
-        return PROMPT.length() + cursorPos;
+        int promptWidth = columnWidth(PROMPT);
+        int textWidth = columnWidth(buffer.substring(0, cursorPos));
+        return promptWidth + textWidth;
+    }
+
+    /**
+     * 計算字串的實際顯示寬度（columns）。
+     * CJK 全形字元佔 2 columns，其餘佔 1 column。
+     */
+    private int columnWidth(String s) {
+        int width = 0;
+        for (int i = 0; i < s.length(); i++) {
+            int w = org.jline.utils.WCWidth.wcwidth(s.charAt(i));
+            width += (w > 0) ? w : 1;
+        }
+        return width;
     }
 
     /**
