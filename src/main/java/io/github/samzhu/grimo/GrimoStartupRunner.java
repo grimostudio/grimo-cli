@@ -1,6 +1,7 @@
 package io.github.samzhu.grimo;
 
 import io.github.samzhu.grimo.agent.detect.AgentDetector;
+import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.agent.registry.AgentProviderRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
 import io.github.samzhu.grimo.channel.ChannelEventListener;
@@ -66,8 +67,13 @@ public class GrimoStartupRunner {
     }
 
     @Bean
-    AgentRouter agentRouter(AgentProviderRegistry registry, GrimoConfig grimoConfig) {
-        return new AgentRouter(registry, grimoConfig);
+    AgentModelRegistry agentModelRegistry() {
+        return new AgentModelRegistry();
+    }
+
+    @Bean
+    AgentRouter agentRouter(AgentModelRegistry agentModelRegistry, GrimoConfig grimoConfig) {
+        return new AgentRouter(agentModelRegistry, grimoConfig);
     }
 
     @Bean

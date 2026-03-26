@@ -1,21 +1,22 @@
 package io.github.samzhu.grimo;
 
-import io.github.samzhu.grimo.agent.provider.AgentProvider;
-import io.github.samzhu.grimo.agent.provider.AgentRequest;
-import io.github.samzhu.grimo.agent.provider.AgentResult;
-import io.github.samzhu.grimo.agent.provider.AgentType;
-import io.github.samzhu.grimo.agent.registry.AgentProviderRegistry;
+import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
 import io.github.samzhu.grimo.channel.ChannelRegistry;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springaicommunity.agents.model.AgentModel;
+import org.springaicommunity.agents.model.AgentResponse;
+import org.springaicommunity.agents.model.AgentTaskRequest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 
 class GrimoCommandsTest {
 
-    AgentProviderRegistry agentRegistry;
+    AgentModelRegistry agentRegistry;
     AgentRouter router;
     ChannelRegistry channelRegistry;
     SkillRegistry skillRegistry;
@@ -23,15 +24,16 @@ class GrimoCommandsTest {
 
     @BeforeEach
     void setUp() {
-        agentRegistry = new AgentProviderRegistry();
-        agentRegistry.register("stub", new AgentProvider() {
-            @Override public String id() { return "stub"; }
-            @Override public AgentType type() { return AgentType.API; }
-            @Override public boolean isAvailable() { return true; }
-            @Override public AgentResult execute(AgentRequest request) {
-                return new AgentResult(true, "Echo: " + request.prompt());
-            }
-        });
+        agentRegistry = new AgentModelRegistry();
+
+        AgentModel stubModel = mock(AgentModel.class);
+        when(stubModel.isAvailable()).thenReturn(true);
+        AgentResponse stubResponse = mock(AgentResponse.class);
+        when(stubResponse.isSuccessful()).thenReturn(true);
+        when(stubResponse.getText()).thenReturn("Echo: Hello");
+        when(stubModel.call(any(AgentTaskRequest.class))).thenReturn(stubResponse);
+
+        agentRegistry.register("stub", stubModel);
         router = new AgentRouter(agentRegistry);
         channelRegistry = new ChannelRegistry();
         skillRegistry = new SkillRegistry();
