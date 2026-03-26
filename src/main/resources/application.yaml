@@ -6,6 +6,16 @@ spring:
   shell:
     interactive:
       enabled: true
+  # 排除 Spring AI Community agent-client 的 auto-configuration
+  # 設計說明：Grimo 使用 Library 模式手動管理 AgentModel（AgentConfiguration + AgentModelFactory）
+  # auto-config 會在啟動/AOT 時嘗試偵測 CLI 並拋 Exception（如 CodexSDKException）
+  # 此設定同時對 runtime 和 AOT processAot 生效
+  autoconfigure:
+    exclude:
+      - org.springaicommunity.agents.claude.autoconfigure.ClaudeAgentAutoConfiguration
+      - org.springaicommunity.agents.claude.autoconfigure.ClaudeHookAutoConfiguration
+      - org.springaicommunity.agents.codex.autoconfigure.CodexAgentAutoConfiguration
+      - org.springaicommunity.agents.client.autoconfigure.AgentClientAutoConfiguration
 
 management:
   endpoints:

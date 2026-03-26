@@ -83,12 +83,6 @@ tasks.withType<Test> {
 	useJUnitPlatform()
 }
 
-// 停用 AOT 處理：agent-client auto-config 在 AOT 時會嘗試偵測 CLI 並拋異常
-// 設計說明：Grimo 使用 Library 模式手動管理 AgentModel，不需要 AOT 預處理
-tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
-	jvmArgs = listOf("-Dspring.aot.enabled=false")
-}
-
 springBoot {
 	mainClass.set("io.github.samzhu.grimo.GrimoApplication")
 }
