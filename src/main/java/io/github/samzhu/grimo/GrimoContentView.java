@@ -94,6 +94,15 @@ public class GrimoContentView {
     }
 
     /**
+     * 移除最後一行（用於移除 "thinking..." 等暫時狀態行）。
+     */
+    public void removeLastLine() {
+        if (!lines.isEmpty()) {
+            lines.removeLast();
+        }
+    }
+
+    /**
      * 清空所有內容。
      */
     public void clear() {

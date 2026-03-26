@@ -377,6 +377,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
                                 .workingDirectory(java.nio.file.Path.of(System.getProperty("user.dir")))
                                 .run();
 
+                        // 移除 "thinking..." 暫時狀態行
+                        contentView.removeLastLine();
+
                         long duration = System.currentTimeMillis() - startTime;
                         if (response.isSuccessful()) {
                             log.info("Agent response received: success=true, duration={}ms, resultLength={}",
@@ -389,6 +392,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                         }
                         sessionWriter.writeAssistantMessage(response.getResult());
                     } catch (Exception e) {
+                        contentView.removeLastLine(); // 移除 "thinking..."
                         long duration = System.currentTimeMillis() - startTime;
                         log.error("Agent call failed: duration={}ms, error={}", duration, e.getMessage(), e);
                         String errorMsg = formatAgentError(e);
