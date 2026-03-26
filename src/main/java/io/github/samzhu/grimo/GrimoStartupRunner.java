@@ -1,13 +1,9 @@
 package io.github.samzhu.grimo;
 
-import io.github.samzhu.grimo.agent.detect.AgentDetector;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
-import io.github.samzhu.grimo.agent.registry.AgentProviderRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
 import io.github.samzhu.grimo.channel.ChannelEventListener;
 import io.github.samzhu.grimo.channel.ChannelRegistry;
-import io.github.samzhu.grimo.mcp.client.McpClientManager;
-import io.github.samzhu.grimo.mcp.client.McpClientRegistry;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.config.GrimoProperties;
 import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
@@ -15,7 +11,6 @@ import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import io.github.samzhu.grimo.task.store.MarkdownTaskStore;
-import org.jline.terminal.Terminal;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
@@ -35,6 +30,8 @@ import java.nio.file.Path;
  *   使得 @Component 的 Commands 類別可以透過建構子注入取得依賴
  * - 啟動流程（動畫、偵測、banner、REPL loop）由 {@link GrimoTuiRunner} 負責
  * - ChannelEventListener 需要是 Spring bean 才能讓 @ApplicationModuleListener 生效
+ * - 舊版 AgentProviderRegistry / AgentDetector / McpClientManager / McpClientRegistry 已移除，
+ *   改用 AgentModelRegistry（AgentModelFactory 偵測）和 McpCatalogBuilder（GrimoConfig 讀取）
  */
 @Configuration
 @EnableScheduling
@@ -54,17 +51,7 @@ public class GrimoStartupRunner {
         return new GrimoConfig(workspaceManager.configFile());
     }
 
-    @Bean
-    AgentProviderRegistry agentProviderRegistry() {
-        return new AgentProviderRegistry();
-    }
-
     // GrimoPromptProvider 已移除 — TerminalUI 不使用 LineReader/PromptProvider
-
-    @Bean
-    AgentDetector agentDetector(AgentProviderRegistry registry) {
-        return new AgentDetector(registry);
-    }
 
     @Bean
     AgentModelRegistry agentModelRegistry() {
@@ -118,16 +105,6 @@ public class GrimoStartupRunner {
     @Bean
     ChannelEventListener channelEventListener(ChannelRegistry channelRegistry) {
         return new ChannelEventListener(channelRegistry);
-    }
-
-    @Bean
-    McpClientRegistry mcpClientRegistry() {
-        return new McpClientRegistry();
-    }
-
-    @Bean
-    McpClientManager mcpClientManager(McpClientRegistry mcpRegistry) {
-        return new McpClientManager(mcpRegistry);
     }
 
     @Bean

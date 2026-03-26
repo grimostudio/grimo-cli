@@ -43,20 +43,12 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
     implementation("io.micrometer:micrometer-tracing-bridge-brave")
 
-    // Spring AI — library, NOT starter (runtime dynamic creation)
-    implementation("org.springframework.ai:spring-ai-anthropic")
-    implementation("org.springframework.ai:spring-ai-openai")
-    implementation("org.springframework.ai:spring-ai-ollama")
-
     // Spring AI Community — agent-client libraries (Library mode, NOT starter)
     implementation("org.springaicommunity.agents:spring-ai-agent-model:0.10.0-SNAPSHOT")
     implementation("org.springaicommunity.agents:spring-ai-agent-client:0.10.0-SNAPSHOT")
     implementation("org.springaicommunity.agents:spring-ai-claude-agent:0.10.0-SNAPSHOT")
     implementation("org.springaicommunity.agents:spring-ai-gemini:0.10.0-SNAPSHOT")
     implementation("org.springaicommunity.agents:spring-ai-codex-agent:0.10.0-SNAPSHOT")
-
-    // MCP Java SDK — NOT Spring AI MCP Starter (runtime dynamic management)
-    implementation("io.modelcontextprotocol.sdk:mcp:1.1.0")
 
     // Channels
     implementation("org.telegram:telegrambots-springboot-longpolling-starter:9.0.0")

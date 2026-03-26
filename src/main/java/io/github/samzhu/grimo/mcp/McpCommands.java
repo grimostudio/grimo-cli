@@ -1,14 +1,19 @@
 package io.github.samzhu.grimo.mcp;
 
-import io.github.samzhu.grimo.mcp.client.McpClientRegistry;
-import io.github.samzhu.grimo.mcp.client.McpConnectionInfo;
+import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
+
 /**
- * Spring Shell CLI commands for managing MCP server connections.
- * Provides 'mcp list' to display all registered MCP connections
- * and 'mcp remove' to disconnect a specific MCP server.
+ * Spring Shell CLI commands for displaying MCP server configuration.
+ * Reads MCP server definitions from GrimoConfig (config.yaml mcp 區段).
+ *
+ * 設計說明：
+ * - 取代舊版使用 McpClientRegistry 的實作，改為直接讀取 GrimoConfig.getMcpServers()
+ * - MCP server 連線由各 AgentModel（Claude/Gemini/Codex）透過 McpServerCatalog 管理
+ * - 此命令只提供 read-only 的設定查看，實際連線生命週期由 AgentClient 負責
  *
  * Uses Spring Shell 4.0 @Command annotation model (replaces legacy @ShellComponent/@ShellMethod).
  * Reference: https://github.com/spring-projects/spring-shell/wiki/v4-migration-guide
@@ -16,37 +21,34 @@ import org.springframework.stereotype.Component;
 @Component
 public class McpCommands {
 
-    private final McpClientRegistry registry;
+    private final GrimoConfig config;
 
-    public McpCommands(McpClientRegistry registry) {
-        this.registry = registry;
+    public McpCommands(GrimoConfig config) {
+        this.config = config;
     }
 
     /**
-     * 列出所有 MCP server 連線。
+     * 列出所有 config.yaml 中設定的 MCP server。
      * kebab-case 扁平命令：/mcp-list
      */
-    @Command(name = "mcp-list", description = "List MCP server connections")
+    @Command(name = "mcp-list", description = "List MCP server configurations")
     public String list() {
-        var connections = registry.listAll();
-        if (connections.isEmpty()) {
-            return "No MCP connections configured.";
+        Map<String, Map<String, Object>> servers = config.getMcpServers();
+        if (servers.isEmpty()) {
+            return "No MCP servers configured.";
         }
 
         var sb = new StringBuilder();
-        sb.append(String.format("  %-12s %-10s %-6s%n", "NAME", "TRANSPORT", "TOOLS"));
-        for (McpConnectionInfo c : connections) {
-            sb.append(String.format("  %-12s %-10s %-6d%n", c.name(), c.transport(), c.toolCount()));
+        sb.append(String.format("  %-20s %-10s %-30s%n", "NAME", "TYPE", "COMMAND/URL"));
+        for (var entry : servers.entrySet()) {
+            String name = entry.getKey();
+            Map<String, Object> cfg = entry.getValue();
+            String type = (String) cfg.getOrDefault("type", "stdio");
+            String commandOrUrl = type.equals("stdio")
+                    ? (String) cfg.getOrDefault("command", "")
+                    : (String) cfg.getOrDefault("url", "");
+            sb.append(String.format("  %-20s %-10s %-30s%n", name, type, commandOrUrl));
         }
         return sb.toString();
-    }
-
-    @Command(name = "mcp-remove", description = "Remove an MCP server connection")
-    public String remove(String name) {
-        if (registry.get(name).isEmpty()) {
-            return "MCP connection not found: " + name;
-        }
-        registry.remove(name);
-        return "MCP connection removed: " + name;
     }
 }
