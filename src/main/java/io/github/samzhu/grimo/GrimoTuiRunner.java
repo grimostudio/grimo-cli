@@ -249,6 +249,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
             case GrimoEventLoop.OP_ENTER -> {
                 String text = inputView.getText().trim();
                 if (!text.isEmpty()) {
+                    log.debug("ENTER pressed, text='{}', lastBinding bytes={}", text,
+                            lastBinding != null ? java.util.HexFormat.of().formatHex(lastBinding.getBytes()) : "null");
                     history.add(text);
                     historyIndex = history.size();
                     savedInput = "";
@@ -285,6 +287,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
             case GrimoEventLoop.OP_LEFT -> inputView.moveCursorLeft();
             case GrimoEventLoop.OP_RIGHT -> inputView.moveCursorRight();
             case GrimoEventLoop.OP_CHAR -> {
+                log.debug("OP_CHAR, lastBinding bytes={}, text='{}'",
+                        lastBinding != null ? java.util.HexFormat.of().formatHex(lastBinding.getBytes()) : "null",
+                        lastBinding);
                 insertCharFromBinding(lastBinding);
                 if (inputView.shouldOpenSlashMenu()) {
                     slashMenuView.filterAll();

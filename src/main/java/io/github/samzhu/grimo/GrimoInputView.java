@@ -195,9 +195,15 @@ public class GrimoInputView {
         result.add(new AttributedString(separator, SEPARATOR_STYLE));
 
         // ❯ 前綴 + 輸入文字（斜線指令以品牌色渲染，仿 Claude Code）
+        // 設計說明：padding 到全寬，確保 JLine Display diff 能清除舊字元
         var sb = new AttributedStringBuilder();
         sb.styled(BRAND_STYLE, PROMPT);
         appendStyledInput(sb);
+        // padding 到 terminal 寬度，避免 Display diff 殘留舊字元
+        int currentWidth = sb.toAttributedString().columnLength();
+        if (currentWidth < cols) {
+            sb.append(" ".repeat(cols - currentWidth));
+        }
         var inputLine = sb.toAttributedString();
         if (inputLine.columnLength() > cols) {
             inputLine = inputLine.columnSubSequence(0, cols);
