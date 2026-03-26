@@ -289,8 +289,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
      */
     private void insertCharFromBinding(String lastBinding) {
         if (lastBinding != null && !lastBinding.isEmpty()) {
-            for (char c : lastBinding.toCharArray()) {
-                if (c >= 32 && c < 127) {
+            for (int i = 0; i < lastBinding.length(); i++) {
+                char c = lastBinding.charAt(i);
+                // 允許所有可印刷字元（含 Unicode：中文、日文等），排除控制字元
+                if (!Character.isISOControl(c)) {
                     inputView.insertChar(c);
                 }
             }

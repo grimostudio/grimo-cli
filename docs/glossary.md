@@ -75,12 +75,13 @@
 
 ## 技術元件對應
 
-| 佈局區域 | 實作元件 | Spring Shell / JLine 類別 |
-|----------|----------|--------------------------|
-| Content 區 | `GrimoContentView` | 自建，extends `BoxView` |
-| Input 區 | `GrimoInputView` | 自建，extends `BoxView`（InputView 無 setText） |
-| Status 區 | `StatusBarView` | Spring Shell 內建 |
-| 斜線指令選單 | `GrimoSlashCommandListView` | 自建，透過 `TerminalUI.setModal()` 顯示 |
-| 分隔線 | `BoxView.setShowBorder(true)` | Spring Shell 內建 |
-| 整體佈局 | `GridView` | Spring Shell 內建（3 row：flex + 1 + 1） |
-| TUI 引擎 | `TerminalUI` | Spring Shell 內建 |
+| 佈局區域 | 實作元件 | 底層技術 |
+|----------|----------|----------|
+| Content 區 | `GrimoContentView` | 純 Java + `AttributedString`，render() 回傳行列表 |
+| Input 區 | `GrimoInputView` | 純 Java + `AttributedString`，斜線指令以品牌色渲染 |
+| Status 區 | `GrimoStatusView` | 純 Java + `AttributedString` |
+| 斜線指令選單 | `GrimoSlashMenuView` | 純 Java + `AttributedString`，overlay 到 content 底部 |
+| 分隔線 | `GrimoInputView.render()` | `─` 字元 + gray 色（ANSI 245） |
+| 畫面組合 | `GrimoScreen` | JLine `Display`（diff-based 渲染，不閃爍） |
+| 事件迴圈 | `GrimoEventLoop` | JLine `BindingReader` + `KeyMap`（雙執行緒 Tmux 模式） |
+| 滑鼠滾輪 | `GrimoEventLoop` | JLine `MouseEvent.Button.WheelUp/WheelDown` |

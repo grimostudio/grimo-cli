@@ -250,10 +250,15 @@ public class GrimoEventLoop {
         keyMap.bind(OP_CTRL_U, "\025");   // Ctrl+U = 0x15
         keyMap.bind(OP_CTRL_D, "\004");   // Ctrl+D = 0x04
 
-        // Printable characters (32-126)
+        // Printable ASCII characters (32-126)
         for (char i = 32; i < 127; i++) {
             keyMap.bind(OP_CHAR, Character.toString(i));
         }
+
+        // Unicode 字元（中文、日文等）：KeyMap 範圍外的字元用 setUnicode 處理
+        keyMap.setUnicode(OP_CHAR);
+        // 無匹配時也當作字元輸入（防止未綁定的序列被丟棄）
+        keyMap.setNomatch(OP_CHAR);
 
         return keyMap;
     }

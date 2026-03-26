@@ -16,6 +16,14 @@ java {
 
 repositories {
 	mavenCentral()
+	maven {
+		url = uri("https://central.sonatype.com/repository/maven-snapshots/")
+		mavenContent { snapshotsOnly() }
+	}
+	maven {
+		url = uri("https://repo.spring.io/snapshot")
+		mavenContent { snapshotsOnly() }
+	}
 }
 
 extra["springAiVersion"] = "2.0.0-M3"
@@ -39,6 +47,13 @@ dependencies {
     implementation("org.springframework.ai:spring-ai-anthropic")
     implementation("org.springframework.ai:spring-ai-openai")
     implementation("org.springframework.ai:spring-ai-ollama")
+
+    // Spring AI Community — agent-client libraries (Library mode, NOT starter)
+    implementation("org.springaicommunity.agents:spring-ai-agent-model:0.10.0-SNAPSHOT")
+    implementation("org.springaicommunity.agents:spring-ai-agent-client:0.10.0-SNAPSHOT")
+    implementation("org.springaicommunity.agents:spring-ai-claude-agent:0.10.0-SNAPSHOT")
+    implementation("org.springaicommunity.agents:spring-ai-gemini:0.10.0-SNAPSHOT")
+    implementation("org.springaicommunity.agents:spring-ai-codex-agent:0.10.0-SNAPSHOT")
 
     // MCP Java SDK — NOT Spring AI MCP Starter (runtime dynamic management)
     implementation("io.modelcontextprotocol.sdk:mcp:1.1.0")

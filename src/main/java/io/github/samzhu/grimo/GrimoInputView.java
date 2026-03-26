@@ -129,6 +129,32 @@ public class GrimoInputView {
     }
 
     /**
+     * 將輸入文字加入 AttributedStringBuilder，斜線指令 token 以品牌色渲染。
+     *
+     * 設計說明：
+     * - 偵測 /xxx token（行首或空格後的 /word）
+     * - 斜線指令名以品牌標誌色（#5F87AF）顯示，其餘文字用預設色
+     * - 仿 Claude Code input 區的斜線指令顏色標記
+     */
+    private void appendStyledInput(AttributedStringBuilder sb) {
+        String text = buffer.toString();
+        int i = 0;
+        while (i < text.length()) {
+            // 檢查是否為斜線指令 token 起始位置（行首或空格後的 /）
+            if (text.charAt(i) == '/' && (i == 0 || text.charAt(i - 1) == ' ')) {
+                // 找到 token 結尾（空格或字串結尾）
+                int end = text.indexOf(' ', i);
+                if (end == -1) end = text.length();
+                sb.styled(BRAND_STYLE, text.substring(i, end));
+                i = end;
+            } else {
+                sb.append(text.charAt(i));
+                i++;
+            }
+        }
+    }
+
+    /**
      * 取得游標在 input 行中的欄位置（含 prompt 寬度）。
      */
     public int getCursorCol() {
@@ -148,10 +174,10 @@ public class GrimoInputView {
         // 上方分隔線
         result.add(new AttributedString(separator, SEPARATOR_STYLE));
 
-        // ❯ 前綴 + 輸入文字
+        // ❯ 前綴 + 輸入文字（斜線指令以品牌色渲染，仿 Claude Code）
         var sb = new AttributedStringBuilder();
         sb.styled(BRAND_STYLE, PROMPT);
-        sb.append(buffer.toString());
+        appendStyledInput(sb);
         var inputLine = sb.toAttributedString();
         if (inputLine.columnLength() > cols) {
             inputLine = inputLine.columnSubSequence(0, cols);
