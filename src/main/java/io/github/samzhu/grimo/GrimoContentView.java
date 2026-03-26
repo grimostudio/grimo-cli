@@ -3,10 +3,6 @@ package io.github.samzhu.grimo;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
-import org.springframework.shell.jline.tui.component.view.control.BoxView;
-import org.springframework.shell.jline.tui.component.view.screen.Screen;
-import org.springframework.shell.jline.tui.geom.Position;
-import org.springframework.shell.jline.tui.geom.Rectangle;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,15 +11,13 @@ import java.util.List;
  * Content 區：顯示 banner + 對話紀錄，支援底部對齊渲染和滾動。
  *
  * 設計說明：
- * - 維護 List<AttributedString> lines（所有內容行）
+ * - 純資料模型 + render() 產出 List<AttributedString>，不接觸 Terminal
  * - 底部對齊渲染：內容少於 view 高度時，上方留空，內容靠底部顯示
  * - 內容超過 view 高度時，根據 scrollOffset 決定顯示範圍
  * - autoFollow 模式下新內容自動滾到底部
- * - 使用 setDrawFunction() 注入自訂繪製邏輯（BoxView.draw() 是 final）
- *
- * @see <a href="https://docs.spring.io/spring-shell/reference/tui/views/box.html">BoxView :: Spring Shell</a>
+ * - 渲染統一由 GrimoScreen → Display.update() 處理（diff-based，不閃爍）
  */
-public class GrimoContentView extends BoxView {
+public class GrimoContentView {
 
     /** 品牌標誌色 steel blue（ANSI 256 色碼 67, #5F87AF） */
     private static final int BRAND_COLOR = 67;
@@ -35,17 +29,12 @@ public class GrimoContentView extends BoxView {
     private int scrollOffset = 0;
     private boolean autoFollow = true;
 
-    public GrimoContentView() {
-        setDrawFunction(this::drawContent);
-    }
-
     /**
      * 初始化 banner 文字（純 ANSI 字串，逐行加入 lines）。
      */
     public void setBannerText(String bannerText) {
         for (String line : bannerText.split("\n")) {
-            // fromAnsi() 正確解析 ANSI escape codes 為 style 資訊，
-            // 而非 new AttributedString() 把 escape codes 當可見字元（導致寬度爆炸）
+            // fromAnsi() 正確解析 ANSI escape codes 為 style 資訊
             lines.add(AttributedString.fromAnsi(line));
         }
     }
@@ -128,7 +117,6 @@ public class GrimoContentView extends BoxView {
     }
 
     private int maxOffset() {
-        // maxOffset = lines.size() (全部看完) - 但受限於 draw 時的 viewHeight
         return Math.max(0, lines.size());
     }
 
@@ -139,34 +127,33 @@ public class GrimoContentView extends BoxView {
     }
 
     /**
-     * 自訂繪製邏輯：底部對齊渲染。
+     * 渲染 content 區域為 List<AttributedString>。
      *
-     * 設計說明：
-     * - 當內容少於 view 高度時：上方留空，內容靠底部（如啟動時 banner 在底部）
-     * - 當內容超過 view 高度時：根據 scrollOffset 顯示對應範圍
-     * - autoFollow 模式下總是顯示最新內容
+     * @param cols 終端機寬度（用於截斷超寬行）
+     * @param viewHeight content 區可用行數
+     * @return 固定 viewHeight 行的列表
      */
-    private Rectangle drawContent(Screen screen, Rectangle rect) {
-        int viewHeight = rect.height();
-        int viewWidth = rect.width();
+    public List<AttributedString> render(int cols, int viewHeight) {
+        List<AttributedString> result = new ArrayList<>(viewHeight);
         int totalLines = lines.size();
 
-        if (totalLines == 0 || viewHeight == 0) {
-            return rect;
+        if (totalLines == 0 || viewHeight <= 0) {
+            for (int i = 0; i < viewHeight; i++) {
+                result.add(AttributedString.EMPTY);
+            }
+            return result;
         }
 
-        var writer = screen.writerBuilder().build();
-
         if (totalLines <= viewHeight) {
-            // 內容少於 view 高度：底部對齊
-            int startRow = viewHeight - totalLines;
-            for (int i = 0; i < totalLines; i++) {
-                writer.text(lines.get(i), rect.x(), rect.y() + startRow + i);
+            // 底部對齊：上方填空白
+            for (int i = 0; i < viewHeight - totalLines; i++) {
+                result.add(AttributedString.EMPTY);
+            }
+            for (var line : lines) {
+                result.add(truncate(line, cols));
             }
         } else {
-            // 內容超過 view 高度：根據 scrollOffset 決定顯示範圍
-            // scrollOffset 表示「最底部對齊時的偏移」，但這裡用更簡單的方式：
-            // 在 autoFollow 時，顯示最後 viewHeight 行
+            // 根據 scrollOffset 取可見範圍
             int endIndex;
             if (autoFollow) {
                 endIndex = totalLines;
@@ -178,11 +165,22 @@ public class GrimoContentView extends BoxView {
             }
             int startIndex = Math.max(0, endIndex - viewHeight);
 
-            for (int i = 0; i < viewHeight && (startIndex + i) < totalLines; i++) {
-                writer.text(lines.get(startIndex + i), rect.x(), rect.y() + i);
+            for (int i = startIndex; i < startIndex + viewHeight && i < totalLines; i++) {
+                result.add(truncate(lines.get(i), cols));
             }
         }
 
-        return rect;
+        // 確保行數正確
+        while (result.size() < viewHeight) {
+            result.add(AttributedString.EMPTY);
+        }
+        return result;
+    }
+
+    private AttributedString truncate(AttributedString line, int maxWidth) {
+        if (line.columnLength() <= maxWidth) {
+            return line;
+        }
+        return line.columnSubSequence(0, maxWidth);
     }
 }

@@ -9,6 +9,7 @@ import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
+import org.jline.terminal.MouseEvent;
 import org.jline.terminal.Terminal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,12 +21,6 @@ import org.springframework.shell.core.command.CommandContext;
 import org.springframework.shell.core.command.CommandExecutor;
 import org.springframework.shell.core.command.CommandParser;
 import org.springframework.shell.core.command.CommandRegistry;
-import org.springframework.shell.jline.tui.component.view.TerminalUI;
-import org.springframework.shell.jline.tui.component.view.control.DialogView;
-import org.springframework.shell.jline.tui.component.view.control.GridView;
-import org.springframework.shell.jline.tui.component.view.control.StatusBarView;
-import org.springframework.shell.jline.tui.component.view.control.StatusBarView.StatusItem;
-import org.springframework.shell.jline.tui.component.view.event.KeyEvent.Key;
 import org.springframework.stereotype.Component;
 
 import java.io.PrintWriter;
@@ -35,18 +30,17 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 自建 TUI Runner：使用 Spring Shell TerminalUI 框架建構完整 TUI 介面。
+ * 自建 TUI Runner：使用 JLine Display + BindingReader 建構完整 TUI 介面。
  *
  * 設計說明：
- * - 取代舊版 JLine LineReader + 手動 ANSI scroll region 的做法
- * - 使用 GridView 三區佈局：content(flex) + input(1行) + status(1行)
- * - GrimoContentView 負責 banner 顯示和對話紀錄（底部對齊 + 滾動）
- * - GrimoInputView 自建輸入元件（InputView 缺少 setText()）
- * - StatusBarView 顯示 agent/model/workspace/計數資訊
- * - TerminalUI.run() 阻塞式事件迴圈，取代 shellRunner.run()
+ * - 取代 Spring Shell TerminalUI（其 mouse event parsing 有 KeyMap binding bug）
+ * - 使用 JLine Display 做 diff-based 渲染（不閃爍）
+ * - 使用 JLine BindingReader + KeyMap 正確處理 SGR mouse events（支援滾輪捲動）
+ * - 雙執行緒模式（參考 JLine Tmux.java）：input thread + render thread
+ * - 保留 Spring Shell CommandParser/CommandExecutor/CommandRegistry 做命令處理
  *
- * @see <a href="https://docs.spring.io/spring-shell/reference/tui/intro/terminalui.html">TerminalUI :: Spring Shell</a>
- * @see <a href="https://docs.spring.io/spring-shell/reference/tui/views/grid.html">GridView :: Spring Shell</a>
+ * @see <a href="https://jline.org/docs/advanced/mouse-support/">JLine Mouse Support</a>
+ * @see <a href="https://github.com/jline/jline3/blob/master/terminal/src/main/java/org/jline/utils/Display.java">JLine Display</a>
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -54,10 +48,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(GrimoTuiRunner.class);
 
-    /** 輸入歷史紀錄（自建，因不使用 JLine LineReader） */
+    /** 輸入歷史紀錄 */
     private final List<String> history = new ArrayList<>();
     private int historyIndex = 0;
-    /** 歷史瀏覽前暫存目前輸入，離開歷史模式時恢復 */
     private String savedInput = "";
 
     private final Terminal terminal;
@@ -73,6 +66,14 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final CommandParser commandParser;
     private final CommandExecutor commandExecutor;
     private final CommandRegistry commandRegistry;
+
+    // TUI 元件（run 時初始化）
+    private GrimoContentView contentView;
+    private GrimoInputView inputView;
+    private GrimoSlashMenuView slashMenuView;
+    private GrimoScreen screen;
+    private GrimoEventLoop eventLoop;
+    private SessionWriter sessionWriter;
 
     public GrimoTuiRunner(Terminal terminal,
                            WorkspaceManager workspaceManager,
@@ -128,222 +129,167 @@ public class GrimoTuiRunner implements ApplicationRunner {
         int mcpCount = mcpClientRegistry.listAll().size();
         int taskCount = taskSchedulerService.getScheduledTaskIds().size();
 
-        // === Phase 4: 建構 TerminalUI ===
-        TerminalUI ui = new TerminalUI(terminal);
-
-        // Content 區：banner + 對話紀錄
-        var contentView = new GrimoContentView();
+        // === Phase 4: 建構 TUI 元件 ===
+        contentView = new GrimoContentView();
         String bannerText = bannerRenderer.render(
                 version, agentId, model, workspacePath,
                 (int) agentCount, skillCount, mcpCount, taskCount);
         contentView.setBannerText(bannerText);
 
-        // Input 區：自建輸入元件
-        var inputView = new GrimoInputView();
+        inputView = new GrimoInputView();
 
-        // Status 區
         String statusText = agentId + " · " + model + " │ " + workspacePath
                 + " │ " + (int) agentCount + " agent · " + skillCount + " skill · "
                 + mcpCount + " mcp · " + taskCount + " task";
-        var statusBar = new StatusBarView(List.of(StatusItem.of(statusText)));
+        var statusView = new GrimoStatusView(statusText);
 
-        // 三區 GridView：content(flex) + input(3行: ─+❯+─) + status(1行)
-        var root = new GridView();
-        root.setColumnSize(0);     // 1 欄 flex（佔滿終端寬度）
-        root.setRowSize(0, 3, 1);  // row 0=flex, row 1=3行(separator+input+separator), row 2=1行
-        root.addItem(contentView, 0, 0, 1, 1, 0, 0);
-        root.addItem(inputView, 1, 0, 1, 1, 0, 0);
-        root.addItem(statusBar, 2, 0, 1, 1, 0, 0);
-
-        // 斜線指令選單：從 CommandRegistry + SkillRegistry 建構候選項
         var menuItems = buildMenuItems();
-        var slashCommandListView = new GrimoSlashCommandListView(menuItems);
-        var slashCommandDialog = new DialogView(slashCommandListView);
+        slashMenuView = new GrimoSlashMenuView(menuItems);
 
-        ui.configure(contentView);
-        ui.configure(inputView);
-        ui.configure(statusBar);
-        ui.configure(slashCommandListView);
-        ui.setRoot(root, true);  // fullscreen 模式
+        screen = new GrimoScreen(terminal, contentView, inputView, statusView, slashMenuView);
 
         // === Session 對話存檔 ===
         String cwd = System.getProperty("user.dir");
         String encodedCwd = cwd.replaceAll("[^a-zA-Z0-9]", "-");
         var sessionsDir = workspaceManager.root().resolve("projects").resolve(encodedCwd).resolve("sessions");
-        var sessionWriter = new SessionWriter(sessionsDir);
+        sessionWriter = new SessionWriter(sessionsDir);
         sessionWriter.writeSystemMessage(cwd, version, "Grimo TUI session");
 
-        // === Phase 5: 註冊鍵盤事件處理（含斜線選單） ===
-        registerKeyHandlers(ui, inputView, contentView, slashCommandListView, slashCommandDialog, sessionWriter);
-
-        log.debug("Grimo TUI setup complete, starting TerminalUI event loop.");
-
-        // === Phase 6: 啟動 TUI 事件迴圈（阻塞） ===
-        // 已知問題：Spring Shell TerminalUI 的 mouse event parsing 未完成。
-        // TerminalUI.run() 內部啟用 mouse tracking，但 EventLoop 從未呼叫
-        // reader.readMouseEvent() 解析 SGR sequences，導致 raw bytes 漏到 keyEvents。
-        // 參考：https://github.com/spring-projects/spring-shell/discussions/760
-        //       https://github.com/spring-projects/spring-shell/issues/1045
-        // 解法：在 run() 啟動後立即關閉所有 mouse tracking modes。
-        Thread.ofVirtual().name("grimo-mouse-disable").start(() -> {
-            try { Thread.sleep(50); } catch (InterruptedException e) { return; }
-            terminal.writer().write("\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l");
-            terminal.writer().flush();
-        });
-        ui.run();
+        // === Phase 5: 啟動 TUI 事件迴圈（阻塞） ===
+        log.debug("Grimo TUI setup complete, starting raw JLine event loop.");
+        eventLoop = new GrimoEventLoop(terminal, screen, new TuiKeyHandler());
+        eventLoop.run();
     }
 
     /**
-     * 註冊鍵盤事件處理器。
+     * 鍵盤/滑鼠事件處理器：實作 GrimoEventLoop.KeyHandler。
      *
      * 設計說明：
-     * - 斜線指令選單模式（modal 可見）：↑↓ 選擇、Tab/Enter 填入、Esc 關閉
-     * - 一般模式：字元輸入、Enter 送出、Ctrl+C 清空、Ctrl+U/D 翻頁
-     * - 輸入「行首/」或「空格+/」時自動開啟斜線指令選單
-     * - 退出：輸入 /exit
+     * - 分兩個模式：斜線選單模式（slashMenuVisible）和一般模式
+     * - 滑鼠滾輪事件直接轉為 content 捲動
+     * - 所有狀態更新後由 eventLoop.setDirty() 觸發重繪
      */
-    private void registerKeyHandlers(TerminalUI ui, GrimoInputView inputView,
-                                      GrimoContentView contentView,
-                                      GrimoSlashCommandListView slashCommandListView,
-                                      DialogView slashCommandDialog,
-                                      SessionWriter sessionWriter) {
-        var eventLoop = ui.getEventLoop();
+    private class TuiKeyHandler implements GrimoEventLoop.KeyHandler {
 
-        eventLoop.keyEvents().subscribe(event -> {
-            if (ui.getModal() != null) {
-                // === 斜線指令選單模式（modal 可見）===
-                handleSlashMenuKey(event, ui, inputView, slashCommandListView, slashCommandDialog);
+        @Override
+        public void handleKey(String operation, String lastBinding) {
+            if (screen.isSlashMenuVisible()) {
+                handleSlashMenuKey(operation, lastBinding);
             } else {
-                // === 一般模式 ===
-                handleNormalKey(event, ui, inputView, contentView, slashCommandListView, slashCommandDialog, sessionWriter);
+                handleNormalKey(operation, lastBinding);
             }
-            ui.redraw();
-        });
+        }
 
+        @Override
+        public void handleMouse(MouseEvent event) {
+            if (event.getType() == MouseEvent.Type.Wheel) {
+                if (event.getButton() == MouseEvent.Button.WheelUp) {
+                    contentView.scrollUp(3);
+                } else if (event.getButton() == MouseEvent.Button.WheelDown) {
+                    contentView.scrollDown(3);
+                }
+            }
+        }
     }
 
     /**
      * 斜線指令選單模式的鍵盤處理。
      */
-    private void handleSlashMenuKey(org.springframework.shell.jline.tui.component.view.event.KeyEvent event,
-                                     TerminalUI ui, GrimoInputView inputView,
-                                     GrimoSlashCommandListView slashCommandListView,
-                                     DialogView slashCommandDialog) {
-        if (event.isKey(Key.CursorUp)) {
-            slashCommandListView.moveUp();
-        } else if (event.isKey(Key.CursorDown)) {
-            slashCommandListView.moveDown();
-        } else if (event.isKey(Key.Tab) || event.isKey(Key.Enter)) {
-            // 填入選中斜線指令到 input
-            String selected = slashCommandListView.getSelected();
-            if (selected != null) {
-                inputView.insertSlashCommand(selected);
+    private void handleSlashMenuKey(String operation, String lastBinding) {
+        switch (operation) {
+            case GrimoEventLoop.OP_UP -> slashMenuView.moveUp();
+            case GrimoEventLoop.OP_DOWN -> slashMenuView.moveDown();
+            case GrimoEventLoop.OP_TAB, GrimoEventLoop.OP_ENTER -> {
+                String selected = slashMenuView.getSelected();
+                if (selected != null) {
+                    inputView.insertSlashCommand(selected);
+                }
+                screen.setSlashMenuVisible(false);
             }
-            ui.setModal(null);
-        } else if (event.isKey(Key.Backspace)) {
-            inputView.deleteChar();
-            String slashToken = inputView.getCurrentSlashToken();
-            if (slashToken == null) {
-                ui.setModal(null);
-            } else {
-                slashCommandListView.filter(slashToken.substring(1));
-                if (!slashCommandListView.hasItems()) {
-                    ui.setModal(null);
+            case GrimoEventLoop.OP_BACKSPACE -> {
+                inputView.deleteChar();
+                String slashToken = inputView.getCurrentSlashToken();
+                if (slashToken == null || !slashMenuView.hasItems()) {
+                    screen.setSlashMenuVisible(false);
+                } else {
+                    slashMenuView.filter(slashToken.substring(1));
+                    if (!slashMenuView.hasItems()) {
+                        screen.setSlashMenuVisible(false);
+                    }
                 }
             }
-        } else if (event.hasCtrl() && event.getPlainKey() == Key.c) {
-            // Ctrl+C 在選單模式也關閉選單
-            ui.setModal(null);
-        } else {
-            // 普通字元：插入字元並更新過濾
-            insertCharFromEvent(event, inputView);
-            String slashToken = inputView.getCurrentSlashToken();
-            if (slashToken != null) {
-                slashCommandListView.filter(slashToken.substring(1));
-                if (!slashCommandListView.hasItems()) {
-                    ui.setModal(null);
+            case GrimoEventLoop.OP_CTRL_C -> screen.setSlashMenuVisible(false);
+            case GrimoEventLoop.OP_CHAR -> {
+                insertCharFromBinding(lastBinding);
+                String slashToken = inputView.getCurrentSlashToken();
+                if (slashToken != null) {
+                    slashMenuView.filter(slashToken.substring(1));
+                    if (!slashMenuView.hasItems()) {
+                        screen.setSlashMenuVisible(false);
+                    }
+                } else {
+                    screen.setSlashMenuVisible(false);
                 }
-            } else {
-                ui.setModal(null);
             }
         }
     }
 
     /**
-     * 一般模式的鍵盤處理（含 ↑↓ 歷史瀏覽）。
-     *
-     * 設計說明：
-     * - ↑ 鍵：瀏覽前一筆歷史（首次按下時暫存目前輸入）
-     * - ↓ 鍵：瀏覽下一筆歷史（到最底恢復暫存的輸入）
-     * - Enter 時加入 history
+     * 一般模式的鍵盤處理。
      */
-    private void handleNormalKey(org.springframework.shell.jline.tui.component.view.event.KeyEvent event,
-                                  TerminalUI ui, GrimoInputView inputView,
-                                  GrimoContentView contentView,
-                                  GrimoSlashCommandListView slashCommandListView,
-                                  DialogView slashCommandDialog,
-                                  SessionWriter sessionWriter) {
-        if (event.isKey(Key.Enter)) {
-            String text = inputView.getText().trim();
-            if (!text.isEmpty()) {
-                history.add(text);
+    private void handleNormalKey(String operation, String lastBinding) {
+        switch (operation) {
+            case GrimoEventLoop.OP_ENTER -> {
+                String text = inputView.getText().trim();
+                if (!text.isEmpty()) {
+                    history.add(text);
+                    historyIndex = history.size();
+                    savedInput = "";
+                    contentView.appendUserInput(text);
+                    inputView.clear();
+                    sessionWriter.writeUserMessage(text);
+                    processInput(text);
+                }
+            }
+            case GrimoEventLoop.OP_UP, GrimoEventLoop.OP_DOWN -> {
+                // ↑/↓ 在一般模式暫不處理（未來可加歷史瀏覽）
+            }
+            case GrimoEventLoop.OP_CTRL_U -> {
+                int halfPage = Math.max(1, (terminal.getHeight() - 4) / 2);
+                contentView.scrollUp(halfPage);
+            }
+            case GrimoEventLoop.OP_CTRL_D -> {
+                int halfPage = Math.max(1, (terminal.getHeight() - 4) / 2);
+                contentView.scrollDown(halfPage);
+            }
+            case GrimoEventLoop.OP_CTRL_C -> {
+                inputView.clear();
                 historyIndex = history.size();
                 savedInput = "";
-                contentView.appendUserInput(text);
-                inputView.clear();
-                sessionWriter.writeUserMessage(text);
-                processInput(text, contentView, ui, sessionWriter);
             }
-        } else if (event.isKey(Key.CursorUp) || event.isKey(Key.CursorDown)) {
-            // ↑/↓ 在一般模式不處理（僅在斜線指令選單模式用於選擇指令）
-        } else if (event.hasCtrl() && event.getPlainKey() == Key.u) {
-            // Ctrl+U：Content 區上翻半頁
-            int halfPage = Math.max(1, (terminal.getHeight() - 4) / 2);
-            contentView.scrollUp(halfPage);
-        } else if (event.hasCtrl() && event.getPlainKey() == Key.d) {
-            // Ctrl+D：Content 區下翻半頁（覆蓋原本的「退出」功能，退出改用 /exit）
-            int halfPage = Math.max(1, (terminal.getHeight() - 4) / 2);
-            contentView.scrollDown(halfPage);
-        } else if (event.hasCtrl() && event.getPlainKey() == Key.c) {
-            inputView.clear();
-            historyIndex = history.size();
-            savedInput = "";
-        } else if (event.isKey(Key.Backspace)) {
-            inputView.deleteChar();
-        } else if (event.isKey(Key.Delete)) {
-            inputView.deleteForward();
-        } else if (event.isKey(Key.CursorLeft)) {
-            inputView.moveCursorLeft();
-        } else if (event.isKey(Key.CursorRight)) {
-            inputView.moveCursorRight();
-        } else {
-            // 普通字元輸入
-            insertCharFromEvent(event, inputView);
-            // 偵測是否應開啟斜線指令選單
-            if (inputView.shouldOpenSlashMenu()) {
-                slashCommandListView.filterAll();
-                int h = terminal.getHeight();
-                int w = terminal.getWidth();
-                int menuHeight = slashCommandListView.getVisibleCount();
-                slashCommandDialog.setRect(0, h - 4 - menuHeight, w, menuHeight);
-                ui.setModal(slashCommandDialog);
+            case GrimoEventLoop.OP_BACKSPACE -> inputView.deleteChar();
+            case GrimoEventLoop.OP_DELETE -> inputView.deleteForward();
+            case GrimoEventLoop.OP_LEFT -> inputView.moveCursorLeft();
+            case GrimoEventLoop.OP_RIGHT -> inputView.moveCursorRight();
+            case GrimoEventLoop.OP_CHAR -> {
+                insertCharFromBinding(lastBinding);
+                if (inputView.shouldOpenSlashMenu()) {
+                    slashMenuView.filterAll();
+                    screen.setSlashMenuVisible(true);
+                }
             }
         }
     }
 
     /**
-     * 從 KeyEvent 插入字元到 inputView。
+     * 從 BindingReader 的 lastBinding 插入字元到 inputView。
      */
-    private void insertCharFromEvent(org.springframework.shell.jline.tui.component.view.event.KeyEvent event,
-                                      GrimoInputView inputView) {
-        if (event.isKey() && event.data() != null && !event.data().isEmpty()) {
-            for (char c : event.data().toCharArray()) {
-                inputView.insertChar(c);
-            }
-        } else {
-            int key = event.key();
-            if (key >= 32 && key < 127) {
-                inputView.insertChar((char) key);
+    private void insertCharFromBinding(String lastBinding) {
+        if (lastBinding != null && !lastBinding.isEmpty()) {
+            for (char c : lastBinding.toCharArray()) {
+                if (c >= 32 && c < 127) {
+                    inputView.insertChar(c);
+                }
             }
         }
     }
@@ -351,18 +297,16 @@ public class GrimoTuiRunner implements ApplicationRunner {
     /**
      * 從 CommandRegistry + SkillRegistry 建構斜線指令選單項目。
      */
-    private List<GrimoSlashCommandListView.MenuItem> buildMenuItems() {
-        var items = new java.util.ArrayList<GrimoSlashCommandListView.MenuItem>();
+    private List<GrimoSlashMenuView.MenuItem> buildMenuItems() {
+        var items = new java.util.ArrayList<GrimoSlashMenuView.MenuItem>();
 
-        // 從 CommandRegistry 取得所有命令（排除 chat）
         commandRegistry.getCommandsByPrefix("").stream()
                 .filter(cmd -> !"chat".equals(cmd.getName()))
-                .forEach(cmd -> items.add(new GrimoSlashCommandListView.MenuItem(
+                .forEach(cmd -> items.add(new GrimoSlashMenuView.MenuItem(
                         cmd.getName(), cmd.getDescription())));
 
-        // 從 SkillRegistry 取得所有 Skills
         skillRegistry.listAll().forEach(skill ->
-                items.add(new GrimoSlashCommandListView.MenuItem(
+                items.add(new GrimoSlashMenuView.MenuItem(
                         skill.name(), skill.description())));
 
         return items;
@@ -370,17 +314,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
     /**
      * 處理使用者輸入：判斷是斜線指令還是對話。
-     *
-     * 設計說明：
-     * - /exit 直接退出
-     * - 以 / 開頭 → CommandParser.parse() → CommandContext → CommandExecutor.execute()
-     * - 命令輸出透過 StringWriter 捕獲，轉發到 contentView
-     * - 其他文字 → AI 對話（Phase 2+ 完整實作）
      */
-    private void processInput(String text, GrimoContentView contentView, TerminalUI ui,
-                               SessionWriter sessionWriter) {
+    private void processInput(String text) {
         if (text.equals("/exit")) {
-            System.exit(0);
+            eventLoop.stop();
             return;
         }
 
@@ -408,7 +345,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
             contentView.appendAiReply(reply);
             sessionWriter.writeAssistantMessage(reply);
         }
-        ui.redraw();
     }
 
     // === 載入步驟方法（靜默執行，無動畫）===

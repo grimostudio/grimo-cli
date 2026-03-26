@@ -3,36 +3,28 @@ package io.github.samzhu.grimo;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
-import org.springframework.shell.jline.tui.component.view.control.BoxView;
-import org.springframework.shell.jline.tui.component.view.screen.Screen;
-import org.springframework.shell.jline.tui.geom.Position;
-import org.springframework.shell.jline.tui.geom.Rectangle;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * 自建輸入元件：取代 Spring Shell 的 InputView（其缺少 setText()）。
+ * 自建輸入元件：純資料模型 + render() 產出 List<AttributedString>。
  *
  * 設計說明：
- * - 使用 BoxView + setDrawFunction() 注入自訂繪製邏輯
  * - 支援 getText()/setText()/insertChar()/deleteChar()/游標移動
- * - 顯示 ❯ 前綴 + 使用者輸入文字 + 游標
- * - 未來擴展：多行支援（Shift+Enter）、斜線指令標誌色渲染
- *
- * @see <a href="https://docs.spring.io/spring-shell/reference/tui/views/input.html">InputView :: Spring Shell</a>
+ * - 顯示 ❯ 前綴 + 使用者輸入文字
+ * - 上下各有分隔線（共 3 行高）
+ * - 渲染統一由 GrimoScreen → Display.update() 處理
  */
-public class GrimoInputView extends BoxView {
+public class GrimoInputView {
 
     /** 品牌標誌色 steel blue */
     private static final AttributedStyle BRAND_STYLE = AttributedStyle.DEFAULT.foreground(67);
+    private static final AttributedStyle SEPARATOR_STYLE = AttributedStyle.DEFAULT.foreground(245);
     private static final String PROMPT = "❯ ";
 
     private final StringBuilder buffer = new StringBuilder();
     private int cursorPos = 0;
-
-    public GrimoInputView() {
-        // 不用 setShowBorder(true)（會畫完整方框含左右邊框）
-        // 上方分隔線在 drawInput 中手動繪製
-        setDrawFunction(this::drawInput);
-    }
 
     // === 文字操作 ===
 
@@ -116,7 +108,6 @@ public class GrimoInputView extends BoxView {
     public String getCurrentSlashToken() {
         if (buffer.isEmpty()) return null;
         String text = buffer.substring(0, cursorPos);
-        // 從游標位置往回找最近的空格或行首
         int start = text.lastIndexOf(' ');
         String token = (start == -1) ? text : text.substring(start + 1);
         if (token.startsWith("/")) {
@@ -131,41 +122,45 @@ public class GrimoInputView extends BoxView {
     public void insertSlashCommand(String commandName) {
         String token = getCurrentSlashToken();
         if (token != null) {
-            // 找到 token 起始位置
             int tokenStart = buffer.substring(0, cursorPos).lastIndexOf(token);
             buffer.replace(tokenStart, cursorPos, "/" + commandName + " ");
-            cursorPos = tokenStart + commandName.length() + 2; // +2 for "/" and " "
+            cursorPos = tokenStart + commandName.length() + 2;
         }
     }
 
     /**
-     * 自訂繪製：顯示 ❯ 前綴 + 文字 + 游標位置。
+     * 取得游標在 input 行中的欄位置（含 prompt 寬度）。
      */
-    private Rectangle drawInput(Screen screen, Rectangle rect) {
-        var separatorWriter = screen.writerBuilder().color(245).build();  // gray
-        var brandWriter = screen.writerBuilder().color(67).build();       // brand color
-        var defaultWriter = screen.writerBuilder().build();
+    public int getCursorCol() {
+        return PROMPT.length() + cursorPos;
+    }
 
-        String separator = "─".repeat(rect.width());
+    /**
+     * 渲染 input 區域為 List<AttributedString>（3 行：separator + input + separator）。
+     *
+     * @param cols 終端機寬度
+     * @return 固定 3 行的列表
+     */
+    public List<AttributedString> render(int cols) {
+        List<AttributedString> result = new ArrayList<>(3);
+        String separator = "─".repeat(cols);
 
         // 上方分隔線
-        separatorWriter.text(separator, rect.x(), rect.y());
+        result.add(new AttributedString(separator, SEPARATOR_STYLE));
 
-        // ❯ 前綴 + 輸入文字（第二行）
-        int inputRow = rect.y() + 1;
-        brandWriter.text(PROMPT, rect.x(), inputRow);
-        String text = buffer.toString();
-        if (!text.isEmpty()) {
-            defaultWriter.text(text, rect.x() + PROMPT.length(), inputRow);
+        // ❯ 前綴 + 輸入文字
+        var sb = new AttributedStringBuilder();
+        sb.styled(BRAND_STYLE, PROMPT);
+        sb.append(buffer.toString());
+        var inputLine = sb.toAttributedString();
+        if (inputLine.columnLength() > cols) {
+            inputLine = inputLine.columnSubSequence(0, cols);
         }
+        result.add(inputLine);
 
-        // 下方分隔線（第三行）
-        separatorWriter.text(separator, rect.x(), rect.y() + 2);
+        // 下方分隔線
+        result.add(new AttributedString(separator, SEPARATOR_STYLE));
 
-        // 游標位置
-        screen.setShowCursor(true);
-        screen.setCursorPosition(new Position(rect.x() + PROMPT.length() + cursorPos, inputRow));
-
-        return rect;
+        return result;
     }
 }

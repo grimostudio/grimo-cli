@@ -1,25 +1,21 @@
 package io.github.samzhu.grimo;
 
-import org.springframework.shell.jline.tui.component.view.control.BoxView;
-import org.springframework.shell.jline.tui.component.view.screen.Screen;
-import org.springframework.shell.jline.tui.geom.Rectangle;
+import org.jline.utils.AttributedString;
+import org.jline.utils.AttributedStyle;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 斜線指令候選列表：modal overlay，最多 5 項、即時過濾、↑↓ 選擇。
+ * 斜線指令候選列表：最多 5 項、即時過濾、↑↓ 選擇。
  *
  * 設計說明：
- * - 基於 BoxView + setDrawFunction()（ListView 的 ItemStyle 不支援純色彩高亮）
+ * - 純資料模型 + render() 產出 List<AttributedString>
  * - 選中項以品牌標誌色（ANSI 256 色碼 67, #5F87AF steel blue）渲染
  * - 未選中項以預設色渲染
- * - 最多顯示 5 項，隨輸入即時過濾
- * - 作為 modal overlay 覆蓋 content 底部，input/status 不動
- *
- * @see <a href="https://docs.spring.io/spring-shell/reference/tui/views/box.html">BoxView :: Spring Shell</a>
+ * - 作為 overlay 渲染到 content 底部（由 GrimoScreen 負責覆蓋）
  */
-public class GrimoSlashCommandListView extends BoxView {
+public class GrimoSlashMenuView {
 
     /** 品牌標誌色 steel blue（ANSI 256 色碼 67） */
     private static final int BRAND_COLOR = 67;
@@ -37,10 +33,9 @@ public class GrimoSlashCommandListView extends BoxView {
      */
     public record MenuItem(String name, String description) {}
 
-    public GrimoSlashCommandListView(List<MenuItem> items) {
+    public GrimoSlashMenuView(List<MenuItem> items) {
         this.allItems = new ArrayList<>(items);
         this.filteredItems = new ArrayList<>(items);
-        setDrawFunction(this::drawList);
     }
 
     /**
@@ -67,18 +62,12 @@ public class GrimoSlashCommandListView extends BoxView {
         selectedIndex = 0;
     }
 
-    /**
-     * 移動選中項：上移。
-     */
     public void moveUp() {
         if (!filteredItems.isEmpty()) {
             selectedIndex = (selectedIndex - 1 + filteredItems.size()) % filteredItems.size();
         }
     }
 
-    /**
-     * 移動選中項：下移。
-     */
     public void moveDown() {
         if (!filteredItems.isEmpty()) {
             selectedIndex = (selectedIndex + 1) % filteredItems.size();
@@ -109,31 +98,28 @@ public class GrimoSlashCommandListView extends BoxView {
     }
 
     /**
-     * 自訂繪製：選中項用標誌色，未選中用預設色。
+     * 渲染斜線指令選單為 List<AttributedString>。
+     *
+     * @param cols 終端機寬度
+     * @return 可見項目數量的行列表
      */
-    private Rectangle drawList(Screen screen, Rectangle rect) {
+    public List<AttributedString> render(int cols) {
+        List<AttributedString> result = new ArrayList<>();
         int visibleCount = getVisibleCount();
-        if (visibleCount == 0) return rect;
-
-        var brandWriter = screen.writerBuilder().color(BRAND_COLOR).build();
-        var defaultWriter = screen.writerBuilder().build();
 
         for (int i = 0; i < visibleCount; i++) {
             var item = filteredItems.get(i);
-            // 格式：  /command-name    Description
-            String line = String.format("  /%-20s %s", item.name(), item.description());
-            // 截斷到 view 寬度
-            if (line.length() > rect.width()) {
-                line = line.substring(0, rect.width());
+            String text = String.format("  /%-20s %s", item.name(), item.description());
+            if (text.length() > cols) {
+                text = text.substring(0, cols);
             }
 
-            if (i == selectedIndex) {
-                brandWriter.text(line, rect.x(), rect.y() + i);
-            } else {
-                defaultWriter.text(line, rect.x(), rect.y() + i);
-            }
+            AttributedStyle style = (i == selectedIndex)
+                    ? AttributedStyle.DEFAULT.foreground(BRAND_COLOR)
+                    : AttributedStyle.DEFAULT;
+            result.add(new AttributedString(text, style));
         }
 
-        return rect;
+        return result;
     }
 }
