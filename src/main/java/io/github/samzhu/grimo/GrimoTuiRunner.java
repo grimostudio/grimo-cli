@@ -1,9 +1,8 @@
 package io.github.samzhu.grimo;
 
-import io.github.samzhu.grimo.agent.detect.AgentDetector;
-import io.github.samzhu.grimo.agent.detect.AgentDetector.DetectionResult;
-import io.github.samzhu.grimo.mcp.client.McpClientManager;
-import io.github.samzhu.grimo.mcp.client.McpClientRegistry;
+import io.github.samzhu.grimo.agent.detect.AgentModelFactory;
+import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
+import io.github.samzhu.grimo.agent.router.AgentRouter;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
@@ -27,7 +26,6 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 自建 TUI Runner：使用 JLine Display + BindingReader 建構完整 TUI 介面。
@@ -56,16 +54,20 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final Terminal terminal;
     private final WorkspaceManager workspaceManager;
     private final GrimoConfig grimoConfig;
-    private final AgentDetector agentDetector;
+    private final AgentModelFactory agentModelFactory;
+    private final AgentModelRegistry agentModelRegistry;
+    private final AgentRouter agentRouter;
     private final SkillLoader skillLoader;
     private final SkillRegistry skillRegistry;
     private final TaskSchedulerService taskSchedulerService;
-    private final McpClientManager mcpClientManager;
-    private final McpClientRegistry mcpClientRegistry;
     private final BannerRenderer bannerRenderer;
     private final CommandParser commandParser;
     private final CommandExecutor commandExecutor;
     private final CommandRegistry commandRegistry;
+
+    /** AI 對話併發控制：確保同時只有一個 agent 執行 */
+    private volatile boolean agentRunning = false;
+    private volatile Thread agentThread = null;
 
     // TUI 元件（run 時初始化）
     private GrimoContentView contentView;
@@ -78,12 +80,12 @@ public class GrimoTuiRunner implements ApplicationRunner {
     public GrimoTuiRunner(Terminal terminal,
                            WorkspaceManager workspaceManager,
                            GrimoConfig grimoConfig,
-                           AgentDetector agentDetector,
+                           AgentModelFactory agentModelFactory,
+                           AgentModelRegistry agentModelRegistry,
+                           AgentRouter agentRouter,
                            SkillLoader skillLoader,
                            SkillRegistry skillRegistry,
                            TaskSchedulerService taskSchedulerService,
-                           McpClientManager mcpClientManager,
-                           McpClientRegistry mcpClientRegistry,
                            BannerRenderer bannerRenderer,
                            CommandParser commandParser,
                            CommandExecutor commandExecutor,
@@ -91,12 +93,12 @@ public class GrimoTuiRunner implements ApplicationRunner {
         this.terminal = terminal;
         this.workspaceManager = workspaceManager;
         this.grimoConfig = grimoConfig;
-        this.agentDetector = agentDetector;
+        this.agentModelFactory = agentModelFactory;
+        this.agentModelRegistry = agentModelRegistry;
+        this.agentRouter = agentRouter;
         this.skillLoader = skillLoader;
         this.skillRegistry = skillRegistry;
         this.taskSchedulerService = taskSchedulerService;
-        this.mcpClientManager = mcpClientManager;
-        this.mcpClientRegistry = mcpClientRegistry;
         this.bannerRenderer = bannerRenderer;
         this.commandParser = commandParser;
         this.commandExecutor = commandExecutor;
@@ -111,22 +113,24 @@ public class GrimoTuiRunner implements ApplicationRunner {
         }
 
         // === Phase 2: 同步載入（靜默，無動畫）===
-        List<DetectionResult> agentResults = detectAgents();
+        var agentResults = agentModelFactory.detectAndRegister(
+                java.nio.file.Path.of(System.getProperty("user.dir")));
         loadSkills();
-        connectMcp();
         restoreTasks();
 
         // === Phase 3: 準備環境資訊 ===
         String version = getClass().getPackage().getImplementationVersion();
         if (version == null) version = "dev";
         String agentId = resolveAgentId(agentResults);
-        String model = grimoConfig.getDefaultModel();
+        String model = grimoConfig.getAgentOption(agentId, "model");
+        if (model == null) model = grimoConfig.getDefaultModel();
         if (model == null) model = "unknown";
         String workspacePath = workspaceManager.root().toString()
                 .replace(System.getProperty("user.home"), "~");
-        long agentCount = agentResults.stream().filter(DetectionResult::available).count();
+        long agentCount = agentResults.stream()
+                .filter(AgentModelFactory.DetectionResult::available).count();
         int skillCount = skillRegistry.listAll().size();
-        int mcpCount = mcpClientRegistry.listAll().size();
+        int mcpCount = grimoConfig.getMcpServers().size();
         int taskCount = taskSchedulerService.getScheduledTaskIds().size();
 
         // === Phase 4: 建構 TUI 元件 ===
@@ -266,9 +270,15 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 contentView.scrollDown(halfPage);
             }
             case GrimoEventLoop.OP_CTRL_C -> {
-                inputView.clear();
-                historyIndex = history.size();
-                savedInput = "";
+                if (agentRunning && agentThread != null) {
+                    agentThread.interrupt();
+                    contentView.appendError("Agent cancelled.");
+                    eventLoop.setDirty();
+                } else {
+                    inputView.clear();
+                    historyIndex = history.size();
+                    savedInput = "";
+                }
             }
             case GrimoEventLoop.OP_BACKSPACE -> inputView.deleteChar();
             case GrimoEventLoop.OP_DELETE -> inputView.deleteForward();
@@ -345,23 +355,48 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 sessionWriter.writeCommandMessage(text, errorMsg);
             }
         } else {
-            // 一般文字：AI 對話（Phase 2+ 實作）
-            String reply = "（對話功能尚在開發中）";
-            contentView.appendAiReply(reply);
-            sessionWriter.writeAssistantMessage(reply);
+            // AI 對話 — 透過 AgentClient 呼叫 CLI agent
+            if (agentRunning) {
+                contentView.appendError("Agent is still running. Wait or press Ctrl+C to cancel.");
+                return;
+            }
+            try {
+                var model = agentRouter.route(null);
+                agentRunning = true;
+                contentView.appendLine(new org.jline.utils.AttributedString("\u23f3 thinking...",
+                        org.jline.utils.AttributedStyle.DEFAULT.foreground(245)));
+                eventLoop.setDirty();
+
+                agentThread = Thread.startVirtualThread(() -> {
+                    try {
+                        var client = org.springaicommunity.agents.client.AgentClient.create(model);
+                        var response = client
+                                .goal(text)
+                                .workingDirectory(java.nio.file.Path.of(System.getProperty("user.dir")))
+                                .run();
+
+                        if (response.isSuccessful()) {
+                            contentView.appendAiReply(response.getResult());
+                        } else {
+                            contentView.appendError(response.getResult());
+                        }
+                        sessionWriter.writeAssistantMessage(response.getResult());
+                    } catch (Exception e) {
+                        String errorMsg = formatAgentError(e);
+                        contentView.appendError(errorMsg);
+                    } finally {
+                        agentRunning = false;
+                        agentThread = null;
+                        eventLoop.setDirty();
+                    }
+                });
+            } catch (IllegalStateException e) {
+                contentView.appendError(e.getMessage());
+            }
         }
     }
 
     // === 載入步驟方法（靜默執行，無動畫）===
-
-    private List<DetectionResult> detectAgents() {
-        try {
-            return agentDetector.detect();
-        } catch (Exception e) {
-            log.warn("Agent detection failed: {}", e.getMessage());
-            return List.of();
-        }
-    }
 
     private void loadSkills() {
         try {
@@ -369,29 +404,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
             skills.forEach(skillRegistry::register);
         } catch (Exception e) {
             log.warn("Skill loading failed: {}", e.getMessage());
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private void connectMcp() {
-        try {
-            var config = grimoConfig.load();
-            if (config.containsKey("mcp")) {
-                var mcpServers = (Map<String, Map<String, String>>) config.get("mcp");
-                for (var entry : mcpServers.entrySet()) {
-                    try {
-                        String transport = entry.getValue().get("transport");
-                        String command = entry.getValue().get("command");
-                        if ("stdio".equals(transport)) {
-                            mcpClientManager.addStdio(entry.getKey(), command);
-                        }
-                    } catch (Exception e) {
-                        log.warn("MCP server {} connection failed: {}", entry.getKey(), e.getMessage());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("MCP config loading failed: {}", e.getMessage());
         }
     }
 
@@ -403,14 +415,29 @@ public class GrimoTuiRunner implements ApplicationRunner {
         }
     }
 
-    private String resolveAgentId(List<DetectionResult> agentResults) {
+    private String resolveAgentId(List<AgentModelFactory.DetectionResult> agentResults) {
         String agentId = grimoConfig.getDefaultAgent();
         if (agentId == null) {
             agentId = agentResults.stream()
-                    .filter(DetectionResult::available)
-                    .map(DetectionResult::id)
+                    .filter(AgentModelFactory.DetectionResult::available)
+                    .map(AgentModelFactory.DetectionResult::id)
                     .findFirst().orElse("no agent");
         }
         return agentId;
+    }
+
+    /**
+     * 格式化 Agent 執行錯誤訊息，依例外類型給出使用者友善的提示。
+     */
+    private String formatAgentError(Exception e) {
+        String name = e.getClass().getSimpleName();
+        if (name.contains("NotFoundException")) {
+            return "\u26a0 CLI not found. Install the agent CLI and try again.";
+        } else if (name.contains("AuthenticationException")) {
+            return "\u26a0 Authentication failed. Run the agent's login command.";
+        } else if (name.contains("TimeoutException")) {
+            return "\u26a0 Agent timed out. Try a simpler goal.";
+        }
+        return "\u26a0 Agent error: " + e.getMessage();
     }
 }
