@@ -85,3 +85,18 @@
 | 畫面組合 | `GrimoScreen` | JLine `Display`（diff-based 渲染，不閃爍） |
 | 事件迴圈 | `GrimoEventLoop` | JLine `BindingReader` + `KeyMap`（雙執行緒 Tmux 模式） |
 | 滑鼠滾輪 | `GrimoEventLoop` | JLine `MouseEvent.Button.WheelUp/WheelDown` |
+
+## Agent 技術元件對應
+
+| 元件 | 實作 | 底層技術 |
+|------|------|----------|
+| Agent 統一抽象 | `AgentModel` | Spring AI Community Agent Client 0.10.0-SNAPSHOT（Library 模式） |
+| Agent 偵測 | `AgentModelFactory` | 各 SDK `isAvailable()` + Virtual Thread 並行偵測 |
+| Agent 註冊 | `AgentModelRegistry` | `ConcurrentHashMap<String, AgentModel>`（runtime 動態增刪） |
+| Agent 路由 | `AgentRouter` | config default → 第一個可用 |
+| Agent 呼叫 | `AgentClient.create(model).goal().run()` | CLI subprocess（claude / gemini / codex） |
+| Agent 配置 | `AgentConfiguration` | `@Configuration` + `AgentSpec` per CLI agent |
+| Advisor: Session | `GrimoSessionAdvisor` | `AgentCallAdvisor`（around-advice，記錄 goal/result） |
+| Advisor: Validation | `GoalValidationAdvisor` | `AgentCallAdvisor`（阻擋危險操作） |
+| MCP 定義 | `McpCatalogBuilder` | `McpServerCatalog`（Portable MCP，各 CLI 自動轉原生格式） |
+| 非阻塞對話 | `GrimoTuiRunner` | Virtual Thread + `eventLoop.setDirty()` 觸發重繪 |
