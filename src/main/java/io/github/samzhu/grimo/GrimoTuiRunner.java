@@ -362,12 +362,14 @@ public class GrimoTuiRunner implements ApplicationRunner {
             }
             try {
                 var model = agentRouter.route(null);
+                log.info("Routing to agent, goal: {}", text.length() > 100 ? text.substring(0, 100) + "..." : text);
                 agentRunning = true;
                 contentView.appendLine(new org.jline.utils.AttributedString("\u23f3 thinking...",
                         org.jline.utils.AttributedStyle.DEFAULT.foreground(245)));
                 eventLoop.setDirty();
 
                 agentThread = Thread.startVirtualThread(() -> {
+                    long startTime = System.currentTimeMillis();
                     try {
                         var client = org.springaicommunity.agents.client.AgentClient.create(model);
                         var response = client
@@ -375,13 +377,20 @@ public class GrimoTuiRunner implements ApplicationRunner {
                                 .workingDirectory(java.nio.file.Path.of(System.getProperty("user.dir")))
                                 .run();
 
+                        long duration = System.currentTimeMillis() - startTime;
                         if (response.isSuccessful()) {
+                            log.info("Agent response received: success=true, duration={}ms, resultLength={}",
+                                    duration, response.getResult() != null ? response.getResult().length() : 0);
                             contentView.appendAiReply(response.getResult());
                         } else {
+                            log.warn("Agent response received: success=false, duration={}ms, result={}",
+                                    duration, response.getResult());
                             contentView.appendError(response.getResult());
                         }
                         sessionWriter.writeAssistantMessage(response.getResult());
                     } catch (Exception e) {
+                        long duration = System.currentTimeMillis() - startTime;
+                        log.error("Agent call failed: duration={}ms, error={}", duration, e.getMessage(), e);
                         String errorMsg = formatAgentError(e);
                         contentView.appendError(errorMsg);
                     } finally {
@@ -391,6 +400,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     }
                 });
             } catch (IllegalStateException e) {
+                log.warn("Agent routing failed: {}", e.getMessage());
                 contentView.appendError(e.getMessage());
             }
         }
