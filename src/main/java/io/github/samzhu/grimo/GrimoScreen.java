@@ -107,9 +107,11 @@ public class GrimoScreen {
         }
 
         // 游標位置：input 區第二行（separator 之後），prompt + cursorPos
+        // Display 內部用 columns1 = columns + 1 作為每行邏輯寬度（含行尾換行符）
+        // 參考 JLine Size.cursorPos(): row * (cols + 1) + col
         int cursorRow = contentHeight + 1; // +1 跳過上方 separator
         int cursorCol = inputView.getCursorCol();
-        int cursorPos = cursorRow * cols + cursorCol;
+        int cursorPos = cursorRow * (cols + 1) + cursorCol;
 
         display.update(allLines, cursorPos);
     }

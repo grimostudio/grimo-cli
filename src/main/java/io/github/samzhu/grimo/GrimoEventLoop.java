@@ -3,6 +3,7 @@ package io.github.samzhu.grimo;
 import org.jline.keymap.BindingReader;
 import org.jline.keymap.KeyMap;
 import org.jline.terminal.MouseEvent;
+import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
 import org.jline.utils.InfoCmp.Capability;
 import org.slf4j.Logger;
@@ -82,8 +83,8 @@ public class GrimoEventLoop {
      * - input thread 阻塞讀取輸入，render thread 等 dirty 通知後重繪
      */
     public void run() {
-        // 進入 TUI 模式
-        terminal.enterRawMode();
+        // 進入 TUI 模式（enterRawMode 回傳原始 Attributes，退出時用 setAttributes 恢復）
+        Attributes savedAttributes = terminal.enterRawMode();
         terminal.puts(Capability.enter_ca_mode);    // alternate screen buffer
         terminal.puts(Capability.keypad_xmit);      // application keypad mode
         terminal.trackMouse(Terminal.MouseTracking.Normal);
@@ -109,11 +110,12 @@ public class GrimoEventLoop {
         } finally {
             running = false;
             inputThread.interrupt();
-            // 恢復終端機狀態
+            // 恢復終端機狀態（順序重要：先關 mouse → 離開 alternate screen → 恢復 cooked mode）
             terminal.trackMouse(Terminal.MouseTracking.Off);
             terminal.puts(Capability.keypad_local);
             terminal.puts(Capability.exit_ca_mode);
             terminal.flush();
+            terminal.setAttributes(savedAttributes);  // 恢復原始終端機屬性（cooked mode）
         }
     }
 

@@ -159,6 +159,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
         log.debug("Grimo TUI setup complete, starting raw JLine event loop.");
         eventLoop = new GrimoEventLoop(terminal, screen, new TuiKeyHandler());
         eventLoop.run();
+
+        // 事件迴圈結束（/exit），終止 Spring Boot JVM
+        System.exit(0);
     }
 
     /**
