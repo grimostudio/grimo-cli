@@ -66,6 +66,14 @@ GrimoTuiRunner (ApplicationRunner)
 - 同一行沒變 → 完全不輸出（EQUAL diff operation）
 - 來源：[JLine Display.java](https://github.com/jline/jline3/blob/master/terminal/src/main/java/org/jline/utils/Display.java)
 
+**Display diff bug — 多行同時變動時遺漏更新**：
+- **現象**：送出訊息後（Enter），input 行殘留舊字元（如 "hi" 殘留 "h"）
+- **根因**：Enter 同時觸發 content 區新增行（user input + thinking）和 input 區 clear()。content 區 scroll 導致大量行變動，Display.update() 的 diff 演算法在處理大量行更新時，可能遺漏 input 行的更新
+- **驗證**：Log 確認 render() 被呼叫、snapshot 為空、傳給 Display 的行正確（"❯ " + padding），但螢幕仍顯示舊字元。排除了 thread race（加 synchronized 無效）、padding（補空白無效）
+- **解法**：在 content + input 同時變動時呼叫 `display.clear()` 強制全螢幕重繪，跳過 diff
+- **實作**：`GrimoScreen.requestFullRedraw()` 設定 `forceFullRedraw` flag，render 時檢測到就先 `display.clear()` 再 `display.update()`
+- **觸發時機**：`GrimoTuiRunner` 在 Enter 送出（`processInput`）前呼叫 `screen.requestFullRedraw()`
+
 ### 需手動處理
 
 | 項目 | 說明 |
@@ -74,6 +82,7 @@ GrimoTuiRunner (ApplicationRunner)
 | SIGWINCH | `terminal.handle(Signal.WINCH, ...)` → `display.resize()` + `setDirty()` |
 | 行寬截斷 | View 層自行截斷超寬行（Display 不自動 wrap） |
 | 填滿高度 | 組合後的行數不足螢幕高度時，補空白行 |
+| Display diff bug | content + input 同時變動時，呼叫 `display.clear()` 強制全螢幕重繪 |
 
 ## 新建檔案
 

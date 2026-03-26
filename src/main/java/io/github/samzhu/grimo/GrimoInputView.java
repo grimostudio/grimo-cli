@@ -202,12 +202,17 @@ public class GrimoInputView {
      * @param cols 終端機寬度
      * @return 固定 3 行的列表
      */
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GrimoInputView.class);
+
     public List<AttributedString> render(int cols) {
         // 在 lock 下快照 buffer 內容，避免 render thread 和 input thread race condition
         String snapshot;
+        int snapCursor;
         synchronized (lock) {
             snapshot = buffer.toString();
+            snapCursor = cursorPos;
         }
+        log.debug("render(): snapshot='{}', cursorPos={}", snapshot, snapCursor);
 
         List<AttributedString> result = new ArrayList<>(3);
         String separator = "─".repeat(cols);

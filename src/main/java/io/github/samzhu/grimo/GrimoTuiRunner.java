@@ -256,6 +256,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     savedInput = "";
                     contentView.appendUserInput(text);
                     inputView.clear();
+                    // content 和 input 同時變動時，強制全螢幕重繪
+                    // 避免 JLine Display diff 遺漏 input 行更新
+                    screen.requestFullRedraw();
                     sessionWriter.writeUserMessage(text);
                     processInput(text);
                 }

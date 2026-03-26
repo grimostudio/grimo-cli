@@ -22,6 +22,8 @@ import java.util.List;
  */
 public class GrimoScreen {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GrimoScreen.class);
+
     private static final int INPUT_HEIGHT = 3;   // separator + input + separator
     private static final int STATUS_HEIGHT = 1;
 
@@ -34,6 +36,7 @@ public class GrimoScreen {
     private int rows;
     private int cols;
     private boolean slashMenuVisible = false;
+    private volatile boolean forceFullRedraw = false;
 
     public GrimoScreen(Terminal terminal, GrimoContentView contentView,
                         GrimoInputView inputView, GrimoStatusView statusView,
@@ -113,6 +116,13 @@ public class GrimoScreen {
         int cursorCol = inputView.getCursorCol();
         int cursorPos = cursorRow * (cols + 1) + cursorCol;
 
+        // 強制全螢幕重繪（解決 Display diff 在 content 大量變動時不更新 input 行的問題）
+        // 設計說明：JLine Display.update() 的 diff 演算法在多行同時變化時可能遺漏部分行更新
+        // 當 content 區新增行（如送出訊息後加入 user input + thinking 行）時，觸發 clear() 重繪
+        if (forceFullRedraw) {
+            display.clear();
+            forceFullRedraw = false;
+        }
         display.update(allLines, cursorPos);
     }
 
@@ -122,6 +132,14 @@ public class GrimoScreen {
     public void clear() {
         display.clear();
         display.reset();
+    }
+
+    /**
+     * 請求下次 render 時做完整重繪（不依賴 Display diff）。
+     * 用於 content 大量變動後確保 input 行正確更新。
+     */
+    public void requestFullRedraw() {
+        forceFullRedraw = true;
     }
 
     public int getRows() { return rows; }
