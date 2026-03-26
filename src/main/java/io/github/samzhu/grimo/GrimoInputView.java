@@ -23,82 +23,98 @@ public class GrimoInputView {
     private static final AttributedStyle SEPARATOR_STYLE = AttributedStyle.DEFAULT.foreground(245);
     private static final String PROMPT = "❯ ";
 
+    /**
+     * 設計說明：buffer 和 cursorPos 被 input thread（key events）和
+     * render thread（screen.render）同時存取。用 lock 物件同步所有存取。
+     */
+    private final Object lock = new Object();
     private final StringBuilder buffer = new StringBuilder();
     private int cursorPos = 0;
 
     // === 文字操作 ===
 
     public String getText() {
-        return buffer.toString();
+        synchronized (lock) {
+            return buffer.toString();
+        }
     }
 
     public void setText(String text) {
-        buffer.setLength(0);
-        buffer.append(text);
-        cursorPos = buffer.length();
+        synchronized (lock) {
+            buffer.setLength(0);
+            buffer.append(text);
+            cursorPos = buffer.length();
+        }
     }
 
     public void insertChar(char c) {
-        buffer.insert(cursorPos, c);
-        cursorPos++;
+        synchronized (lock) {
+            buffer.insert(cursorPos, c);
+            cursorPos++;
+        }
     }
 
     public void insertString(String s) {
-        buffer.insert(cursorPos, s);
-        cursorPos += s.length();
+        synchronized (lock) {
+            buffer.insert(cursorPos, s);
+            cursorPos += s.length();
+        }
     }
 
     public void deleteChar() {
-        if (cursorPos > 0) {
-            buffer.deleteCharAt(cursorPos - 1);
-            cursorPos--;
+        synchronized (lock) {
+            if (cursorPos > 0) {
+                buffer.deleteCharAt(cursorPos - 1);
+                cursorPos--;
+            }
         }
     }
 
     public void deleteForward() {
-        if (cursorPos < buffer.length()) {
-            buffer.deleteCharAt(cursorPos);
+        synchronized (lock) {
+            if (cursorPos < buffer.length()) {
+                buffer.deleteCharAt(cursorPos);
+            }
         }
     }
 
     public void clear() {
-        buffer.setLength(0);
-        cursorPos = 0;
+        synchronized (lock) {
+            buffer.setLength(0);
+            cursorPos = 0;
+        }
     }
 
     // === 游標移動 ===
 
     public void moveCursorLeft() {
-        if (cursorPos > 0) cursorPos--;
+        synchronized (lock) { if (cursorPos > 0) cursorPos--; }
     }
 
     public void moveCursorRight() {
-        if (cursorPos < buffer.length()) cursorPos++;
+        synchronized (lock) { if (cursorPos < buffer.length()) cursorPos++; }
     }
 
     public void moveCursorHome() {
-        cursorPos = 0;
+        synchronized (lock) { cursorPos = 0; }
     }
 
     public void moveCursorEnd() {
-        cursorPos = buffer.length();
+        synchronized (lock) { cursorPos = buffer.length(); }
     }
 
     // === 斜線指令偵測 ===
 
-    /**
-     * 偵測是否剛輸入「空格+/」或「行首/」，應開啟斜線指令選單。
-     */
     public boolean shouldOpenSlashMenu() {
-        if (buffer.isEmpty()) return false;
-        String text = buffer.toString();
-        // 行首 /
-        if (cursorPos == 1 && text.charAt(0) == '/') return true;
-        // 空格 + /
-        if (cursorPos >= 2 && text.charAt(cursorPos - 1) == '/' && text.charAt(cursorPos - 2) == ' ') {
-            return true;
+        synchronized (lock) {
+            if (buffer.isEmpty()) return false;
+            String text = buffer.toString();
+            if (cursorPos == 1 && text.charAt(0) == '/') return true;
+            if (cursorPos >= 2 && text.charAt(cursorPos - 1) == '/' && text.charAt(cursorPos - 2) == ' ') {
+                return true;
+            }
+            return false;
         }
-        return false;
     }
 
     /**
@@ -106,25 +122,23 @@ public class GrimoInputView {
      * 回傳 null 表示游標不在斜線 token 上。
      */
     public String getCurrentSlashToken() {
-        if (buffer.isEmpty()) return null;
-        String text = buffer.substring(0, cursorPos);
-        int start = text.lastIndexOf(' ');
-        String token = (start == -1) ? text : text.substring(start + 1);
-        if (token.startsWith("/")) {
-            return token;
+        synchronized (lock) {
+            if (buffer.isEmpty()) return null;
+            String text = buffer.substring(0, cursorPos);
+            int start = text.lastIndexOf(' ');
+            String token = (start == -1) ? text : text.substring(start + 1);
+            return token.startsWith("/") ? token : null;
         }
-        return null;
     }
 
-    /**
-     * 插入斜線指令名（前後加空格），取代目前的 /xxx token。
-     */
     public void insertSlashCommand(String commandName) {
-        String token = getCurrentSlashToken();
-        if (token != null) {
-            int tokenStart = buffer.substring(0, cursorPos).lastIndexOf(token);
-            buffer.replace(tokenStart, cursorPos, "/" + commandName + " ");
-            cursorPos = tokenStart + commandName.length() + 2;
+        synchronized (lock) {
+            String token = getCurrentSlashToken();
+            if (token != null) {
+                int tokenStart = buffer.substring(0, cursorPos).lastIndexOf(token);
+                buffer.replace(tokenStart, cursorPos, "/" + commandName + " ");
+                cursorPos = tokenStart + commandName.length() + 2;
+            }
         }
     }
 
@@ -136,8 +150,7 @@ public class GrimoInputView {
      * - 斜線指令名以品牌標誌色（#5F87AF）顯示，其餘文字用預設色
      * - 仿 Claude Code input 區的斜線指令顏色標記
      */
-    private void appendStyledInput(AttributedStringBuilder sb) {
-        String text = buffer.toString();
+    private void appendStyledInput(AttributedStringBuilder sb, String text) {
         int i = 0;
         while (i < text.length()) {
             // 檢查是否為斜線指令 token 起始位置（行首或空格後的 /）
@@ -163,9 +176,11 @@ public class GrimoInputView {
      * - 修正中文輸入後游標位置偏移的問題
      */
     public int getCursorCol() {
-        int promptWidth = columnWidth(PROMPT);
-        int textWidth = columnWidth(buffer.substring(0, cursorPos));
-        return promptWidth + textWidth;
+        synchronized (lock) {
+            int promptWidth = columnWidth(PROMPT);
+            int textWidth = columnWidth(buffer.substring(0, cursorPos));
+            return promptWidth + textWidth;
+        }
     }
 
     /**
@@ -188,6 +203,12 @@ public class GrimoInputView {
      * @return 固定 3 行的列表
      */
     public List<AttributedString> render(int cols) {
+        // 在 lock 下快照 buffer 內容，避免 render thread 和 input thread race condition
+        String snapshot;
+        synchronized (lock) {
+            snapshot = buffer.toString();
+        }
+
         List<AttributedString> result = new ArrayList<>(3);
         String separator = "─".repeat(cols);
 
@@ -198,7 +219,7 @@ public class GrimoInputView {
         // 設計說明：padding 到全寬，確保 JLine Display diff 能清除舊字元
         var sb = new AttributedStringBuilder();
         sb.styled(BRAND_STYLE, PROMPT);
-        appendStyledInput(sb);
+        appendStyledInput(sb, snapshot);
         // padding 到 terminal 寬度，避免 Display diff 殘留舊字元
         int currentWidth = sb.toAttributedString().columnLength();
         if (currentWidth < cols) {
