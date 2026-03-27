@@ -2,13 +2,18 @@
 <configuration>
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
+    <!-- 從 Spring Environment 讀取 grimo.workspace，與 application.yaml 同步 -->
+    <!-- 支援 GRIMO_WORKSPACE 環境變數覆蓋 -->
+    <!-- 參考：https://docs.spring.io/spring-boot/reference/features/logging.html#features.logging.logback-extensions.environment-properties -->
+    <springProperty scope="context" name="grimoWorkspace" source="grimo.workspace"
+                    defaultValue="${user.home}/.grimo"/>
+
     <!-- 互動式 CLI 不需要 console 日誌，所有 UI 由 JLine Terminal 直接處理 -->
     <!-- 日誌只寫入檔案，console 完全靜音 -->
-    <!-- 參考：https://docs.spring.io/spring-boot/reference/features/logging.html -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${user.home}/grimo-workspace/logs/grimo.log</file>
+        <file>${grimoWorkspace}/logs/grimo.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-            <fileNamePattern>${user.home}/grimo-workspace/logs/grimo-%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+            <fileNamePattern>${grimoWorkspace}/logs/grimo-%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
             <maxFileSize>10MB</maxFileSize>
             <maxHistory>7</maxHistory>
         </rollingPolicy>

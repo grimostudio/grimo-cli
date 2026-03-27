@@ -18,6 +18,7 @@ public class WorkspaceManager {
         createDir(skillsDir());
         createDir(conversationsDir());
         createDir(logsDir());
+        createDir(agentsDir());   // F4 Sub-Agent 定義檔目錄
     }
 
     public boolean isInitialized() {
@@ -31,6 +32,7 @@ public class WorkspaceManager {
     public Path conversationsDir()  { return root.resolve("conversations"); }
     public Path logsDir()           { return root.resolve("logs"); }
     public Path configFile()        { return root.resolve("config.yaml"); }
+    public Path agentsDir()         { return root.resolve("agents"); }
 
     private void createDir(Path dir) {
         try {

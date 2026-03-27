@@ -31,4 +31,4 @@ management:
         enabled: false
 
 grimo:
-  workspace: ${user.home}/grimo-workspace
+  workspace: ${user.home}/.grimo

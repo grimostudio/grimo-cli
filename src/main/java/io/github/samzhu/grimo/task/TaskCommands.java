@@ -20,7 +20,7 @@ import java.util.UUID;
  * 設計說明：
  * - 提供 task create / task list / task show / task cancel 四個子命令
  * - create 支援可選的 cron 參數，有 cron 時自動排程；無 cron 則為 IMMEDIATE 類型
- * - 透過 MarkdownTaskStore 持久化任務至 ~/grimo-workspace/tasks/ 目錄
+ * - 透過 MarkdownTaskStore 持久化任務至 ~/.grimo/tasks/ 目錄
  * - 透過 TaskSchedulerService 管理 cron 排程的註冊與取消
  * - Task ID 格式為 task-{yyyyMMdd}-{8碼UUID}，確保唯一且可排序
  *

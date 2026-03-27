@@ -14,7 +14,7 @@ import java.util.UUID;
  * Session 對話存檔：JSONL（JSON Lines）格式，append-only。
  *
  * 設計說明：
- * - 每次 TUI session 的對話紀錄持久化到 ~/grimo-workspace/projects/<encoded-cwd>/sessions/<uuid>.jsonl
+ * - 每次 TUI session 的對話紀錄持久化到 ~/.grimo/projects/<encoded-cwd>/sessions/<uuid>.jsonl
  * - 對齊 Claude Code 的 session 檔案設計
  * - 每行一個 JSON 物件，包含 type/sessionId/timestamp/uuid/parentUuid/message 欄位
  * - 寫入時機：session 啟動（system）、使用者按 Enter（user）、AI 回覆完成（assistant）、命令執行完成（command）
@@ -31,7 +31,7 @@ public class SessionWriter {
     /**
      * 建構子：建立 session 檔案路徑。
      *
-     * @param sessionsBaseDir 基礎目錄（如 ~/grimo-workspace/projects/<encoded-cwd>/sessions/）
+     * @param sessionsBaseDir 基礎目錄（如 ~/.grimo/projects/<encoded-cwd>/sessions/）
      */
     public SessionWriter(Path sessionsBaseDir) {
         this.sessionId = UUID.randomUUID().toString().substring(0, 8);

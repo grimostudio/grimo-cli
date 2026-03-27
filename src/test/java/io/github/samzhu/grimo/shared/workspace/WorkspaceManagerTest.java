@@ -22,6 +22,7 @@ class WorkspaceManagerTest {
         assertThat(tempDir.resolve("skills")).isDirectory();
         assertThat(tempDir.resolve("conversations")).isDirectory();
         assertThat(tempDir.resolve("logs")).isDirectory();
+        assertThat(tempDir.resolve("agents")).isDirectory();
     }
 
     @Test
@@ -33,6 +34,7 @@ class WorkspaceManagerTest {
         assertThat(manager.conversationsDir()).isEqualTo(tempDir.resolve("conversations"));
         assertThat(manager.logsDir()).isEqualTo(tempDir.resolve("logs"));
         assertThat(manager.configFile()).isEqualTo(tempDir.resolve("config.yaml"));
+        assertThat(manager.agentsDir()).isEqualTo(tempDir.resolve("agents"));
     }
 
     @Test

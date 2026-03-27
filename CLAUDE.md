@@ -63,7 +63,7 @@ Single Gradle module. Module boundaries enforced by **Spring Modulith** package 
 
 - **Library over Starter**: LLM providers, MCP servers, and channels are managed as plain Java objects at runtime (not Spring beans), enabling dynamic add/remove via CLI commands.
 - **Event-driven**: Inter-module communication uses Spring Modulith `ApplicationModuleListener` domain events (e.g., `IncomingMessageEvent`, `TaskExecutionEvent`).
-- **Markdown persistence**: Tasks stored as `.md` files with YAML frontmatter in `~/grimo-workspace/tasks/`.
+- **Markdown persistence**: Tasks stored as `.md` files with YAML frontmatter in `~/.grimo/tasks/`.
 - **Spring Shell is the main entry point**, not a channel adapter. Channels (Telegram, LINE) are optional background threads.
 
 ### Testing
