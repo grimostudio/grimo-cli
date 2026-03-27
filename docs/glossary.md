@@ -61,7 +61,7 @@
 | 名詞 | 英文 | 說明 |
 |------|------|------|
 | **Session** | Session | 一次 TUI 啟動到結束的對話歷程。以 UUID 識別，存為 JSONL 檔案。可透過 `--resume` 恢復。 |
-| **Session 檔案** | Session File | `~/grimo-workspace/projects/<encoded-cwd>/sessions/<session-uuid>.jsonl`。對齊 Claude Code 結構。每行一個 JSON 物件（含 uuid、parentUuid 支援對話樹），append-only。 |
+| **Session 檔案** | Session File | `~/.grimo/projects/<encoded-cwd>/sessions/<session-uuid>.jsonl`。對齊 Claude Code 結構。每行一個 JSON 物件（含 uuid、parentUuid 支援對話樹），append-only。 |
 | **滾動** | Scroll | Content 區支援滑鼠滾輪 / Mac 觸控板兩指滾動，瀏覽已消失的歷史對話。自動跟隨模式：在底部時新內容自動顯示，滾動中途不自動跳轉。 |
 
 ## Domain Events（Spring Modulith）
@@ -85,6 +85,15 @@
 | 畫面組合 | `GrimoScreen` | JLine `Display`（diff-based 渲染，不閃爍） |
 | 事件迴圈 | `GrimoEventLoop` | JLine `BindingReader` + `KeyMap`（雙執行緒 Tmux 模式） |
 | 滑鼠滾輪 | `GrimoEventLoop` | JLine `MouseEvent.Button.WheelUp/WheelDown` |
+
+## 調度系統術語
+
+| 名詞 | 英文 | 說明 |
+|------|------|------|
+| **Sub-agent** | Sub-agent | Grimo 派遣的獨立 CLI agent 實例。擁有獨立 context，不共享主對話歷史。接收明確的 goal，完成後回傳摘要結果。程式碼中使用 `SubAgent`（CamelCase），metadata key 使用 `subagents`（無連字號）。 |
+| **Tier** | Tier | Skill 執行的能力等級。三級：`lite`（快速便宜）、`std`（日常主力）、`pro`（深度推理）。每級對應一個 agent+model fallback list。 |
+| **Grimo Skill** | Grimo Skill | 放在 `~/.grimo/skills/` 的 SKILL.md，定義 Grimo 的調度指令（派誰、怎麼分工）。不是給 CLI agent 的執行指令。 |
+| **Agent Skill** | Agent Skill | 各 CLI agent 自己的 skill（如 `.claude/skills/`、`.gemini/agents/`）。由 agent 自己讀取和執行，Grimo 不介入。 |
 
 ## Agent 技術元件對應
 
