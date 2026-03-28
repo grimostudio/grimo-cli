@@ -100,8 +100,8 @@ if (text.equals("/mcp")) {
 - 持有 server 列表（從 GrimoConfig.getMcpServers() 讀取）
 - 管理選中項 index
 - render() 產出 List<AttributedString>（overlay 行）
-- 提供 moveUp() / moveDown() / getSelectedName() / refresh()
-- refresh() 重讀 config 後 clamp selectedIndex：`selectedIndex = min(selectedIndex, list.size() - 1)`
+- 提供 moveUp() / moveDown() / getSelectedName() / load()
+- load(mcpServers) 接收 server map，更新列表並 clamp selectedIndex：`selectedIndex = min(selectedIndex, list.size() - 1)`
 
 不負責：
 - 按鍵處理（由 GrimoTuiRunner.handleMcpManagerKey 負責）
@@ -156,7 +156,7 @@ if (mcpManagerVisible) {
     ├── mcpManagerView.getSelectedName() → "deepwiki"
     ├── config.removeMcpServer("deepwiki")
     ├── catalogBuilder.rebuild()
-    ├── mcpManagerView.refresh()  ← 重讀 config，更新 server 列表
+    ├── mcpManagerView.load(config.getMcpServers())  ← 重載 server 列表
     ├── eventLoop.setDirty()       ← 觸發重繪
     │
     └── 若列表空了：

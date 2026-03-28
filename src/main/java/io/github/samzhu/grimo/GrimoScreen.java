@@ -32,20 +32,24 @@ public class GrimoScreen {
     private final GrimoInputView inputView;
     private final GrimoStatusView statusView;
     private final GrimoSlashMenuView slashMenuView;
+    private final GrimoMcpManagerView mcpManagerView;
 
     private int rows;
     private int cols;
-    private boolean slashMenuVisible = false;
+    private volatile boolean slashMenuVisible = false;
+    private volatile boolean mcpManagerVisible = false;
     private volatile boolean forceFullRedraw = false;
 
     public GrimoScreen(Terminal terminal, GrimoContentView contentView,
                         GrimoInputView inputView, GrimoStatusView statusView,
-                        GrimoSlashMenuView slashMenuView) {
+                        GrimoSlashMenuView slashMenuView,
+                        GrimoMcpManagerView mcpManagerView) {
         this.display = new Display(terminal, true);
         this.contentView = contentView;
         this.inputView = inputView;
         this.statusView = statusView;
         this.slashMenuView = slashMenuView;
+        this.mcpManagerView = mcpManagerView;
     }
 
     public void resize(Size size) {
@@ -60,6 +64,14 @@ public class GrimoScreen {
 
     public boolean isSlashMenuVisible() {
         return slashMenuVisible;
+    }
+
+    public void setMcpManagerVisible(boolean visible) {
+        this.mcpManagerVisible = visible;
+    }
+
+    public boolean isMcpManagerVisible() {
+        return mcpManagerVisible;
     }
 
     /**
@@ -92,12 +104,25 @@ public class GrimoScreen {
                 }
             }
         }
+
+        // 3. MCP Manager overlay（覆蓋 content 底部，與 slash menu 互斥）
+        if (mcpManagerVisible) {
+            List<AttributedString> managerLines = mcpManagerView.render(cols);
+            int managerHeight = managerLines.size();
+            int overlayStart = contentLines.size() - managerHeight;
+            for (int i = 0; i < managerHeight; i++) {
+                int targetRow = overlayStart + i;
+                if (targetRow >= 0 && targetRow < contentLines.size()) {
+                    contentLines.set(targetRow, managerLines.get(i));
+                }
+            }
+        }
         allLines.addAll(contentLines);
 
-        // 3. Input 區（固定 3 行）
+        // 4. Input 區（固定 3 行）
         allLines.addAll(inputView.render(cols));
 
-        // 4. Status 區（固定 1 行）
+        // 5. Status 區（固定 1 行）
         allLines.addAll(statusView.render(cols));
 
         // 確保填滿螢幕高度

@@ -42,6 +42,7 @@ public class GrimoEventLoop {
     static final String OP_CTRL_U = "CTRL_U";
     static final String OP_CTRL_D = "CTRL_D";
     static final String OP_CHAR = "CHAR";
+    static final String OP_ESC = "ESC";
 
     private final Terminal terminal;
     private final GrimoScreen screen;
@@ -249,6 +250,7 @@ public class GrimoEventLoop {
         keyMap.bind(OP_CTRL_C, "\003");   // Ctrl+C = 0x03
         keyMap.bind(OP_CTRL_U, "\025");   // Ctrl+U = 0x15
         keyMap.bind(OP_CTRL_D, "\004");   // Ctrl+D = 0x04
+        keyMap.bind(OP_ESC, "\033");     // ESC = 0x1B
 
         // Printable ASCII characters (32-126)
         for (char i = 32; i < 127; i++) {

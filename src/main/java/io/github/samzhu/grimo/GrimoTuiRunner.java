@@ -76,6 +76,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private GrimoContentView contentView;
     private GrimoInputView inputView;
     private GrimoSlashMenuView slashMenuView;
+    private GrimoMcpManagerView mcpManagerView;
     private GrimoScreen screen;
     private GrimoEventLoop eventLoop;
     private SessionWriter sessionWriter;
@@ -162,7 +163,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
         var menuItems = buildMenuItems();
         slashMenuView = new GrimoSlashMenuView(menuItems);
 
-        screen = new GrimoScreen(terminal, contentView, inputView, statusView, slashMenuView);
+        mcpManagerView = new GrimoMcpManagerView();
+        screen = new GrimoScreen(terminal, contentView, inputView, statusView, slashMenuView, mcpManagerView);
 
         // === Session 對話存檔 ===
         String cwd = System.getProperty("user.dir");
@@ -192,7 +194,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
         @Override
         public void handleKey(String operation, String lastBinding) {
-            if (screen.isSlashMenuVisible()) {
+            if (screen.isMcpManagerVisible()) {
+                handleMcpManagerKey(operation, lastBinding);
+            } else if (screen.isSlashMenuVisible()) {
                 handleSlashMenuKey(operation, lastBinding);
             } else {
                 handleNormalKey(operation, lastBinding);
@@ -251,6 +255,44 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 }
             }
         }
+    }
+
+    /**
+     * MCP Manager overlay 模式的鍵盤處理。
+     *
+     * 設計說明：
+     * - ↑↓ 導航 server 列表（不 wrap）
+     * - d 直接刪除選中 server，即時重建 catalog
+     * - a 關閉 overlay，Input 區自動填入 "/mcp-add "
+     * - Esc/Ctrl+C 關閉 overlay
+     */
+    private void handleMcpManagerKey(String operation, String lastBinding) {
+        switch (operation) {
+            case GrimoEventLoop.OP_UP -> mcpManagerView.moveUp();
+            case GrimoEventLoop.OP_DOWN -> mcpManagerView.moveDown();
+            case GrimoEventLoop.OP_ESC, GrimoEventLoop.OP_CTRL_C -> {
+                screen.setMcpManagerVisible(false);
+                screen.requestFullRedraw();
+            }
+            case GrimoEventLoop.OP_CHAR -> {
+                if (lastBinding != null && lastBinding.length() == 1) {
+                    char c = lastBinding.charAt(0);
+                    if (c == 'd' || c == 'D') {
+                        String name = mcpManagerView.getSelectedName();
+                        if (name != null) {
+                            grimoConfig.removeMcpServer(name);
+                            mcpCatalogBuilder.rebuild();
+                            mcpManagerView.load(grimoConfig.getMcpServers());
+                        }
+                    } else if (c == 'a' || c == 'A') {
+                        screen.setMcpManagerVisible(false);
+                        screen.requestFullRedraw();
+                        inputView.setText("/mcp-add ");
+                    }
+                }
+            }
+        }
+        eventLoop.setDirty();
     }
 
     /**
@@ -349,6 +391,16 @@ public class GrimoTuiRunner implements ApplicationRunner {
     }
 
     /**
+     * 開啟 MCP Manager overlay。
+     * 互斥保證：先關閉 slash menu 再開啟 MCP Manager。
+     */
+    private void openMcpManager() {
+        screen.setSlashMenuVisible(false);
+        mcpManagerView.load(grimoConfig.getMcpServers());
+        screen.setMcpManagerVisible(true);
+    }
+
+    /**
      * 從 CommandRegistry + SkillRegistry 建構斜線指令選單項目。
      */
     private List<GrimoSlashMenuView.MenuItem> buildMenuItems() {
@@ -372,6 +424,12 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private void processInput(String text) {
         if (text.equals("/exit")) {
             eventLoop.stop();
+            return;
+        }
+
+        // /mcp 無子指令時開啟互動 overlay（不走 CommandExecutor）
+        if (text.equals("/mcp")) {
+            openMcpManager();
             return;
         }
 
@@ -401,7 +459,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
             }
             try {
                 var model = agentRouter.route(null);
-                log.info("Routing to agent, goal: {}", text.length() > 100 ? text.substring(0, 100) + "..." : text);
+                var mcpServers = mcpCatalogBuilder.getServerNames();
+                log.info("Routing to agent, goal: {}, mcpServers: {}",
+                        text.length() > 100 ? text.substring(0, 100) + "..." : text,
+                        mcpServers.isEmpty() ? "none" : String.join(", ", mcpServers));
                 agentRunning = true;
                 contentView.appendLine(new org.jline.utils.AttributedString("\u23f3 thinking...",
                         org.jline.utils.AttributedStyle.DEFAULT.foreground(245)));
