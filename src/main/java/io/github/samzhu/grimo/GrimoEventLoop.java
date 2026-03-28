@@ -84,12 +84,33 @@ public class GrimoEventLoop {
      * - input thread 阻塞讀取輸入，render thread 等 dirty 通知後重繪
      */
     public void run() {
+        // 防禦性清理：無論前一次 Grimo 是正常退出還是被 SIGKILL 強制殺掉，
+        // 都先關閉可能殘留的 mouse tracking 和 alternate screen。
+        // 這是 TUI 應用的標準做法 — SIGKILL 無法被攔截，只能在下次啟動時清理。
+        // 參考：https://jline.org/docs/advanced/terminal-attributes/
+        cleanupStaleTerminalState();
+
         // 進入 TUI 模式（enterRawMode 回傳原始 Attributes，退出時用 setAttributes 恢復）
         Attributes savedAttributes = terminal.enterRawMode();
         terminal.puts(Capability.enter_ca_mode);    // alternate screen buffer
         terminal.puts(Capability.keypad_xmit);      // application keypad mode
         terminal.trackMouse(Terminal.MouseTracking.Normal);
         terminal.flush();
+
+        // SIGINT handler：委派給 keyHandler，走跟 BindingReader 相同的 OP_CTRL_C 路徑。
+        // 設計說明：
+        // - macOS JLine FFM 的 Signal.INT 在 JVM 層攔截 Ctrl+C，比 BindingReader 更早
+        // - BindingReader 收不到字元 0x03，所以 OP_CTRL_C 不會從 inputLoop 觸發
+        // - 直接委派給 keyHandler.handleKey() 讓 double-press 邏輯統一處理
+        // - 在 MCP Manager / Slash Menu 模式下，Ctrl+C 會先關閉 overlay（跟 BindingReader 行為一致）
+        terminal.handle(Terminal.Signal.INT, signal -> {
+            keyHandler.handleKey(OP_CTRL_C, "\003");
+            setDirty();
+        });
+
+        // JVM shutdown hook：備援（涵蓋 SIGTERM 等其他終止信號）
+        Thread shutdownHook = new Thread(() -> restoreTerminal(savedAttributes), "grimo-shutdown");
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
 
         // 終端機大小變化 → resize + 重繪
         terminal.handle(Terminal.Signal.WINCH, signal -> {
@@ -111,12 +132,9 @@ public class GrimoEventLoop {
         } finally {
             running = false;
             inputThread.interrupt();
-            // 恢復終端機狀態（順序重要：先關 mouse → 離開 alternate screen → 恢復 cooked mode）
-            terminal.trackMouse(Terminal.MouseTracking.Off);
-            terminal.puts(Capability.keypad_local);
-            terminal.puts(Capability.exit_ca_mode);
-            terminal.flush();
-            terminal.setAttributes(savedAttributes);  // 恢復原始終端機屬性（cooked mode）
+            restoreTerminal(savedAttributes);
+            // 移除 shutdown hook（正常退出時不需要再執行）
+            try { Runtime.getRuntime().removeShutdownHook(shutdownHook); } catch (IllegalStateException ignored) {}
         }
     }
 
@@ -133,6 +151,42 @@ public class GrimoEventLoop {
         dirty.set(true);
         synchronized (dirty) {
             dirty.notifyAll();
+        }
+    }
+
+    /**
+     * 啟動前清理可能殘留的 terminal 狀態。
+     * 當前一次 Grimo 被 SIGKILL 強制殺掉時，mouse tracking 和 alternate screen 可能殘留。
+     * SIGKILL 無法被攔截（shutdown hook、signal handler 都無效），只能在下次啟動時清理。
+     * 直接寫 ANSI escape sequence 而非用 JLine API，因為此時尚未進入 raw mode。
+     */
+    private void cleanupStaleTerminalState() {
+        try {
+            var writer = terminal.writer();
+            writer.write("\033[?1000l");  // Disable X10 mouse tracking
+            writer.write("\033[?1002l");  // Disable button-event mouse tracking
+            writer.write("\033[?1003l");  // Disable all-event mouse tracking
+            writer.write("\033[?1006l");  // Disable SGR extended mouse mode
+            writer.write("\033[?1049l");  // Exit alternate screen buffer（如果殘留）
+            writer.flush();
+        } catch (Exception e) {
+            log.debug("Stale terminal state cleanup failed: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 恢復 terminal 到正常狀態（cooked mode、關閉 mouse tracking、離開 alternate screen）。
+     * 由 finally 和 shutdown hook 共用，確保任何退出路徑都能恢復。
+     */
+    private void restoreTerminal(Attributes savedAttributes) {
+        try {
+            terminal.trackMouse(Terminal.MouseTracking.Off);
+            terminal.puts(Capability.keypad_local);
+            terminal.puts(Capability.exit_ca_mode);
+            terminal.flush();
+            terminal.setAttributes(savedAttributes);
+        } catch (Exception e) {
+            // shutdown 時 terminal 可能已關閉，忽略錯誤
         }
     }
 

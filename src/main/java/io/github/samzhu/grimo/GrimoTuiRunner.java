@@ -72,6 +72,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private volatile boolean agentRunning = false;
     private volatile Thread agentThread = null;
 
+    /** Double Ctrl+C 退出：第一次顯示提示，2 秒內第二次才真的退出（對齊 Claude Code UX） */
+    private long lastCtrlCTime = 0;
+    private static final long CTRL_C_EXIT_WINDOW_MS = 2000;
+
     // TUI 元件（run 時初始化）
     private GrimoContentView contentView;
     private GrimoInputView inputView;
@@ -330,13 +334,27 @@ public class GrimoTuiRunner implements ApplicationRunner {
             }
             case GrimoEventLoop.OP_CTRL_C -> {
                 if (agentRunning && agentThread != null) {
+                    // Agent 執行中 → 取消 agent
                     agentThread.interrupt();
                     contentView.appendError("Agent cancelled.");
                     eventLoop.setDirty();
-                } else {
+                } else if (!inputView.getText().isEmpty()) {
+                    // Input 有文字 → 清空（第一層）
                     inputView.clear();
                     historyIndex = history.size();
                     savedInput = "";
+                } else {
+                    // Input 空 → double Ctrl+C 退出（對齊 Claude Code UX）
+                    long now = System.currentTimeMillis();
+                    if (now - lastCtrlCTime < CTRL_C_EXIT_WINDOW_MS) {
+                        eventLoop.stop();
+                    } else {
+                        lastCtrlCTime = now;
+                        contentView.appendLine(new org.jline.utils.AttributedString(
+                                "  Press Ctrl+C again to exit",
+                                org.jline.utils.AttributedStyle.DEFAULT.foreground(245)));
+                        eventLoop.setDirty();
+                    }
                 }
             }
             case GrimoEventLoop.OP_BACKSPACE -> {

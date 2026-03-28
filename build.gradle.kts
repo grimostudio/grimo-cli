@@ -87,6 +87,16 @@ springBoot {
 	mainClass.set("io.github.samzhu.grimo.GrimoApplication")
 }
 
+// GraalVM native image 需要 --install-exit-handlers 才能讓 shutdown hook 在 SIGINT/SIGTERM 時執行
+// 參考：https://github.com/oracle/graal/issues/465
+graalvmNative {
+	binaries {
+		named("main") {
+			buildArgs.add("--install-exit-handlers")
+		}
+	}
+}
+
 // FFM terminal provider 需要 native access，寫入 jar manifest 讓 java -jar 自動啟用
 // Reference: https://docs.spring.io/spring-shell/reference/building.html
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
