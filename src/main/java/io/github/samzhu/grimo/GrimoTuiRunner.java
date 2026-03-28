@@ -297,7 +297,12 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     savedInput = "";
                 }
             }
-            case GrimoEventLoop.OP_BACKSPACE -> inputView.deleteChar();
+            case GrimoEventLoop.OP_BACKSPACE -> {
+                inputView.deleteChar();
+                // backspace 後檢查是否該重開斜線選單
+                // 修正：選單因過濾為空而關閉後，backspace 回到有效 token 時應重開
+                tryReopenSlashMenu();
+            }
             case GrimoEventLoop.OP_DELETE -> inputView.deleteForward();
             case GrimoEventLoop.OP_LEFT -> inputView.moveCursorLeft();
             case GrimoEventLoop.OP_RIGHT -> inputView.moveCursorRight();
@@ -325,6 +330,20 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 if (!Character.isISOControl(c)) {
                     inputView.insertChar(c);
                 }
+            }
+        }
+    }
+
+    /**
+     * 檢查 backspace 後是否該重開斜線選單。
+     * 修正：選單因過濾結果為空而關閉後，backspace 回到有效 slash token 時應重開選單。
+     */
+    private void tryReopenSlashMenu() {
+        String slashToken = inputView.getCurrentSlashToken();
+        if (slashToken != null) {
+            slashMenuView.filter(slashToken.substring(1));
+            if (slashMenuView.hasItems()) {
+                screen.setSlashMenuVisible(true);
             }
         }
     }
@@ -428,6 +447,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     } finally {
                         agentRunning = false;
                         agentThread = null;
+                        // agent 完成後 content 區大量變動，強制全螢幕重繪
+                        // 修正：JLine Display diff 可能遺漏 input 行的品牌色更新
+                        screen.requestFullRedraw();
                         eventLoop.setDirty();
                     }
                 });
