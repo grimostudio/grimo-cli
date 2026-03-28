@@ -11,6 +11,7 @@ import org.springframework.shell.core.command.CommandRegistry;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -33,8 +34,7 @@ class GrimoCommandCompleterTest {
 
     @Test
     void slashPrefixShouldProvideSkillCandidatesWithSlashInValue() {
-        skillRegistry.register(new SkillDefinition("healthcheck", "Check health", "1.0.0",
-            "grimo-builtin", "api", List.of("cron"), "# HC"));
+        skillRegistry.register(testSkill("healthcheck"));
         var candidates = new ArrayList<Candidate>();
         var line = mockParsedLine("/", List.of("/"));
         completer.complete(mock(LineReader.class), line, candidates);
@@ -44,8 +44,7 @@ class GrimoCommandCompleterTest {
 
     @Test
     void slashPrefixShouldReturnAllCandidatesForJLineFiltering() {
-        skillRegistry.register(new SkillDefinition("healthcheck", "Check health", "1.0.0",
-            "grimo-builtin", "api", List.of(), "# HC"));
+        skillRegistry.register(testSkill("healthcheck"));
         var candidates = new ArrayList<Candidate>();
         var line = mockParsedLine("/hea", List.of("/hea"));
         completer.complete(mock(LineReader.class), line, candidates);
@@ -59,6 +58,14 @@ class GrimoCommandCompleterTest {
         var line = mockParsedLine("stat", List.of("stat"));
         completer.complete(mock(LineReader.class), line, candidates);
         // Just verify no exception thrown — parent returns empty since we mocked empty registry
+    }
+
+    private SkillDefinition testSkill(String name) {
+        return new SkillDefinition(
+            name, "Check health", null, null, List.of(), Map.of(),
+            null, null, null, null, null, null, null, List.of(), null,
+            "# HC"
+        );
     }
 
     private ParsedLine mockParsedLine(String line, List<String> words) {

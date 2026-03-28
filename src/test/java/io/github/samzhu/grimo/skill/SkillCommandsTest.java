@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -27,8 +28,12 @@ class SkillCommandsTest {
 
     @Test
     void listShouldShowRegisteredSkills() {
-        registry.register(new SkillDefinition("healthcheck", "Check health", "1.0.0",
-            "grimo-builtin", "api", List.of("cron"), "# HC"));
+        registry.register(new SkillDefinition(
+            "healthcheck", "Check health", null, null, List.of(),
+            Map.of("grimo.version", "1.0.0", "grimo.author", "grimo-builtin"),
+            null, null, null, null, null, null, null, List.of(), null,
+            "# HC"
+        ));
 
         String output = commands.list();
 
@@ -45,8 +50,11 @@ class SkillCommandsTest {
 
     @Test
     void removeShouldUnregisterSkill() {
-        registry.register(new SkillDefinition("test", "Test", "1.0.0",
-            "test", "api", List.of(), "# Test"));
+        registry.register(new SkillDefinition(
+            "test", "Test", null, null, List.of(), Map.of(),
+            null, null, null, null, null, null, null, List.of(), null,
+            "# Test"
+        ));
 
         String output = commands.remove("test");
 

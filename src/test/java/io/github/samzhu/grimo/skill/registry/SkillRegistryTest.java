@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -44,13 +45,21 @@ class SkillRegistryTest {
 
     @Test
     void registerShouldOverwriteExisting() {
-        registry.register(new SkillDefinition("x", "old", "1.0", "a", "api", List.of(), "old body"));
-        registry.register(new SkillDefinition("x", "new", "2.0", "a", "api", List.of(), "new body"));
+        registry.register(testSkill("x", "old", "old body"));
+        registry.register(testSkill("x", "new", "new body"));
 
         assertThat(registry.get("x").get().description()).isEqualTo("new");
     }
 
     private SkillDefinition sampleSkill(String name) {
-        return new SkillDefinition(name, "Test skill", "1.0.0", "test", "api", List.of(), "# Test");
+        return testSkill(name, "Test skill", "# Test");
+    }
+
+    private SkillDefinition testSkill(String name, String description, String body) {
+        return new SkillDefinition(
+            name, description, null, null, List.of(), Map.of(),
+            null, null, null, null, null, null, null, List.of(), null,
+            body
+        );
     }
 }

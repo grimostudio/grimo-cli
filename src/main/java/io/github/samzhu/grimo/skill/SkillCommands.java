@@ -41,7 +41,7 @@ public class SkillCommands {
         sb.append(String.format("  %-15s %-10s %-15s %-8s%n", "NAME", "VERSION", "AUTHOR", "STATUS"));
         for (SkillDefinition s : skills) {
             sb.append(String.format("  %-15s %-10s %-15s %-8s%n",
-                s.name(), s.version(), s.author(), "loaded"));
+                s.name(), s.grimoVersion(), s.grimoAuthor(), "loaded"));
         }
         return sb.toString();
     }
