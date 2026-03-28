@@ -92,7 +92,7 @@
 |------|------|------|
 | **Sub-agent** | Sub-agent | Grimo 派遣的獨立 CLI agent 實例。擁有獨立 context，不共享主對話歷史。接收明確的 goal，完成後回傳摘要結果。程式碼中使用 `SubAgent`（CamelCase），metadata key 使用 `subagents`（無連字號）。 |
 | **Tier** | Tier | Skill 執行的能力等級。三級：`lite`（快速便宜）、`std`（日常主力）、`pro`（深度推理）。每級對應一個 agent+model fallback list。 |
-| **Grimo Skill** | Grimo Skill | 放在 `~/.grimo/skills/` 的 SKILL.md，定義 Grimo 的調度指令（派誰、怎麼分工）。不是給 CLI agent 的執行指令。 |
+| **Grimo Skill** | Grimo Skill | 放在 `~/.grimo/skills/` 的 SKILL.md，格式對齊 Agent Skills 開放標準（[agentskills.io](https://agentskills.io/specification)）。定義 Grimo 的調度指令（派誰、怎麼分工）。Grimo 擴充欄位放在 `metadata` map 裡（`grimo.tier`、`grimo.subagents`、`grimo.execution`）。第三方 Skill 直接安裝不會解析失敗。 |
 | **Agent Skill** | Agent Skill | 各 CLI agent 自己的 skill（如 `.claude/skills/`、`.gemini/agents/`）。由 agent 自己讀取和執行，Grimo 不介入。 |
 | **Portable MCP** | Portable MCP | Spring AI Community Agent Client 的 MCP 轉換機制。在 `config.yaml` 統一定義 MCP server（stdio/sse/http），SDK 自動轉成各 CLI agent 的原生格式（Claude: `--mcp-config` JSON、Gemini: settings.json、Codex: 原生格式）。Grimo 不需處理轉換邏輯。 |
 | **McpServerCatalog** | MCP Server Catalog | 所有 MCP server 定義的 immutable 集合。由 `McpCatalogBuilder` 從 `config.yaml` 建構，傳入 `AgentClient.Builder.mcpServerCatalog()` 後由 SDK 處理分發。 |

@@ -1,7 +1,7 @@
 # F1: MCP Catalog 接通 AgentClient
 
 > Date: 2026-03-27
-> Status: Draft
+> Status: Done
 > Phase: 1（基礎設施）
 > Parent: [PRD](2026-03-27-grimo-orchestration-platform-prd.md)
 
