@@ -105,6 +105,34 @@ class McpCatalogBuilderTest {
     }
 
     @Test
+    void rebuildShouldUpdateCachedCatalog() {
+        var config = mock(GrimoConfig.class);
+        // 第一次 build：空
+        when(config.getMcpServers()).thenReturn(Map.of());
+        var builder = new McpCatalogBuilder(config);
+        builder.rebuild();
+        assertThat(builder.getCatalog().getAll()).isEmpty();
+        assertThat(builder.getServerNames()).isEmpty();
+
+        // 第二次 rebuild：有一個 server
+        when(config.getMcpServers()).thenReturn(Map.of(
+                "deepwiki", Map.of("type", "sse", "url", "https://mcp.deepwiki.com/sse")
+        ));
+        builder.rebuild();
+        assertThat(builder.getCatalog().getAll()).hasSize(1);
+        assertThat(builder.getServerNames()).containsExactly("deepwiki");
+    }
+
+    @Test
+    void getCatalogBeforeRebuildShouldReturnEmpty() {
+        var config = mock(GrimoConfig.class);
+        var builder = new McpCatalogBuilder(config);
+
+        // 未呼叫 rebuild 前，getCatalog 回傳空 catalog
+        assertThat(builder.getCatalog().getAll()).isEmpty();
+    }
+
+    @Test
     void throwsWhenStdioMissingCommand() {
         var config = mock(GrimoConfig.class);
         when(config.getMcpServers()).thenReturn(Map.of(

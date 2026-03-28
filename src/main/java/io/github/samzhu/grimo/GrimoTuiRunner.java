@@ -3,11 +3,13 @@ package io.github.samzhu.grimo;
 import io.github.samzhu.grimo.agent.detect.AgentModelFactory;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
+import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
+import org.springaicommunity.agents.client.AgentClient;
 import org.jline.terminal.MouseEvent;
 import org.jline.terminal.Terminal;
 import org.slf4j.Logger;
@@ -64,6 +66,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final CommandParser commandParser;
     private final CommandExecutor commandExecutor;
     private final CommandRegistry commandRegistry;
+    private final McpCatalogBuilder mcpCatalogBuilder;
 
     /** AI 對話併發控制：確保同時只有一個 agent 執行 */
     private volatile boolean agentRunning = false;
@@ -89,7 +92,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
                            BannerRenderer bannerRenderer,
                            CommandParser commandParser,
                            CommandExecutor commandExecutor,
-                           CommandRegistry commandRegistry) {
+                           CommandRegistry commandRegistry,
+                           McpCatalogBuilder mcpCatalogBuilder) {
         this.terminal = terminal;
         this.workspaceManager = workspaceManager;
         this.grimoConfig = grimoConfig;
@@ -103,6 +107,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
         this.commandParser = commandParser;
         this.commandExecutor = commandExecutor;
         this.commandRegistry = commandRegistry;
+        this.mcpCatalogBuilder = mcpCatalogBuilder;
     }
 
     @Override
@@ -116,6 +121,13 @@ public class GrimoTuiRunner implements ApplicationRunner {
         var agentResults = agentModelFactory.detectAndRegister(
                 java.nio.file.Path.of(System.getProperty("user.dir")));
         loadSkills();
+
+        // Phase 2: MCP catalog 初始建構（快取在 McpCatalogBuilder 內，/mcp-add 時自動 rebuild）
+        mcpCatalogBuilder.rebuild();
+        log.debug("MCP catalog built: {} servers [{}]",
+                mcpCatalogBuilder.getServerNames().size(),
+                String.join(", ", mcpCatalogBuilder.getServerNames()));
+
         restoreTasks();
 
         // === Phase 3: 準備環境資訊 ===
@@ -379,7 +391,15 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 agentThread = Thread.startVirtualThread(() -> {
                     long startTime = System.currentTimeMillis();
                     try {
-                        var client = org.springaicommunity.agents.client.AgentClient.create(model);
+                        // 設計說明：使用 builder pattern 傳入 MCP catalog，讓 CLI agent 自動帶上 MCP tools
+                        // McpServerCatalog 由 Portable MCP 機制自動轉成各 CLI 原生格式
+                        // 參考：javap AgentClient$Builder → mcpServerCatalog() + defaultMcpServers()
+                        // 設計說明：每次取 McpCatalogBuilder 最新快取，/mcp-add 後即時生效
+                        // volatile 保證 command thread 寫入後 virtual thread 能看到新值
+                        var client = AgentClient.builder(model)
+                                .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
+                                .defaultMcpServers(mcpCatalogBuilder.getServerNames())
+                                .build();
                         var response = client
                                 .goal(text)
                                 .workingDirectory(java.nio.file.Path.of(System.getProperty("user.dir")))

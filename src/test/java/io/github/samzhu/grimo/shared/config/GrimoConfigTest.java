@@ -95,4 +95,65 @@ class GrimoConfigTest {
         var perms = Files.getPosixFilePermissions(configFile);
         assertThat(perms).hasSize(2); // OWNER_READ, OWNER_WRITE
     }
+
+    @Test
+    void setMcpServerShouldPersistSseServer() {
+        var configFile = tempDir.resolve("config.yaml");
+        var config = new GrimoConfig(configFile);
+
+        config.setMcpServer("deepwiki", Map.of(
+                "type", "sse",
+                "url", "https://mcp.deepwiki.com/sse"
+        ));
+
+        var reloaded = new GrimoConfig(configFile);
+        var servers = reloaded.getMcpServers();
+        assertThat(servers).containsKey("deepwiki");
+        assertThat(servers.get("deepwiki").get("type")).isEqualTo("sse");
+        assertThat(servers.get("deepwiki").get("url")).isEqualTo("https://mcp.deepwiki.com/sse");
+    }
+
+    @Test
+    void setMcpServerShouldCreateMcpSectionWhenMissing() {
+        var configFile = tempDir.resolve("config.yaml");
+        var config = new GrimoConfig(configFile);
+
+        config.setMcpServer("test-server", Map.of("type", "http", "url", "http://localhost/mcp"));
+
+        assertThat(configFile).exists();
+        var servers = new GrimoConfig(configFile).getMcpServers();
+        assertThat(servers).containsKey("test-server");
+    }
+
+    @Test
+    void removeMcpServerShouldDeleteFromConfig() throws IOException {
+        var configFile = tempDir.resolve("config.yaml");
+        Files.writeString(configFile, """
+            mcp:
+              deepwiki:
+                type: sse
+                url: https://mcp.deepwiki.com/sse
+              filesystem:
+                type: stdio
+                command: npx
+            """);
+
+        var config = new GrimoConfig(configFile);
+        boolean removed = config.removeMcpServer("deepwiki");
+
+        assertThat(removed).isTrue();
+        var servers = new GrimoConfig(configFile).getMcpServers();
+        assertThat(servers).doesNotContainKey("deepwiki");
+        assertThat(servers).containsKey("filesystem");
+    }
+
+    @Test
+    void removeMcpServerShouldReturnFalseWhenNotFound() {
+        var configFile = tempDir.resolve("config.yaml");
+        var config = new GrimoConfig(configFile);
+
+        boolean removed = config.removeMcpServer("nonexistent");
+
+        assertThat(removed).isFalse();
+    }
 }

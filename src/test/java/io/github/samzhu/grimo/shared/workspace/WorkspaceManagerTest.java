@@ -23,6 +23,20 @@ class WorkspaceManagerTest {
         assertThat(tempDir.resolve("conversations")).isDirectory();
         assertThat(tempDir.resolve("logs")).isDirectory();
         assertThat(tempDir.resolve("agents")).isDirectory();
+        assertThat(tempDir.resolve("config.yaml")).isRegularFile();
+        assertThat(tempDir.resolve("config.yaml")).content().contains("# MCP Server");
+    }
+
+    @Test
+    void initializeShouldNotOverwriteExistingConfig() throws Exception {
+        var manager = new WorkspaceManager(tempDir);
+        var configFile = tempDir.resolve("config.yaml");
+        Files.writeString(configFile, "mcp:\n  deepwiki:\n    type: sse\n    url: https://mcp.deepwiki.com/sse\n");
+
+        manager.initialize();
+
+        assertThat(configFile).content().contains("deepwiki");
+        assertThat(configFile).content().doesNotContain("# Grimo CLI");
     }
 
     @Test

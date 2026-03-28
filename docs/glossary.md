@@ -94,6 +94,8 @@
 | **Tier** | Tier | Skill 執行的能力等級。三級：`lite`（快速便宜）、`std`（日常主力）、`pro`（深度推理）。每級對應一個 agent+model fallback list。 |
 | **Grimo Skill** | Grimo Skill | 放在 `~/.grimo/skills/` 的 SKILL.md，定義 Grimo 的調度指令（派誰、怎麼分工）。不是給 CLI agent 的執行指令。 |
 | **Agent Skill** | Agent Skill | 各 CLI agent 自己的 skill（如 `.claude/skills/`、`.gemini/agents/`）。由 agent 自己讀取和執行，Grimo 不介入。 |
+| **Portable MCP** | Portable MCP | Spring AI Community Agent Client 的 MCP 轉換機制。在 `config.yaml` 統一定義 MCP server（stdio/sse/http），SDK 自動轉成各 CLI agent 的原生格式（Claude: `--mcp-config` JSON、Gemini: settings.json、Codex: 原生格式）。Grimo 不需處理轉換邏輯。 |
+| **McpServerCatalog** | MCP Server Catalog | 所有 MCP server 定義的 immutable 集合。由 `McpCatalogBuilder` 從 `config.yaml` 建構，傳入 `AgentClient.Builder.mcpServerCatalog()` 後由 SDK 處理分發。 |
 
 ## Agent 技術元件對應
 
@@ -103,9 +105,9 @@
 | Agent 偵測 | `AgentModelFactory` | 各 SDK `isAvailable()` + Virtual Thread 並行偵測 |
 | Agent 註冊 | `AgentModelRegistry` | `ConcurrentHashMap<String, AgentModel>`（runtime 動態增刪） |
 | Agent 路由 | `AgentRouter` | config default → 第一個可用 |
-| Agent 呼叫 | `AgentClient.create(model).goal().run()` | CLI subprocess（claude / gemini / codex） |
+| Agent 呼叫 | `AgentClient.builder(model).mcpServerCatalog().build().goal().run()` | CLI subprocess（claude / gemini / codex） |
 | Agent 配置 | `AgentConfiguration` | `@Configuration` + `AgentSpec` per CLI agent |
 | Advisor: Session | `GrimoSessionAdvisor` | `AgentCallAdvisor`（around-advice，記錄 goal/result） |
 | Advisor: Validation | `GoalValidationAdvisor` | `AgentCallAdvisor`（阻擋危險操作） |
-| MCP 定義 | `McpCatalogBuilder` | `McpServerCatalog`（Portable MCP，各 CLI 自動轉原生格式） |
+| MCP 定義 | `McpCatalogBuilder` | `McpServerCatalog`（Portable MCP，config.yaml → AgentClient.Builder） |
 | 非阻塞對話 | `GrimoTuiRunner` | Virtual Thread + `eventLoop.setDirty()` 觸發重繪 |

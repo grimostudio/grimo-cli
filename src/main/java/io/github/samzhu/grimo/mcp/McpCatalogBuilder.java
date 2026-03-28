@@ -32,8 +32,36 @@ public class McpCatalogBuilder {
 
     private final GrimoConfig config;
 
+    /**
+     * 設計說明：volatile 保證 command thread 寫入後 agent virtual thread 能看到最新值。
+     * McpServerCatalog 本身是 immutable，替換參照即可安全切換。
+     */
+    private volatile McpServerCatalog cachedCatalog = McpServerCatalog.of(Map.of());
+    private volatile List<String> cachedServerNames = List.of();
+
     public McpCatalogBuilder(GrimoConfig config) {
         this.config = config;
+    }
+
+    /**
+     * 重讀 config.yaml 並重建 catalog 快取。
+     * 由 /mcp-add、/mcp-remove 呼叫以達到即時生效。
+     * 也由 GrimoTuiRunner Phase 2 啟動時呼叫。
+     */
+    public void rebuild() {
+        McpServerCatalog newCatalog = build();
+        cachedServerNames = List.copyOf(newCatalog.getAll().keySet());
+        cachedCatalog = newCatalog;
+    }
+
+    /** 取得目前快取的 catalog（immutable，thread-safe）。 */
+    public McpServerCatalog getCatalog() {
+        return cachedCatalog;
+    }
+
+    /** 取得目前快取的 server 名稱列表（immutable）。 */
+    public List<String> getServerNames() {
+        return cachedServerNames;
     }
 
     /**

@@ -21,7 +21,7 @@ public class GrimoConfig {
     }
 
     @SuppressWarnings("unchecked")
-    public Map<String, Object> load() {
+    public synchronized Map<String, Object> load() {
         if (!Files.exists(configFile)) {
             return new LinkedHashMap<>();
         }
@@ -34,24 +34,24 @@ public class GrimoConfig {
         }
     }
 
-    public String getDefaultAgent() {
+    public synchronized String getDefaultAgent() {
         return getNestedString("agents", "default");
     }
 
-    public String getDefaultModel() {
+    public synchronized String getDefaultModel() {
         return getNestedString("agents", "model");
     }
 
-    public void setDefaultAgent(String agentId) {
+    public synchronized void setDefaultAgent(String agentId) {
         setNestedValue("agents", "default", agentId);
     }
 
-    public void setDefaultModel(String model) {
+    public synchronized void setDefaultModel(String model) {
         setNestedValue("agents", "model", model);
     }
 
     @SuppressWarnings("unchecked")
-    private String getNestedString(String section, String key) {
+    private synchronized String getNestedString(String section, String key) {
         var data = load();
         var sectionMap = (Map<String, Object>) data.get(section);
         if (sectionMap == null) return null;
@@ -60,7 +60,7 @@ public class GrimoConfig {
     }
 
     @SuppressWarnings("unchecked")
-    private void setNestedValue(String section, String key, String value) {
+    private synchronized void setNestedValue(String section, String key, String value) {
         var data = load();
         var sectionMap = (Map<String, Object>) data.computeIfAbsent(section, k -> new LinkedHashMap<>());
         sectionMap.put(key, value);
@@ -75,7 +75,7 @@ public class GrimoConfig {
      * - 取代原本全域的 agents.model 設定
      */
     @SuppressWarnings("unchecked")
-    public String getAgentOption(String agentId, String key) {
+    public synchronized String getAgentOption(String agentId, String key) {
         var data = load();
         var agentOptions = (Map<String, Object>) data.get("agent-options");
         if (agentOptions == null) return null;
@@ -90,13 +90,41 @@ public class GrimoConfig {
      * 回傳格式：Map<serverName, Map<configKey, configValue>>
      */
     @SuppressWarnings("unchecked")
-    public Map<String, Map<String, Object>> getMcpServers() {
+    public synchronized Map<String, Map<String, Object>> getMcpServers() {
         var data = load();
         var mcp = (Map<String, Map<String, Object>>) data.get("mcp");
         return mcp != null ? mcp : Map.of();
     }
 
-    public void save(Map<String, Object> data) {
+    /**
+     * 新增或更新指定名稱的 MCP server 定義到 config 的 mcp 區段。
+     * 若 mcp 區段不存在則自動建立。
+     */
+    @SuppressWarnings("unchecked")
+    public synchronized void setMcpServer(String name, Map<String, Object> serverDef) {
+        var data = load();
+        var mcp = (Map<String, Map<String, Object>>) data.computeIfAbsent("mcp", k -> new LinkedHashMap<>());
+        mcp.put(name, new LinkedHashMap<>(serverDef));
+        save(data);
+    }
+
+    /**
+     * 移除指定名稱的 MCP server 定義。
+     * 回傳 true 表示成功移除，false 表示該 server 不存在。
+     */
+    @SuppressWarnings("unchecked")
+    public synchronized boolean removeMcpServer(String name) {
+        var data = load();
+        var mcp = (Map<String, Map<String, Object>>) data.get("mcp");
+        if (mcp == null || !mcp.containsKey(name)) {
+            return false;
+        }
+        mcp.remove(name);
+        save(data);
+        return true;
+    }
+
+    public synchronized void save(Map<String, Object> data) {
         var options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         options.setPrettyFlow(true);
