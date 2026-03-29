@@ -1,7 +1,7 @@
 # F1 附加：MCP 斜線指令（add/remove）
 
 > Date: 2026-03-27
-> Status: Draft
+> Status: Done
 > Phase: 1（基礎設施）
 > Parent: [F1 Spec](2026-03-27-f1-mcp-catalog-wiring.md)
 

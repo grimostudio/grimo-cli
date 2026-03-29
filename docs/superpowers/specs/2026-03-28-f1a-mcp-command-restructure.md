@@ -1,7 +1,7 @@
 # F1-a: MCP 指令結構對齊業界語法
 
 > Date: 2026-03-28
-> Status: Draft
+> Status: Done
 > Phase: 1（基礎設施）
 > Parent: [F1 Spec](2026-03-27-f1-mcp-catalog-wiring.md)
 

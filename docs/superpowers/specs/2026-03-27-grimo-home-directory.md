@@ -1,7 +1,7 @@
 # 應用程式資料目錄遷移：~/grimo-workspace → ~/.grimo
 
 > Date: 2026-03-27
-> Status: Draft
+> Status: Done
 > Parent: [PRD](2026-03-27-grimo-orchestration-platform-prd.md)
 
 ## 問題

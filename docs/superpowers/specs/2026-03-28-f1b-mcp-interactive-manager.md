@@ -1,7 +1,7 @@
 # F1-b: MCP 互動式管理畫面
 
 > Date: 2026-03-28
-> Status: Draft
+> Status: Done
 > Phase: 1（基礎設施）
 > Parent: [F1 Spec](2026-03-27-f1-mcp-catalog-wiring.md)
 > Depends on: [F1-a](2026-03-28-f1a-mcp-command-restructure.md)（`/mcp`、`/mcp-add`、`/mcp-remove` 指令已實作）
