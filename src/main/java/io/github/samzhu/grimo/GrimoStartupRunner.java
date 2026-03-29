@@ -8,6 +8,8 @@ import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.config.GrimoProperties;
 import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
+import io.github.samzhu.grimo.shared.sandbox.WorkspaceProvisioner;
+import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import io.github.samzhu.grimo.task.store.MarkdownTaskStore;
@@ -79,6 +81,16 @@ public class GrimoStartupRunner {
     @Bean
     Path skillsDir(WorkspaceManager workspaceManager) {
         return workspaceManager.skillsDir();
+    }
+
+    @Bean
+    WorkspaceProvisioner workspaceProvisioner(WorkspaceManager workspaceManager) {
+        return new WorkspaceProvisioner(workspaceManager.skillsDir());
+    }
+
+    @Bean
+    SandboxDetector sandboxDetector() {
+        return new SandboxDetector();
     }
 
     @Bean

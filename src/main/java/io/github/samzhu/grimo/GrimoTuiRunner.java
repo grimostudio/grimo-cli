@@ -4,6 +4,8 @@ import io.github.samzhu.grimo.agent.detect.AgentModelFactory;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
+import io.github.samzhu.grimo.shared.sandbox.WorkspaceProvisioner;
+import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
@@ -67,6 +69,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final CommandExecutor commandExecutor;
     private final CommandRegistry commandRegistry;
     private final McpCatalogBuilder mcpCatalogBuilder;
+    private final WorkspaceProvisioner workspaceProvisioner;
+    private final SandboxDetector sandboxDetector;
 
     /** AI 對話併發控制：確保同時只有一個 agent 執行 */
     private volatile boolean agentRunning = false;
@@ -98,7 +102,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
                            CommandParser commandParser,
                            CommandExecutor commandExecutor,
                            CommandRegistry commandRegistry,
-                           McpCatalogBuilder mcpCatalogBuilder) {
+                           McpCatalogBuilder mcpCatalogBuilder,
+                           WorkspaceProvisioner workspaceProvisioner,
+                           SandboxDetector sandboxDetector) {
         this.terminal = terminal;
         this.workspaceManager = workspaceManager;
         this.grimoConfig = grimoConfig;
@@ -113,6 +119,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
         this.commandExecutor = commandExecutor;
         this.commandRegistry = commandRegistry;
         this.mcpCatalogBuilder = mcpCatalogBuilder;
+        this.workspaceProvisioner = workspaceProvisioner;
+        this.sandboxDetector = sandboxDetector;
     }
 
     @Override
@@ -134,6 +142,11 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 String.join(", ", mcpCatalogBuilder.getServerNames()));
 
         restoreTasks();
+
+        // Phase 2: Sandbox 後端偵測
+        var sandboxResult = sandboxDetector.detect();
+        String sandboxMode = sandboxDetector.resolveMode(sandboxResult, grimoConfig.getSandboxMode());
+        log.info("Using sandbox mode: {}", sandboxMode);
 
         // === Phase 3: 準備環境資訊 ===
         String version = getClass().getPackage().getImplementationVersion();
