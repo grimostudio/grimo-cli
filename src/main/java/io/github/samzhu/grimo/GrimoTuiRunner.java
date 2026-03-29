@@ -508,6 +508,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     var provisionedSkills = workspaceProvisioner.provision(
                             projectDir, skillRegistry.listAll());
                     try {
+                        // 移除 "thinking..." 暫時狀態行（在顯示 skill 之前）
+                        contentView.removeLastLine();
+
                         // 在 Content 區顯示已配置的 skill（對齊 Claude Code 風格）
                         for (var skillName : provisionedSkills) {
                             var nameLine = new org.jline.utils.AttributedStringBuilder();
@@ -536,9 +539,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
                                 .workingDirectory(projectDir)
                                 .run();
 
-                        // 移除 "thinking..." 暫時狀態行
-                        contentView.removeLastLine();
-
                         long duration = System.currentTimeMillis() - startTime;
                         if (response.isSuccessful()) {
                             log.info("Agent response received: success=true, duration={}ms, resultLength={}",
@@ -551,7 +551,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
                         }
                         sessionWriter.writeAssistantMessage(response.getResult());
                     } catch (Exception e) {
-                        contentView.removeLastLine(); // 移除 "thinking..."
                         long duration = System.currentTimeMillis() - startTime;
                         log.error("Agent call failed: duration={}ms, error={}", duration, e.getMessage(), e);
                         String errorMsg = formatAgentError(e);
