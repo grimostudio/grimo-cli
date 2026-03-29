@@ -124,6 +124,15 @@ public class GrimoConfig {
         return true;
     }
 
+    /**
+     * 取得 sandbox 模式設定（local / docker / e2b）。
+     * 預設 "local"。
+     */
+    public synchronized String getSandboxMode() {
+        String mode = getNestedString("sandbox", "mode");
+        return mode != null ? mode : "local";
+    }
+
     public synchronized void save(Map<String, Object> data) {
         var options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);

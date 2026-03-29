@@ -148,6 +148,25 @@ class GrimoConfigTest {
     }
 
     @Test
+    void getSandboxModeShouldReturnConfiguredMode() throws Exception {
+        var configFile = tempDir.resolve("config.yaml");
+        Files.writeString(configFile, """
+            sandbox:
+              mode: docker
+            """);
+        var config = new GrimoConfig(configFile);
+        assertThat(config.getSandboxMode()).isEqualTo("docker");
+    }
+
+    @Test
+    void getSandboxModeShouldReturnLocalWhenNotConfigured() throws Exception {
+        var configFile = tempDir.resolve("config.yaml");
+        Files.writeString(configFile, "agents:\n  default: claude\n");
+        var config = new GrimoConfig(configFile);
+        assertThat(config.getSandboxMode()).isEqualTo("local");
+    }
+
+    @Test
     void removeMcpServerShouldReturnFalseWhenNotFound() {
         var configFile = tempDir.resolve("config.yaml");
         var config = new GrimoConfig(configFile);

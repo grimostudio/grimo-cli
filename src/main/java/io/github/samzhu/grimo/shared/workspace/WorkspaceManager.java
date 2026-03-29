@@ -69,6 +69,16 @@ public class WorkspaceManager {
             #  deepwiki:
             #    type: sse
             #    url: https://mcp.deepwiki.com/sse
+
+            # Sandbox 設定（agent 執行環境）
+            # skill 和 MCP 會自動配置到 sandbox 中讓 CLI agent 使用
+            #sandbox:
+            #  mode: local              # local | docker | e2b（預設 local）
+            #  docker:
+            #    image: ghcr.io/spring-ai-community/agents-runtime:latest
+            #  e2b:
+            #    api-key: ${E2B_API_KEY}
+            #    template: base
             """;
 
     public boolean isInitialized() {
