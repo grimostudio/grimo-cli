@@ -68,6 +68,7 @@ dependencies {
     testImplementation("org.springframework.shell:spring-shell-starter-test")
     testImplementation("org.testcontainers:testcontainers-grafana")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testImplementation("org.springaicommunity:agent-sandbox-docker:0.9.1-SNAPSHOT")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
