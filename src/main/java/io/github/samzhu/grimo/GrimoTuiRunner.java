@@ -501,7 +501,27 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
                 agentThread = Thread.startVirtualThread(() -> {
                     long startTime = System.currentTimeMillis();
+                    // 設計說明：派遣前將 Grimo 管理的 skill symlink 到 .agents/skills/
+                    // CLI agent（Claude/Gemini/Codex）原生掃描 .agents/skills/ 發現 skill
+                    // Progressive Disclosure：agent 只讀 name+description，需要時才載入 body
+                    var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
+                    var provisionedSkills = workspaceProvisioner.provision(
+                            projectDir, skillRegistry.listAll());
                     try {
+                        // 在 Content 區顯示已配置的 skill（對齊 Claude Code 風格）
+                        for (var skillName : provisionedSkills) {
+                            var nameLine = new org.jline.utils.AttributedStringBuilder();
+                            nameLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(2), "● ");
+                            nameLine.append("Skill(" + skillName + ")");
+                            contentView.appendLine(nameLine.toAttributedString());
+
+                            var statusLine = new org.jline.utils.AttributedStringBuilder();
+                            statusLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
+                                    "  └ Successfully loaded skill");
+                            contentView.appendLine(statusLine.toAttributedString());
+                            eventLoop.setDirty();
+                        }
+
                         // 設計說明：使用 builder pattern 傳入 MCP catalog，讓 CLI agent 自動帶上 MCP tools
                         // McpServerCatalog 由 Portable MCP 機制自動轉成各 CLI 原生格式
                         // 參考：javap AgentClient$Builder → mcpServerCatalog() + defaultMcpServers()
@@ -513,7 +533,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                                 .build();
                         var response = client
                                 .goal(text)
-                                .workingDirectory(java.nio.file.Path.of(System.getProperty("user.dir")))
+                                .workingDirectory(projectDir)
                                 .run();
 
                         // 移除 "thinking..." 暫時狀態行
@@ -539,6 +559,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     } finally {
                         agentRunning = false;
                         agentThread = null;
+                        // 清理 Grimo 建立的 symlink
+                        workspaceProvisioner.cleanup(projectDir, provisionedSkills);
                         // agent 完成後 content 區大量變動，強制全螢幕重繪
                         // 修正：JLine Display diff 可能遺漏 input 行的品牌色更新
                         screen.requestFullRedraw();
