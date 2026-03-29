@@ -6,33 +6,63 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SandboxDetectorTest {
 
+    private final SandboxDetector detector = new SandboxDetector();
+
+    // === detect() 測試 ===
+
     @Test
     void localShouldAlwaysBeAvailable() {
-        var detector = new SandboxDetector();
-        var results = detector.detect();
-        assertThat(results.localAvailable()).isTrue();
+        var result = detector.detect();
+        assertThat(result.localAvailable()).isTrue();
     }
 
-    @Test
-    void detectShouldReturnAllBackends() {
-        var detector = new SandboxDetector();
-        var results = detector.detect();
-        assertThat(results.localAvailable()).isTrue();
-        assertThat(results).isNotNull();
-    }
-
-    @Test
-    void resolveModeShouldFallbackToLocal() {
-        var detector = new SandboxDetector();
-        var results = detector.detect();
-        String mode = detector.resolveMode(results, "docker");
-        assertThat(mode).isIn("docker", "local");
-    }
+    // === resolveMode() 測試（使用建構的 DetectionResult，不依賴實際環境）===
 
     @Test
     void resolveModeShouldReturnLocalWhenRequested() {
-        var detector = new SandboxDetector();
-        var results = detector.detect();
-        assertThat(detector.resolveMode(results, "local")).isEqualTo("local");
+        var result = new SandboxDetector.DetectionResult(true, false, false);
+        assertThat(detector.resolveMode(result, "local")).isEqualTo("local");
+    }
+
+    @Test
+    void resolveModeShouldReturnDockerWhenAvailable() {
+        var result = new SandboxDetector.DetectionResult(true, true, false);
+        assertThat(detector.resolveMode(result, "docker")).isEqualTo("docker");
+    }
+
+    @Test
+    void resolveModeShouldFallbackToLocalWhenDockerUnavailable() {
+        var result = new SandboxDetector.DetectionResult(true, false, false);
+        assertThat(detector.resolveMode(result, "docker")).isEqualTo("local");
+    }
+
+    @Test
+    void resolveModeShouldReturnE2bWhenAvailable() {
+        var result = new SandboxDetector.DetectionResult(true, false, true);
+        assertThat(detector.resolveMode(result, "e2b")).isEqualTo("e2b");
+    }
+
+    @Test
+    void resolveModeShouldFallbackToLocalWhenE2bUnavailable() {
+        var result = new SandboxDetector.DetectionResult(true, false, false);
+        assertThat(detector.resolveMode(result, "e2b")).isEqualTo("local");
+    }
+
+    @Test
+    void resolveModeShouldFallbackToLocalForUnknownMode() {
+        var result = new SandboxDetector.DetectionResult(true, true, true);
+        assertThat(detector.resolveMode(result, "kubernetes")).isEqualTo("local");
+    }
+
+    @Test
+    void resolveModeShouldReturnLocalForNullMode() {
+        var result = new SandboxDetector.DetectionResult(true, false, false);
+        assertThat(detector.resolveMode(result, null)).isEqualTo("local");
+    }
+
+    @Test
+    void resolveModeShouldReturnLocalForEmptyMode() {
+        var result = new SandboxDetector.DetectionResult(true, false, false);
+        assertThat(detector.resolveMode(result, "")).isEqualTo("local");
     }
 }
