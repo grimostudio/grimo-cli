@@ -157,18 +157,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 (int) agentCount, skillCount, mcpCount, taskCount);
         contentView.setBannerText(bannerText);
 
-        // Skill 載入資訊顯示（對齊 Claude Code 風格：逐一列出已載入的 skill）
-        for (var skill : skillRegistry.listAll()) {
-            var nameLine = new org.jline.utils.AttributedStringBuilder();
-            nameLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(2), "● ");
-            nameLine.append("Skill(" + skill.name() + ")");
-            contentView.appendLine(nameLine.toAttributedString());
-
-            var statusLine = new org.jline.utils.AttributedStringBuilder();
-            statusLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245), "  └ Successfully loaded skill");
-            contentView.appendLine(statusLine.toAttributedString());
-        }
-
         inputView = new GrimoInputView();
 
         String statusText = agentId + " · " + model + " │ " + workspacePath

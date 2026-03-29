@@ -1,7 +1,7 @@
 # F2-c: Skill 載入 TUI 顯示 + Log
 
 > Date: 2026-03-28
-> Status: Done
+> Status: Superseded by F2-d (Sandbox 環境準備)
 > Phase: 1（基礎設施）
 > Parent: [F2 Spec](2026-03-27-f2-skill-standard-compatibility.md)
 
