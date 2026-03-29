@@ -1,7 +1,7 @@
 # F2-d: Sandbox 環境準備與 Skill/MCP 自動配置
 
 > Date: 2026-03-29
-> Status: Draft
+> Status: Done (Phase A)
 > Phase: 1（基礎設施）
 > Parent: [PRD](2026-03-27-grimo-orchestration-platform-prd.md)
 > Depends: F1 (MCP Catalog), F2 (Skill 標準)

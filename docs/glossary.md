@@ -96,6 +96,8 @@
 | **Agent Skill** | Agent Skill | 各 CLI agent 自己的 skill（如 `.claude/skills/`、`.gemini/agents/`）。由 agent 自己讀取和執行，Grimo 不介入。 |
 | **Portable MCP** | Portable MCP | Spring AI Community Agent Client 的 MCP 轉換機制。在 `config.yaml` 統一定義 MCP server（stdio/sse/http），SDK 自動轉成各 CLI agent 的原生格式（Claude: `--mcp-config` JSON、Gemini: settings.json、Codex: 原生格式）。Grimo 不需處理轉換邏輯。 |
 | **McpServerCatalog** | MCP Server Catalog | 所有 MCP server 定義的 immutable 集合。由 `McpCatalogBuilder` 從 `config.yaml` 建構，傳入 `AgentClient.Builder.mcpServerCatalog()` 後由 SDK 處理分發。 |
+| **WorkspaceProvisioner** | Workspace Provisioner | 派遣 agent 前將 Grimo 管理的 Skill symlink 到工作目錄 `.agents/skills/`（跨 agent 標準路徑）。CLI agent（Claude/Gemini/Codex）原生發現 skill，Progressive Disclosure 自然運作。Grimo 的環境準備層，不同於 SDK 的 `LocalSandbox`（agent 執行隔離層）。 |
+| **Sandbox** | Sandbox | Agent 執行環境。Local 模式直接使用工作目錄（symlink skill）；Docker/E2B 模式使用隔離容器（Phase B/C）。由 `SandboxDetector` 偵測可用後端，`WorkspaceProvisioner` 負責環境配置。 |
 
 ## Agent 技術元件對應
 
