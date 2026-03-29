@@ -12,7 +12,7 @@
 目前 Grimo 派遣 agent 時直接使用 `System.getProperty("user.dir")` 作為工作目錄。Skill 和 MCP 的配置各自分散：
 
 - MCP 透過 `AgentClient.Builder.mcpServerCatalog()` 傳遞（已實作 F1）
-- Skill 放在 `~/.grimo/skills/` 但 CLI agent 看不到（agent 只認 `.claude/skills/`）
+- Skill 放在 `~/.grimo/skills/` 但 CLI agent 看不到（agent 各自掃描 `.claude/skills/`、`.gemini/skills/`、`.codex/skills/`）
 - 沒有統一的「執行環境準備」步驟
 
 ## 目標
@@ -31,27 +31,60 @@
 │            Grimo 調度層                    │
 │  SkillRegistry + McpCatalogBuilder        │
 └──────────────┬────────────────────────────┘
-               │ prepareSandbox()
+               │ provision()
 ┌──────────────▼────────────────────────────┐
-│         Sandbox 層（環境準備）              │
-│  .claude/skills/*/SKILL.md  ← symlink     │
+│      WorkspaceProvisioner（環境準備）       │
+│  .agents/skills/*/SKILL.md  ← symlink     │  ← 跨 agent 標準路徑
 │  MCP → AgentClient.mcpServerCatalog()     │
 │  ┌────────┬──────────┬──────────┐         │
 │  │ Local  │  Docker  │   E2B   │         │
 │  └────────┴──────────┴──────────┘         │
 └──────────────┬────────────────────────────┘
-               │ sandbox.workDir()
+               │ projectDir
 ┌──────────────▼────────────────────────────┐
 │         AgentClient 層                     │
-│  .goal(task).workingDirectory(workDir)    │
+│  .goal(task).workingDirectory(projectDir) │
 └──────────────┬────────────────────────────┘
                │ CLI subprocess
 ┌──────────────▼────────────────────────────┐
 │   CLI Agent（Claude / Gemini / Codex）     │
-│   原生發現 .claude/skills/*               │
+│   原生發現 .agents/skills/*               │  ← 三個 agent 都掃描
 │   Progressive Disclosure (Tier 1→2→3)     │
 └───────────────────────────────────────────┘
 ```
+
+### Agent Skills 跨 agent 發現路徑
+
+三個 CLI agent 都支援 [Agent Skills 開放標準](https://agentskills.io/specification)，且都掃描跨 agent 標準路徑 `.agents/skills/`：
+
+| Agent | Native Project | Native User | **Cross-Client (標準)** |
+|-------|---------------|-------------|------------------------|
+| Claude Code | `.claude/skills/` | `~/.claude/skills/` | **`.agents/skills/`** |
+| Gemini CLI | `.gemini/skills/` | `~/.gemini/skills/` | **`.agents/skills/`** |
+| Codex CLI | `.codex/skills/` | `~/.codex/skills/` | **`.agents/skills/`** |
+
+**Grimo 使用 `.agents/skills/` 作為配置路徑** — 一個路徑，三個 agent 都能原生發現。
+
+> 參考：[Agent Skills Client Implementation Guide](https://agentskills.io/client-implementation/adding-skills-support)
+> — 「`.agents/skills/` paths have emerged as a widely-adopted convention for cross-client skill sharing」
+
+### 各 Agent 的 MCP 配置方式
+
+MCP 已由 AgentClient Portable MCP 機制處理（F1），各 agent 格式自動轉換：
+
+| Agent | MCP 設定格式 | 由 AgentClient 自動處理 |
+|-------|-------------|----------------------|
+| Claude Code | `--mcp-config` JSON | ✅ `McpServerCatalog` |
+| Gemini CLI | `.gemini/settings.json` `mcpServers` | ✅ `McpServerCatalog` |
+| Codex CLI | `.codex/config.toml` `[mcp_servers]` | ✅ `McpServerCatalog` |
+
+### 各 Agent 的指令檔案
+
+| Agent | 專案指令 | 全域指令 |
+|-------|---------|---------|
+| Claude Code | `CLAUDE.md` | `~/.claude/CLAUDE.md` |
+| Gemini CLI | `GEMINI.md` | `~/.gemini/GEMINI.md` |
+| Codex CLI | `AGENTS.md` | `~/.codex/AGENTS.md` |
 
 ## 設計
 
@@ -93,8 +126,8 @@ sandbox:
  *
  * 設計說明：
  * - 每次 agent 派遣前呼叫 provision()，將 SkillRegistry 中的 skill
- *   symlink 到工作目錄的 .claude/skills/
- * - CLI agent 原生發現 .claude/skills/* 中的 SKILL.md
+ *   symlink 到工作目錄的 .agents/skills/（跨 agent 標準路徑）
+ * - CLI agent 原生發現 .agents/skills/* 中的 SKILL.md（Claude/Gemini/Codex 皆支援）
  * - Progressive Disclosure：agent 啟動時只讀 name+description（Tier 1），
  *   對話中 AI 判斷需要時才載入完整 body（Tier 2）
  * - 併發假設：GrimoTuiRunner 已有 agentRunning 守衛，同時只有一個 agent 執行
@@ -104,7 +137,7 @@ sandbox:
  */
 public class WorkspaceProvisioner {
 
-    // 將 skills symlink 到 projectDir/.claude/skills/，回傳已配置的 skill 名稱
+    // 將 skills symlink 到 projectDir/.agents/skills/，回傳已配置的 skill 名稱
     public List<String> provision(Path projectDir, List<SkillDefinition> skills);
 
     // 清理 Grimo 建立的 symlink（不刪除使用者自己的 skill）
@@ -114,18 +147,20 @@ public class WorkspaceProvisioner {
 
 ### 4. Skill 配置機制
 
-**Local 模式：** 在工作目錄下建立 `.claude/skills/` 並 symlink Grimo 管理的 skill：
+**Local 模式：** 在工作目錄下建立 `.agents/skills/` 並 symlink Grimo 管理的 skill：
 
 ```
 projectDir/
-└── .claude/
+└── .agents/
     └── skills/
         ├── code-review -> ~/.grimo/skills/code-review     (symlink)
         └── explain-code -> ~/.grimo/skills/explain-code   (symlink)
 ```
 
+使用 `.agents/skills/`（跨 agent 標準路徑）而非 `.claude/skills/`，確保 Claude Code、Gemini CLI、Codex CLI 都能原生發現。
+
 - 使用 symlink 而非複製，避免重複檔案
-- 如果 `.claude/skills/` 已存在（使用者自己的 skill），不覆蓋，只新增
+- 如果 `.agents/skills/` 已存在（使用者自己的 skill），不覆蓋，只新增
 - Grimo skill 名稱衝突時以使用者的為優先（WARN log）
 - 派遣結束後 cleanup 移除 Grimo 建立的 symlink（不刪除使用者的）
 - 併發安全：`GrimoTuiRunner` 已有 `agentRunning` 守衛，同時只有一個 agent 執行，不需要額外的 mutex
@@ -233,8 +268,8 @@ implementation("org.springaicommunity.agents:spring-ai-gemini:0.10.0-SNAPSHOT")
 ## 分階段實作
 
 **Phase A（此次）：** Local Sandbox + Skill 配置 + TUI 顯示
-- `SandboxManager` 只支援 Local 模式
-- Symlink skill 到 `.claude/skills/`
+- `WorkspaceProvisioner` 只支援 Local 模式
+- Symlink skill 到 `.agents/skills/`（跨 agent 標準路徑，Claude/Gemini/Codex 都支援）
 - 派遣時顯示 `● Skill(name)`
 - 啟動偵測（Docker daemon check）
 
@@ -252,13 +287,16 @@ implementation("org.springaicommunity.agents:spring-ai-gemini:0.10.0-SNAPSHOT")
 1. `~/.grimo/skills/` 放入測試 skill
 2. 啟動 Grimo，日誌顯示 `Sandbox backends: local ✓, docker ✗`
 3. 輸入任意對話，派遣 agent 前 Content 區顯示 `● Skill(name)`
-4. 檢查工作目錄 `.claude/skills/` 下有 symlink
-5. Agent 能原生使用 Grimo 管理的 skill
+4. 檢查工作目錄 `.agents/skills/` 下有 symlink
+5. 任何 CLI agent（Claude/Gemini/Codex）能原生使用 Grimo 管理的 skill
 6. 派遣結束後 symlink 被清理
 
 ## 參考
 
+- [Agent Skills Specification](https://agentskills.io/specification) — 30+ 工具採用的開放標準
+- [Agent Skills Client Implementation Guide](https://agentskills.io/client-implementation/adding-skills-support) — Progressive Disclosure + `.agents/skills/` 跨 agent 路徑
 - [Agent Sandbox](https://springaicommunity.mintlify.app/projects/incubating/agent-sandbox) — Spring AI Community
-- [Agent Skills Progressive Disclosure](https://agentskills.io/client-implementation/adding-skills-support) — agentskills.io
 - [Claude Code Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) — Anthropic
+- [Gemini CLI Skills](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/skills.md) — Google
+- [Codex CLI Skills](https://developers.openai.com/codex/skills) — OpenAI
 - [Agent Client](https://spring-ai-community.github.io/agent-client/) — Spring AI Community
