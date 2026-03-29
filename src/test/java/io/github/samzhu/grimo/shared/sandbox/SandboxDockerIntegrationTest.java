@@ -1,10 +1,10 @@
 package io.github.samzhu.grimo.shared.sandbox;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIf;
 import org.springaicommunity.sandbox.ExecSpec;
 import org.springaicommunity.sandbox.FileSpec;
 import org.springaicommunity.sandbox.docker.DockerSandbox;
+import org.testcontainers.junit.jupiter.EnabledIfDockerAvailable;
 
 import java.util.List;
 
@@ -14,25 +14,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Docker 整合測試：驗證 SandboxDetector 偵測 + DockerSandbox skill 配置可行性。
  *
  * 設計說明：
- * - 只在 Docker daemon 可用時執行（@EnabledIf）
+ * - 使用 Testcontainers @EnabledIfDockerAvailable，Docker 不可用時自動跳過
  * - Part A：驗證 SandboxDetector.checkDocker() 正確偵測
  * - Part B：驗證 DockerSandbox 可用 SandboxFiles 寫入 SKILL.md（Phase B 可行性驗證）
- * - Docker 不可用時自動跳過，不影響 CI/CD
+ *
+ * @see <a href="https://java.testcontainers.org/test_framework_integration/junit_5/">
+ *      Testcontainers JUnit 5 Integration</a>
  */
-@EnabledIf("isDockerAvailable")
+@EnabledIfDockerAvailable
 class SandboxDockerIntegrationTest {
-
-    static boolean isDockerAvailable() {
-        try {
-            var process = new ProcessBuilder("docker", "info")
-                    .redirectErrorStream(true)
-                    .start();
-            process.getInputStream().readAllBytes();
-            return process.waitFor() == 0;
-        } catch (Exception e) {
-            return false;
-        }
-    }
 
     // === Part A: SandboxDetector Docker 偵測 ===
 
