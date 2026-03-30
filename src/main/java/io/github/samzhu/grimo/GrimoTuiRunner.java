@@ -198,7 +198,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
         contentView = new GrimoContentView();
         String bannerText = bannerRenderer.render(
                 version, agentId, model, workspacePath,
-                (int) agentCount, skillCount, mcpCount, taskCount);
+                (int) agentCount, skillCount, mcpCount, taskCount,
+                terminal.getWidth());
         contentView.setBannerText(bannerText);
 
         inputView = new GrimoInputView();

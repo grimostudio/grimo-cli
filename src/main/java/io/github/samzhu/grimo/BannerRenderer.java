@@ -1,5 +1,7 @@
 package io.github.samzhu.grimo;
 
+import io.github.samzhu.grimo.shared.tui.DisplayWidth;
+
 /**
  * 渲染靜態 Banner：左側可愛方塊幽靈吉祥物 + 右側環境狀態。
  *
@@ -31,14 +33,18 @@ public class BannerRenderer {
      * @param skillCount    已載入的 Skill 數量
      * @param mcpCount      已連線的 MCP Server 數量
      * @param taskCount     已排程的 Task 數量
+     * @param cols          終端寬度（目前保留供未來動態排版使用）
      * @return 含 ANSI 色碼的多行 banner 字串
      */
     public String render(String version, String agentId, String model,
-                         String workspacePath, int agentCount, int skillCount, int mcpCount, int taskCount) {
-        // 縮排與 StartupAnimationRenderer 的 MASCOT_COL=4 對齊：
-        // MASCOT_LINES 內部已有 4/2 格空白，加上 col 4 偏移 → 星 col 8、身體 col 6
-        // banner 無游標定位，直接用空白對齊：星 7 格、身體 5 格
-        String gap = "        ";  // 8 spaces between mascot and info
+                         String workspacePath, int agentCount, int skillCount, int mcpCount, int taskCount,
+                         int cols) {
+        // 設計說明：mascot 約佔 16 欄，info 從 mascot 右側開始
+        // 用 DisplayWidth.fill() 動態產生間距，預設 gap 8 欄（cols < 60 時仍保底 4 欄）
+        int mascotWidth = 16;
+        int minGap = 4;
+        int dynamicGap = Math.max(minGap, Math.min(8, cols - mascotWidth - 40));
+        String gap = DisplayWidth.fill(dynamicGap);
         var sb = new StringBuilder();
         sb.append(GOLD).append("       ✦").append(RESET)
           .append(gap).append("    ")
