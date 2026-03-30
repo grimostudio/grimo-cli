@@ -98,6 +98,10 @@
 | **McpServerCatalog** | MCP Server Catalog | 所有 MCP server 定義的 immutable 集合。由 `McpCatalogBuilder` 從 `config.yaml` 建構，傳入 `AgentClient.Builder.mcpServerCatalog()` 後由 SDK 處理分發。 |
 | **WorkspaceProvisioner** | Workspace Provisioner | 派遣 agent 前將 Grimo 管理的 Skill symlink 到工作目錄 `.agents/skills/`（跨 agent 標準路徑）。CLI agent（Claude/Gemini/Codex）原生發現 skill，Progressive Disclosure 自然運作。Grimo 的環境準備層，不同於 SDK 的 `LocalSandbox`（agent 執行隔離層）。 |
 | **Sandbox** | Sandbox | Agent 執行環境。Local 模式直接使用工作目錄（symlink skill）；Docker/E2B 模式使用隔離容器（Phase B/C）。由 `SandboxDetector` 偵測可用後端，`WorkspaceProvisioner` 負責環境配置。 |
+| **TierRouter** | Tier Router | 解析 tier 來源（6 級優先順序：關鍵字 > session /tier > skill-overrides > skill metadata > 自動分析 > 預設 std），查 fallback list（每級多組 agent+model，依序 isAvailable()），回傳 `TierSelection(agentId, model, tier, source)`。 |
+| **TierOptionsFactory** | Tier Options Factory | 根據 agentId 建構對應的 per-request `AgentOptions` 子型別（ClaudeAgentOptions / GeminiAgentOptions / CodexAgentOptions），含 tier 選定的 model。在 `AgentClient.run(goalText, agentOptions)` 傳入以覆寫 defaultOptions。 |
+| **TierKeywordDetector** | Tier Keyword Detector | 從使用者輸入偵測 tier 關鍵字（如「仔細想」→ pro）。只影響該輪，不改 session 設定。多 tier 同時匹配取最高（PRO > STD > LITE）。 |
+| **SkillAnalyzer** | Skill Analyzer | 安裝 Skill 時用 lite tier agent 自動分析 Skill body 複雜度，判定 tier 並寫入 metadata。已標 grimo.tier 的 Skill 跳過分析。 |
 
 ## Agent 技術元件對應
 
@@ -113,3 +117,8 @@
 | Advisor: Validation | `GoalValidationAdvisor` | `AgentCallAdvisor`（阻擋危險操作） |
 | MCP 定義 | `McpCatalogBuilder` | `McpServerCatalog`（Portable MCP，config.yaml → AgentClient.Builder） |
 | 非阻塞對話 | `GrimoTuiRunner` | Virtual Thread + `eventLoop.setDirty()` 觸發重繪 |
+| Tier 路由 | `TierRouter` | 6 級優先順序 → fallback list → `AgentModel.isAvailable()` |
+| Tier 選項 | `TierOptionsFactory` | `AgentClient.run(goal, agentOptions)` per-request model 覆寫 |
+| Tier 偵測 | `TierKeywordDetector` | config.yaml `tier-keywords` 字串比對 |
+| Tier 指令 | `TierCommands` | Spring Shell @Command: `/tier`, `/skill-tier` |
+| Skill 分析 | `SkillAnalyzer` | AgentClient + lite tier → JSON 回應解析 |
