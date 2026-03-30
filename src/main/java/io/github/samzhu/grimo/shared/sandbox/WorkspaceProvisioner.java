@@ -83,22 +83,35 @@ public class WorkspaceProvisioner {
     }
 
     /**
-     * 清理工作區：移除 worktree 目錄 + skill symlinks。
-     * 保留分支（讓使用者可以 merge）。
+     * 清理工作區：移除 symlinks → 判斷是否有真正的 agent 變更 → 決定保留或刪除分支。
+     *
+     * 設計說明：
+     * - 先移除 Grimo provisioned 的 .agents/skills/ symlinks
+     * - 再檢查是否有 agent 真正修改的檔案（uncommitted changes）
+     * - 有變更 → auto-commit + 保留分支（使用者可 merge）
+     * - 無變更 → 刪除分支 + worktree，不留痕跡（純對話場景）
      *
      * @param info provision() 回傳的 WorktreeInfo
-     * @param projectDir 使用者的專案目錄（worktree 模式需要在主 repo 執行 git worktree remove）
+     * @param projectDir 使用者的專案目錄（worktree 模式需要在主 repo 執行 git 指令）
      */
     public void cleanup(WorktreeInfo info, Path projectDir) {
         if (info.isWorktree()) {
             try {
-                // 清理前先檢查未提交變更
+                // 1. 先移除 Grimo 建立的 symlinks，避免它們被當作 agent 的變更
+                cleanupSymlinks(info.workDir(), info.provisionedSkills());
+
+                // 2. 檢查是否有 agent 真正修改的檔案
                 if (gitHelper.hasUncommittedChanges(info.workDir())) {
+                    // agent 有實際變更 → auto-commit + 保留分支
                     gitHelper.autoCommit(info.workDir());
+                    gitHelper.removeWorktree(projectDir, info.workDir());
+                    log.info("Agent modified files on branch {}", info.branchName());
+                } else {
+                    // 純對話，無變更 → 刪除 worktree + 分支，不留痕跡
+                    gitHelper.removeWorktree(projectDir, info.workDir());
+                    gitHelper.deleteBranch(projectDir, info.branchName());
+                    log.debug("No agent changes, cleaned up branch {}", info.branchName());
                 }
-                // removeWorktree --force 會刪除整個 worktree 目錄（包含 .agents/skills/ symlinks）
-                // 所以 worktree 模式不需要單獨呼叫 cleanupSymlinks
-                gitHelper.removeWorktree(projectDir, info.workDir());
             } catch (Exception e) {
                 log.warn("Failed to cleanup worktree: {}", e.getMessage());
             }

@@ -96,20 +96,22 @@ class WorkspaceProvisionerTest {
     }
 
     @Test
-    void cleanupShouldRemoveWorktreeButKeepBranch() throws Exception {
+    void cleanupShouldRemoveWorktreeAndDeleteBranchWhenNoChanges() throws Exception {
         Path repo = createGitRepo();
+        lastRepoDir = repo;
         setupSkillSource("code-review");
 
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-003", List.of(testSkill("code-review")));
+        createdWorktrees.add(info);
         Path worktreeDir = info.workDir();
 
         provisioner.cleanup(info, repo);
 
         assertThat(Files.exists(worktreeDir)).isFalse();
-        // 分支應保留
+        // 無 agent 變更 → 分支應被刪除（smart cleanup）
         String branches = exec(repo, "git", "branch", "--list", "grimo/task-003");
-        assertThat(branches).contains("grimo/task-003");
+        assertThat(branches.trim()).isEmpty();
     }
 
     @Test
@@ -210,6 +212,43 @@ class WorkspaceProvisionerTest {
         // 使用者的 skill 應該優先（不被 Grimo 覆蓋）
         // worktree 裡應該有使用者的 skill（從 repo 繼承）
         assertThat(info.provisionedSkills()).isEmpty();
+    }
+
+    @Test
+    void cleanupShouldDeleteBranchWhenNoAgentChanges() throws Exception {
+        Path repo = createGitRepo();
+        lastRepoDir = repo;
+        setupSkillSource("code-review");
+
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(repo, "task-pure", List.of(testSkill("code-review")));
+        createdWorktrees.add(info);
+
+        // agent 沒改任何檔案，只有 Grimo 的 symlinks
+        provisioner.cleanup(info, repo);
+
+        // 分支應該被刪除（純對話不留痕跡）
+        String branches = exec(repo, "git", "branch", "--list", "grimo/task-pure");
+        assertThat(branches.trim()).isEmpty();
+    }
+
+    @Test
+    void cleanupShouldKeepBranchWhenAgentModifiedFiles() throws Exception {
+        Path repo = createGitRepo();
+        lastRepoDir = repo;
+
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(repo, "task-code", List.of());
+        createdWorktrees.add(info);
+
+        // agent 修改了檔案
+        Files.writeString(info.workDir().resolve("agent-output.txt"), "real work");
+
+        provisioner.cleanup(info, repo);
+
+        // 分支應該保留（agent 有實際變更）
+        String branches = exec(repo, "git", "branch", "--list", "grimo/task-code");
+        assertThat(branches).contains("grimo/task-code");
     }
 
     // === Helpers ===
