@@ -1,11 +1,13 @@
 package io.github.samzhu.grimo.shared.sandbox;
 
 import io.github.samzhu.grimo.skill.loader.SkillDefinition;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -15,6 +17,25 @@ class WorkspaceProvisionerTest {
 
     @TempDir Path tempDir;
     @TempDir Path skillsSourceDir;
+
+    /** 追蹤已建立的 worktree，確保測試後清理 */
+    private final List<WorktreeInfo> createdWorktrees = new ArrayList<>();
+    private Path lastRepoDir;
+
+    @AfterEach
+    void cleanupWorktrees() {
+        var helper = new GitHelper();
+        for (var info : createdWorktrees) {
+            if (info.isWorktree() && Files.exists(info.workDir()) && lastRepoDir != null) {
+                try {
+                    helper.removeWorktree(lastRepoDir, info.workDir());
+                } catch (Exception e) {
+                    // best-effort cleanup
+                }
+            }
+        }
+        createdWorktrees.clear();
+    }
 
     /** 建立真實 git repo（含初始 commit）*/
     private Path createGitRepo() throws Exception {
@@ -45,10 +66,12 @@ class WorkspaceProvisionerTest {
     @Test
     void provisionShouldCreateWorktreeInGitRepo() throws Exception {
         Path repo = createGitRepo();
+        lastRepoDir = repo;
         setupSkillSource("code-review");
 
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-001", List.of(testSkill("code-review")));
+        createdWorktrees.add(info);
 
         assertThat(info.isWorktree()).isTrue();
         assertThat(info.branchName()).isEqualTo("grimo/task-001");
@@ -63,8 +86,10 @@ class WorkspaceProvisionerTest {
     @Test
     void provisionShouldIncludeRepoFilesInWorktree() throws Exception {
         Path repo = createGitRepo();
+        lastRepoDir = repo;
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-002", List.of());
+        createdWorktrees.add(info);
 
         // worktree 應該包含 repo 的檔案
         assertThat(Files.exists(info.workDir().resolve("README.md"))).isTrue();
@@ -141,8 +166,10 @@ class WorkspaceProvisionerTest {
     @Test
     void provisionShouldReturnEmptySkillsWhenNoneProvided() throws Exception {
         Path repo = createGitRepo();
+        lastRepoDir = repo;
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-007", List.of());
+        createdWorktrees.add(info);
 
         assertThat(info.isWorktree()).isTrue();
         assertThat(info.provisionedSkills()).isEmpty();
@@ -151,11 +178,13 @@ class WorkspaceProvisionerTest {
     @Test
     void provisionShouldFallbackWhenWorktreeCreationFails() throws Exception {
         Path repo = createGitRepo();
+        lastRepoDir = repo;
         // 建立同名分支讓 worktree add 失敗
         exec(repo, "git", "branch", "grimo/conflict-task");
 
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "conflict-task", List.of());
+        createdWorktrees.add(info);
 
         assertThat(info.isWorktree()).isFalse();
         assertThat(info.workDir()).isEqualTo(repo);
@@ -164,6 +193,7 @@ class WorkspaceProvisionerTest {
     @Test
     void provisionShouldSkipConflictingUserSkillInWorktree() throws Exception {
         Path repo = createGitRepo();
+        lastRepoDir = repo;
         // 先在 repo 建立使用者自己的 skill
         Path userSkillDir = repo.resolve(".agents/skills/code-review");
         Files.createDirectories(userSkillDir);
@@ -175,6 +205,7 @@ class WorkspaceProvisionerTest {
 
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-008", List.of(testSkill("code-review")));
+        createdWorktrees.add(info);
 
         // 使用者的 skill 應該優先（不被 Grimo 覆蓋）
         // worktree 裡應該有使用者的 skill（從 repo 繼承）

@@ -58,6 +58,11 @@ public class WorkspaceProvisioner {
                 // git worktree add 需要目錄不存在，它會自己建立
                 Path worktreeDir = Path.of(System.getProperty("java.io.tmpdir"),
                         "grimo-worktree-" + taskId);
+                // 設計說明：如果目錄已存在（上次 crash 沒清理），先刪除再建
+                if (Files.exists(worktreeDir)) {
+                    log.warn("Stale worktree directory found, cleaning up: {}", worktreeDir);
+                    gitHelper.removeWorktree(projectDir, worktreeDir);
+                }
                 String branchName = "grimo/" + taskId;
                 gitHelper.createWorktree(projectDir, worktreeDir, branchName);
 
