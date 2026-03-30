@@ -673,15 +673,30 @@ public class GrimoTuiRunner implements ApplicationRunner {
         }
     }
 
+    /**
+     * 解析預設 agent：先看 config，沒有則按優先順序自動選擇。
+     *
+     * 設計說明：
+     * - 優先順序：claude → codex → gemini（claude 生態最成熟）
+     * - 使用者可用 /agent-use 覆寫，寫入 config 後下次啟動沿用
+     */
+    private static final List<String> AGENT_PRIORITY = List.of("claude", "codex", "gemini");
+
     private String resolveAgentId(List<AgentModelFactory.DetectionResult> agentResults) {
         String agentId = grimoConfig.getDefaultAgent();
-        if (agentId == null) {
-            agentId = agentResults.stream()
-                    .filter(AgentModelFactory.DetectionResult::available)
-                    .map(AgentModelFactory.DetectionResult::id)
-                    .findFirst().orElse("no agent");
+        if (agentId != null) return agentId;
+
+        var availableIds = agentResults.stream()
+                .filter(AgentModelFactory.DetectionResult::available)
+                .map(AgentModelFactory.DetectionResult::id)
+                .toList();
+
+        // 按優先順序找第一個可用的
+        for (String preferred : AGENT_PRIORITY) {
+            if (availableIds.contains(preferred)) return preferred;
         }
-        return agentId;
+        // 都不在優先清單裡，fallback 到第一個可用的
+        return availableIds.isEmpty() ? "no agent" : availableIds.getFirst();
     }
 
     /**
