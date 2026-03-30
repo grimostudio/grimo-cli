@@ -61,11 +61,16 @@ public class AgentCommands {
             return "No agents available. Install a CLI agent (claude, gemini, or codex).";
         }
 
+        String defaultAgent = config.getDefaultAgent();
         var sb = new StringBuilder();
-        sb.append(String.format("  %-15s %-15s%n", "ID", "STATUS"));
         for (var entry : models.entrySet()) {
+            String id = entry.getKey();
+            String indicator = id.equals(defaultAgent) ? "\u25cf " : "  ";
             String status = entry.getValue().isAvailable() ? "ready" : "not available";
-            sb.append(String.format("  %-15s %-15s%n", entry.getKey(), status));
+            // 顯示記憶的模型或推薦預設
+            String model = config.getAgentOption(id, "model");
+            if (model == null) model = RECOMMENDED_MODELS.getOrDefault(id, "");
+            sb.append(String.format("  %s%-12s %-15s %s%n", indicator, id, status, model));
         }
         return sb.toString();
     }
