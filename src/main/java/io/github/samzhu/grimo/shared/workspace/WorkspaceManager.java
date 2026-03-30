@@ -79,6 +79,45 @@ public class WorkspaceManager {
             #  e2b:
             #    api-key: ${E2B_API_KEY}
             #    template: base
+
+            # Skill 三級對應表（每級多選項，按優先順序 fallback）
+            skill-tiers:
+              lite:
+                - agent: gemini
+                  model: gemini-2.5-flash
+                - agent: claude
+                  model: claude-haiku-4
+                - agent: codex
+                  model: o4-mini
+              std:
+                - agent: claude
+                  model: claude-sonnet-4
+                - agent: gemini
+                  model: gemini-2.5-pro
+                - agent: codex
+                  model: o4-mini
+              pro:
+                - agent: claude
+                  model: claude-opus-4
+                - agent: gemini
+                  model: gemini-2.5-pro
+                - agent: codex
+                  model: o3
+
+            # Tier 關鍵字觸發（per-turn）
+            tier-keywords:
+              pro:
+                - 仔細想
+                - 深入分析
+                - 好好想
+                - think hard
+                - think deeply
+              lite:
+                - 快速
+                - 簡單說
+                - 大概看一下
+                - quickly
+                - briefly
             """;
 
     public boolean isInitialized() {
