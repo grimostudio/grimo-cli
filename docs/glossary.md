@@ -136,3 +136,5 @@
 | **Layout** | Layout | 佈局切分計算。Slot.Fixed(n) 固定值，Slot.Fill() 填滿剩餘。支援 gap 間距。 |
 | **TuiTable** | TUI Table | 寬度感知的表格 Builder。用 Layout.horizontal 計算欄寬，DisplayWidth.padRight 對齊。 |
 | **TuiStatusBar** | TUI Status Bar | 單行狀態列元件。truncate 感知 CJK，保證精確 width。 |
+| **TuiSelector** | TUI Selector | 可捲動選擇器。渲染 selected/unselected 項目列表，每行保證精確寬度。用於 slash menu、agent 選擇。 |
+| **TuiMessage** | TUI Message | 對話訊息格式化。inline 模式（2 行 icon+detail）和 block 模式（多行 wrap + role icon）。借鑑 OpenCode InlineTool/BlockTool。 |
