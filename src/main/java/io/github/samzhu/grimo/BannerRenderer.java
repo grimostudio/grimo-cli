@@ -1,6 +1,7 @@
 package io.github.samzhu.grimo;
 
 import io.github.samzhu.grimo.shared.tui.DisplayWidth;
+import io.github.samzhu.grimo.shared.tui.Layout;
 import io.github.samzhu.grimo.shared.tui.TuiComponent;
 import org.jline.utils.AttributedString;
 
@@ -50,35 +51,64 @@ public class BannerRenderer implements TuiComponent {
     public String render(String version, String agentId, String model,
                          String workspacePath, int agentCount, int skillCount, int mcpCount, int taskCount,
                          int cols) {
-        // 設計說明：mascot 約佔 16 欄，info 從 mascot 右側開始
-        // 用 DisplayWidth.fill() 動態產生間距，預設 gap 8 欄（cols < 60 時仍保底 4 欄）
-        int mascotWidth = 16;
-        int minGap = 4;
-        int dynamicGap = Math.max(minGap, Math.min(8, cols - mascotWidth - 40));
-        String gap = DisplayWidth.fill(dynamicGap);
+        // 設計說明：用 Layout.horizontal 將每行切成 mascot + gap + info 三欄
+        // mascot 純文字寬度先測量，再套 ANSI 色碼
+        // 這樣 DisplayWidth.of() 不會被 ANSI escape 干擾
+
+        // Mascot 純文字（不含 ANSI）
+        String[] mascotPlain = {
+                "       ✦",       // line 0: star
+                "     ▄████▄",    // line 1: head top
+                "     █●██●█",    // line 2: eyes
+                "     ██████",    // line 3: body
+                "     ▀▄▀▀▄▀"    // line 4: feet
+        };
+
+        // Mascot ANSI（與 mascotPlain 同順序，含色碼）
+        String[] mascotAnsi = {
+                GOLD + "       ✦" + RESET,
+                BRAND + "     ▄████▄" + RESET,
+                BRAND + "     █" + WHITE + "●" + BRAND + "██" + WHITE + "●" + BRAND + "█" + RESET,
+                BRAND + "     ██████" + RESET,
+                BRAND + "     ▀▄▀▀▄▀" + RESET
+        };
+
+        // Info 行（與 mascot 行對齊）
+        String[] info = {
+                WHITE + "Grimo" + RESET + " " + GRAY + "v" + version + RESET,
+                GRAY + agentId + " · " + model + RESET,
+                GRAY + workspacePath + RESET,
+                GRAY + agentCount + " agent · " + skillCount + " skill · "
+                        + mcpCount + " mcp · " + taskCount + " task" + RESET,
+                ""  // feet 行沒有 info
+        };
+
+        // 計算 mascot 最大寬度
+        int mascotMaxWidth = 0;
+        for (String line : mascotPlain) {
+            mascotMaxWidth = Math.max(mascotMaxWidth, DisplayWidth.of(line));
+        }
+
+        // Layout: [mascot(fixed)] [gap] [info(fill)]
+        int gap = 2;
+        int[] widths = Layout.horizontal(cols, gap,
+                new Layout.Fixed(mascotMaxWidth),
+                new Layout.Fill());
+        int mascotCol = widths[0];
+
+        // 組裝每行：padRight(mascot) + gap + info
         var sb = new StringBuilder();
-        sb.append(GOLD).append("       ✦").append(RESET)
-          .append(gap).append("    ")
-          .append(WHITE).append("Grimo").append(RESET)
-          .append(" ").append(GRAY).append("v").append(version).append(RESET)
-          .append("\n");
-        sb.append(BRAND).append("     ▄████▄").append(RESET)
-          .append(gap)
-          .append(GRAY).append(agentId).append(" · ").append(model).append(RESET)
-          .append("\n");
-        sb.append(BRAND).append("     █").append(WHITE).append("●").append(BRAND).append("██")
-          .append(WHITE).append("●").append(BRAND).append("█").append(RESET)
-          .append(gap)
-          .append(GRAY).append(workspacePath).append(RESET)
-          .append("\n");
-        sb.append(BRAND).append("     ██████").append(RESET)
-          .append(gap)
-          .append(GRAY).append(agentCount).append(" agent · ")
-          .append(skillCount).append(" skill · ")
-          .append(mcpCount).append(" mcp · ")
-          .append(taskCount).append(" task").append(RESET)
-          .append("\n");
-        sb.append(BRAND).append("     ▀▄▀▀▄▀").append(RESET).append("\n");
+        for (int i = 0; i < mascotPlain.length; i++) {
+            // mascot 部分：用 plain 算 padding，再把 padding 接在 ANSI 版後面
+            int mascotLineWidth = DisplayWidth.of(mascotPlain[i]);
+            String mascotPad = DisplayWidth.fill(mascotCol - mascotLineWidth);
+
+            sb.append(mascotAnsi[i]);
+            sb.append(mascotPad);
+            sb.append(DisplayWidth.fill(gap));
+            sb.append(info[i]);
+            sb.append("\n");
+        }
         return sb.toString();
     }
 }
