@@ -1,5 +1,7 @@
 package io.github.samzhu.grimo;
 
+import io.github.samzhu.grimo.shared.tui.DisplayWidth;
+import io.github.samzhu.grimo.shared.tui.TuiStatusBar;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
@@ -41,22 +43,28 @@ public class GrimoStatusView {
 
     public List<AttributedString> render(int cols) {
         if (tierIcon != null && tierStyle != null) {
-            var builder = new AttributedStringBuilder();
             var iconStyle = switch (tierStyle) {
                 case "lite" -> LITE_STYLE;
                 case "pro" -> PRO_STYLE;
                 default -> STATUS_STYLE;
             };
-            builder.styled(iconStyle, tierIcon + " ");
-            builder.styled(STATUS_STYLE, statusText);
-            var full = builder.toAttributedString();
-            return List.of(full);
+            // 組合 icon + 空格 + statusText，再以 column-aware 方式截斷/補齊
+            String combined = tierIcon + " " + statusText;
+            String fitted = DisplayWidth.padRight(DisplayWidth.truncate(combined, cols), cols);
+            // icon 部分用 tierStyle 色彩，其餘用 STATUS_STYLE
+            int iconPartLen = (tierIcon + " ").length();
+            var builder = new AttributedStringBuilder();
+            // 若截斷後字串短於 icon 部分，只畫截斷後的部分
+            if (fitted.length() <= iconPartLen) {
+                builder.styled(iconStyle, fitted);
+            } else {
+                builder.styled(iconStyle, fitted.substring(0, iconPartLen));
+                builder.styled(STATUS_STYLE, fitted.substring(iconPartLen));
+            }
+            return List.of(builder.toAttributedString());
         }
 
-        String text = statusText;
-        if (text.length() > cols) {
-            text = text.substring(0, cols);
-        }
-        return List.of(new AttributedString(text, STATUS_STYLE));
+        // 使用 DisplayWidth 做 column-aware 截斷 + 補齊，修正 CJK 字元被錯誤截斷的問題
+        return List.of(TuiStatusBar.of(statusText, STATUS_STYLE, cols));
     }
 }
