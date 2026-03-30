@@ -62,15 +62,22 @@ public class AgentCommands {
         }
 
         String defaultAgent = config.getDefaultAgent();
+        // auto-detect 時 defaultAgent 可能是 null，用第一個 available 的 agent
+        if (defaultAgent == null) {
+            defaultAgent = models.entrySet().stream()
+                    .filter(e -> e.getValue().isAvailable())
+                    .map(Map.Entry::getKey)
+                    .findFirst().orElse("");
+        }
         var sb = new StringBuilder();
         for (var entry : models.entrySet()) {
             String id = entry.getKey();
-            String indicator = id.equals(defaultAgent) ? "\u25cf " : "  ";
+            boolean active = id.equals(defaultAgent);
+            String indicator = active ? "> " : "  ";
             String status = entry.getValue().isAvailable() ? "ready" : "not available";
-            // 顯示記憶的模型或推薦預設
             String model = config.getAgentOption(id, "model");
             if (model == null) model = RECOMMENDED_MODELS.getOrDefault(id, "");
-            sb.append(String.format("  %s%-12s %-15s %s%n", indicator, id, status, model));
+            sb.append(String.format("  %s%-12s %-12s %s%n", indicator, id, status, model));
         }
         return sb.toString();
     }
@@ -87,6 +94,9 @@ public class AgentCommands {
      */
     @Command(name = "agent-use", description = "Switch agent (auto-picks model)")
     public String use(String input) {
+        if (input == null || input.isBlank()) {
+            return "Usage: /agent-use <agent> [model]\nExample: /agent-use claude opus";
+        }
         String[] parts = input.trim().split("\\s+", 2);
         String agentId = parts[0];
         String modelHint = parts.length > 1 ? parts[1] : null;
