@@ -1,5 +1,6 @@
 package io.github.samzhu.grimo;
 
+import io.github.samzhu.grimo.agent.AgentCommands;
 import io.github.samzhu.grimo.agent.detect.AgentModelFactory;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
@@ -185,7 +186,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
         String agentId = resolveAgentId(agentResults);
         String model = grimoConfig.getAgentOption(agentId, "model");
         if (model == null) model = grimoConfig.getDefaultModel();
-        if (model == null) model = "unknown";
+        if (model == null) model = AgentCommands.RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
         String workspacePath = workspaceManager.root().toString()
                 .replace(System.getProperty("user.home"), "~");
         long agentCount = agentResults.stream()

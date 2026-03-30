@@ -30,7 +30,7 @@ public class AgentCommands {
     /**
      * 各 CLI agent 的推薦預設模型（對齊各 CLI 官方預設）。
      */
-    static final Map<String, String> RECOMMENDED_MODELS = Map.of(
+    public static final Map<String, String> RECOMMENDED_MODELS = Map.of(
             "claude", "claude-sonnet-4-6",
             "gemini", "gemini-2.5-pro",
             "codex", "o4-mini"
