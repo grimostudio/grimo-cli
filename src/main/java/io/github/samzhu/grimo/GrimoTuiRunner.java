@@ -9,6 +9,7 @@ import io.github.samzhu.grimo.agent.tier.TierOptionsFactory;
 import io.github.samzhu.grimo.agent.tier.TierRouter;
 import io.github.samzhu.grimo.agent.tier.TierSelection;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
+import io.github.samzhu.grimo.shared.sandbox.GitHelper;
 import io.github.samzhu.grimo.shared.sandbox.WorkspaceProvisioner;
 import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
@@ -77,6 +78,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final CommandRegistry commandRegistry;
     private final McpCatalogBuilder mcpCatalogBuilder;
     private final WorkspaceProvisioner workspaceProvisioner;
+    private final GitHelper gitHelper;
     private final SandboxDetector sandboxDetector;
     private final TierRouter tierRouter;
     private final TierKeywordDetector tierKeywordDetector;
@@ -122,6 +124,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                            CommandRegistry commandRegistry,
                            McpCatalogBuilder mcpCatalogBuilder,
                            WorkspaceProvisioner workspaceProvisioner,
+                           GitHelper gitHelper,
                            SandboxDetector sandboxDetector,
                            TierRouter tierRouter,
                            TierKeywordDetector tierKeywordDetector,
@@ -142,6 +145,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
         this.commandRegistry = commandRegistry;
         this.mcpCatalogBuilder = mcpCatalogBuilder;
         this.workspaceProvisioner = workspaceProvisioner;
+        this.gitHelper = gitHelper;
         this.sandboxDetector = sandboxDetector;
         this.tierRouter = tierRouter;
         this.tierKeywordDetector = tierKeywordDetector;

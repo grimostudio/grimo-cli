@@ -8,6 +8,7 @@ import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.config.GrimoProperties;
 import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
+import io.github.samzhu.grimo.shared.sandbox.GitHelper;
 import io.github.samzhu.grimo.shared.sandbox.WorkspaceProvisioner;
 import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
@@ -84,8 +85,13 @@ public class GrimoStartupRunner {
     }
 
     @Bean
-    WorkspaceProvisioner workspaceProvisioner(WorkspaceManager workspaceManager) {
-        return new WorkspaceProvisioner(workspaceManager.skillsDir(), new io.github.samzhu.grimo.shared.sandbox.GitHelper());
+    GitHelper gitHelper() {
+        return new GitHelper();
+    }
+
+    @Bean
+    WorkspaceProvisioner workspaceProvisioner(WorkspaceManager workspaceManager, GitHelper gitHelper) {
+        return new WorkspaceProvisioner(workspaceManager.skillsDir(), gitHelper);
     }
 
     @Bean
