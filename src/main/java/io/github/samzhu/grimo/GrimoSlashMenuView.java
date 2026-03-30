@@ -1,5 +1,6 @@
 package io.github.samzhu.grimo;
 
+import io.github.samzhu.grimo.shared.tui.DisplayWidth;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
 
@@ -109,10 +110,9 @@ public class GrimoSlashMenuView {
 
         for (int i = 0; i < visibleCount; i++) {
             var item = filteredItems.get(i);
-            String text = String.format("  /%-20s %s", item.name(), item.description());
-            if (text.length() > cols) {
-                text = text.substring(0, cols);
-            }
+            String name = "/" + item.name();
+            String padName = DisplayWidth.padRight(name, 22);
+            String text = DisplayWidth.padRight("  " + padName + " " + item.description(), cols);
 
             AttributedStyle style = (i == selectedIndex)
                     ? AttributedStyle.DEFAULT.foreground(BRAND_COLOR)
