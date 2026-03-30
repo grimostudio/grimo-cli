@@ -109,12 +109,24 @@ public final class DisplayWidth {
 
 ### Layer 2: TuiComponent + Layout
 
+**元件不管高度，只管寬度。** 借鑑 OpenCode `<scrollbox>` 模式：元件 render 自然高度，容器負責捲動/截斷。
+
+```
+渲染流程（借鑑 OpenCode）：
+1. 元件 render(width) → 自然內容（可能 100 行，每行剛好 width columns）
+2. Layout 分配空間 → 這個區域有 30 行高
+3. 容器（GrimoContentView）→ 只顯示 [scrollOffset..scrollOffset+30]
+```
+
 ```java
 package io.github.samzhu.grimo.shared.tui;
 
 /**
  * TUI 元件契約。
- * render 保證：回傳的每行 columnLength == width。
+ * 保證：回傳的每行 columnLength == width。
+ * 行數 = 自然高度（不限），由容器決定顯示多少。
+ *
+ * @see <a href="https://github.com/anomalyco/opencode">OpenCode — scrollbox 容器模式</a>
  */
 public interface TuiComponent {
     List<AttributedString> render(int width);
@@ -216,13 +228,26 @@ public final class TuiStatusBar {
 
 ### Layer 4: View 重構
 
+**容器 vs 元件的職責分離：**
+
+```
+GrimoScreen（Layout 分配高度）
+  ├─ BannerRenderer.render(width)      → N 行 → 全顯示（固定區）
+  ├─ ContentView（scrollable 容器）
+  │    ├─ 內部持有所有 TuiMessage 渲染結果
+  │    ├─ Layout 告訴它有 height 行空間
+  │    └─ 只輸出 [scrollOffset..scrollOffset+height] 切片
+  ├─ InputView.render(width)           → 2 行 → 全顯示（固定區）
+  └─ StatusView.render(width)          → 1 行 → 全顯示（固定區）
+```
+
 | 現有 View | 改動 |
 |-----------|------|
-| `GrimoScreen` | `Layout.vertical()` 計算 contentHeight，取代手算 |
-| `GrimoContentView` | 已正確，加 `implements TuiComponent`，用 `TuiMessage` 格式化新訊息 |
+| `GrimoScreen` | `Layout.vertical()` 計算各區域高度，取代手算 |
+| `GrimoContentView` | 已正確，加 `implements TuiComponent`，用 `TuiMessage` 格式化新訊息。作為 scrollable 容器，內部管理 scrollOffset |
 | `GrimoInputView` | 已正確，加 `implements TuiComponent` |
 | `GrimoStatusView` | `substring` → `TuiStatusBar.of()`，加 `implements TuiComponent` |
-| `GrimoSlashMenuView` | `String.format` → `TuiSelector`，加 `implements TuiComponent` |
+| `GrimoSlashMenuView` | `String.format` → `TuiSelector`，加 `implements TuiComponent`。作為 scrollable 容器，內部管理 visible window |
 | `BannerRenderer` | hardcoded 空白 → `DisplayWidth.center()`，加 `implements TuiComponent` |
 | `AgentCommands.list()` | `String.format` → `TuiTable` |
 
