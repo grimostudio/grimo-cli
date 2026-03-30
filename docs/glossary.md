@@ -126,3 +126,13 @@
 | Tier 指令 | `TierCommands` | Spring Shell @Command: `/tier`, `/skill-tier` |
 | Skill 分析 | `SkillAnalyzer` | AgentClient + lite tier → JSON 回應解析 |
 | Worktree 隔離 | `WorkspaceProvisioner` + `GitHelper` | `git worktree add/remove` via ProcessBuilder |
+
+## TUI 框架術語
+
+| 名詞 | 英文 | 說明 |
+|------|------|------|
+| **DisplayWidth** | Display Width | 封裝 JLine WCWidth 的字串寬度計算工具。CJK=2, ASCII=1。提供 padRight/padLeft/center/truncate/wrap 操作。 |
+| **TuiComponent** | TUI Component | TUI 元件介面。`render(int width)` 回傳 `List<AttributedString>`，每行保證 columnLength == width。元件不管高度，容器負責捲動。 |
+| **Layout** | Layout | 佈局切分計算。Slot.Fixed(n) 固定值，Slot.Fill() 填滿剩餘。支援 gap 間距。 |
+| **TuiTable** | TUI Table | 寬度感知的表格 Builder。用 Layout.horizontal 計算欄寬，DisplayWidth.padRight 對齊。 |
+| **TuiStatusBar** | TUI Status Bar | 單行狀態列元件。truncate 感知 CJK，保證精確 width。 |
