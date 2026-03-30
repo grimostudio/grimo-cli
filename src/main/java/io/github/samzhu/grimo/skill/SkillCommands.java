@@ -38,10 +38,10 @@ public class SkillCommands {
         if (skills.isEmpty()) return "No skills loaded.";
 
         var sb = new StringBuilder();
-        sb.append(String.format("  %-15s %-10s %-15s %-8s%n", "NAME", "VERSION", "AUTHOR", "STATUS"));
+        sb.append(String.format("  %-15s %-6s %-10s %-15s %-8s%n", "NAME", "TIER", "VERSION", "AUTHOR", "STATUS"));
         for (SkillDefinition s : skills) {
-            sb.append(String.format("  %-15s %-10s %-15s %-8s%n",
-                s.name(), s.grimoVersion(), s.grimoAuthor(), "loaded"));
+            sb.append(String.format("  %-15s %-6s %-10s %-15s %-8s%n",
+                s.name(), s.grimoTier(), s.grimoVersion(), s.grimoAuthor(), "loaded"));
         }
         return sb.toString();
     }
