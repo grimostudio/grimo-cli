@@ -48,7 +48,7 @@ public class AgentConfiguration {
                 // Claude Code CLI
                 new AgentModelFactory.AgentSpec("claude", "cli", "Claude Code CLI", workingDirectory -> {
                     String model = config.getAgentOption("claude", "model");
-                    if (model == null) model = "claude-sonnet-4-5";
+                    if (model == null) model = "claude-sonnet-4-6";
 
                     ClaudeAgentOptions options = ClaudeAgentOptions.builder()
                             .model(model)
@@ -67,7 +67,7 @@ public class AgentConfiguration {
                 // Gemini CLI
                 new AgentModelFactory.AgentSpec("gemini", "cli", "Gemini CLI", workingDirectory -> {
                     String model = config.getAgentOption("gemini", "model");
-                    if (model == null) model = "gemini-2.5-flash";
+                    if (model == null) model = "gemini-2.5-pro";
 
                     CLIOptions cliOptions = CLIOptions.builder()
                             .model(model)

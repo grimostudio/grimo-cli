@@ -87,6 +87,19 @@ public class GrimoConfig {
     }
 
     /**
+     * 設定指定 agent 的選項值（寫入 agent-options.<agentId>.<key>）。
+     * 用於 per-agent 模型記憶：使用者切換模型後，下次切回同一 agent 自動恢復。
+     */
+    @SuppressWarnings("unchecked")
+    public synchronized void setAgentOption(String agentId, String key, String value) {
+        var data = load();
+        var agentOptions = (Map<String, Object>) data.computeIfAbsent("agent-options", k -> new LinkedHashMap<>());
+        var agentSection = (Map<String, Object>) agentOptions.computeIfAbsent(agentId, k -> new LinkedHashMap<>());
+        agentSection.put(key, value);
+        save(data);
+    }
+
+    /**
      * 取得所有 MCP server 定義（從 mcp 區段）。
      * 回傳格式：Map<serverName, Map<configKey, configValue>>
      */
