@@ -38,11 +38,6 @@ dependencies {
     implementation("org.springframework.modulith:spring-modulith-events-api")
     implementation("org.springframework.shell:spring-shell-starter-ffm")
 
-    // Observability
-    implementation("org.springframework.boot:spring-boot-micrometer-tracing-brave")
-    implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
-    implementation("io.micrometer:micrometer-tracing-bridge-brave")
-
     // Spring AI Community — agent-client libraries (Library mode, NOT starter)
     implementation("org.springaicommunity.agents:spring-ai-agent-model:0.10.0-SNAPSHOT")
     implementation("org.springaicommunity.agents:spring-ai-agent-client:0.10.0-SNAPSHOT")
@@ -56,17 +51,12 @@ dependencies {
 
     // Modulith runtime
     runtimeOnly("org.springframework.modulith:spring-modulith-actuator")
-    runtimeOnly("org.springframework.modulith:spring-modulith-observability")
 
     // Test
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.springframework.boot:spring-boot-micrometer-tracing-test")
-    testImplementation("org.springframework.boot:spring-boot-starter-opentelemetry-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
-    testImplementation("org.springframework.ai:spring-ai-spring-boot-testcontainers")
     testImplementation("org.springframework.modulith:spring-modulith-starter-test")
     testImplementation("org.springframework.shell:spring-shell-starter-test")
-    testImplementation("org.testcontainers:testcontainers-grafana")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.springaicommunity:agent-sandbox-docker:0.9.1-SNAPSHOT")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -82,9 +72,6 @@ dependencyManagement {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
-	// 排除需要 Testcontainers/OTEL 的慢測試（開發迭代時不跑）
-	exclude("**/GrimoApplicationTests.class")
-	exclude("**/SandboxDockerIntegrationTest.class")
 }
 
 springBoot {
