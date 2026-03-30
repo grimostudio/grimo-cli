@@ -3,6 +3,11 @@ package io.github.samzhu.grimo;
 import io.github.samzhu.grimo.agent.detect.AgentModelFactory;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
+import io.github.samzhu.grimo.agent.tier.Tier;
+import io.github.samzhu.grimo.agent.tier.TierKeywordDetector;
+import io.github.samzhu.grimo.agent.tier.TierOptionsFactory;
+import io.github.samzhu.grimo.agent.tier.TierRouter;
+import io.github.samzhu.grimo.agent.tier.TierSelection;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.shared.sandbox.WorkspaceProvisioner;
 import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
@@ -10,6 +15,7 @@ import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
+import io.github.samzhu.grimo.shared.session.SessionWriter;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import org.springaicommunity.agents.client.AgentClient;
 import org.jline.terminal.MouseEvent;
@@ -30,6 +36,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 自建 TUI Runner：使用 JLine Display + BindingReader 建構完整 TUI 介面。
@@ -71,6 +78,17 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final McpCatalogBuilder mcpCatalogBuilder;
     private final WorkspaceProvisioner workspaceProvisioner;
     private final SandboxDetector sandboxDetector;
+    private final TierRouter tierRouter;
+    private final TierKeywordDetector tierKeywordDetector;
+    private final TierOptionsFactory tierOptionsFactory;
+    private final AtomicReference<Tier> sessionTier;
+
+    /** 本輪 tier（顯示用）：每次 processInput 重設 */
+    private volatile TierSelection currentTierSelection;
+
+    /** Status bar 元件（run 時初始化，需在 agent thread 中更新） */
+    private GrimoStatusView statusView;
+    private String originalStatusText;
 
     /** AI 對話併發控制：確保同時只有一個 agent 執行 */
     private volatile boolean agentRunning = false;
@@ -104,7 +122,11 @@ public class GrimoTuiRunner implements ApplicationRunner {
                            CommandRegistry commandRegistry,
                            McpCatalogBuilder mcpCatalogBuilder,
                            WorkspaceProvisioner workspaceProvisioner,
-                           SandboxDetector sandboxDetector) {
+                           SandboxDetector sandboxDetector,
+                           TierRouter tierRouter,
+                           TierKeywordDetector tierKeywordDetector,
+                           TierOptionsFactory tierOptionsFactory,
+                           AtomicReference<Tier> sessionTier) {
         this.terminal = terminal;
         this.workspaceManager = workspaceManager;
         this.grimoConfig = grimoConfig;
@@ -121,6 +143,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
         this.mcpCatalogBuilder = mcpCatalogBuilder;
         this.workspaceProvisioner = workspaceProvisioner;
         this.sandboxDetector = sandboxDetector;
+        this.tierRouter = tierRouter;
+        this.tierKeywordDetector = tierKeywordDetector;
+        this.tierOptionsFactory = tierOptionsFactory;
+        this.sessionTier = sessionTier;
     }
 
     @Override
@@ -175,7 +201,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
         String statusText = agentId + " · " + model + " │ " + workspacePath
                 + " │ " + (int) agentCount + " agent · " + skillCount + " skill · "
                 + mcpCount + " mcp · " + taskCount + " task";
-        var statusView = new GrimoStatusView(statusText);
+        this.statusView = new GrimoStatusView(statusText);
+        this.originalStatusText = statusText;
 
         var menuItems = buildMenuItems();
         slashMenuView = new GrimoSlashMenuView(menuItems);
@@ -489,14 +516,38 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 return;
             }
             try {
-                var model = agentRouter.route(null);
+                // --- Tier 路由：決定用哪個 agent + model ---
+                var keywordTier = tierKeywordDetector.detect(text).orElse(null);
+                var tierCtx = TierRouter.Context.builder()
+                        .keywordTier(keywordTier)
+                        .sessionTier(sessionTier.get())
+                        .build();
+                var tierSelection = tierRouter.resolve(tierCtx);
+                currentTierSelection = tierSelection;
+
+                var model = agentModelRegistry.get(tierSelection.agentId());
+                if (model == null) {
+                    throw new IllegalStateException("Agent not found: " + tierSelection.agentId());
+                }
+                var tierOptions = tierOptionsFactory.build(tierSelection.agentId(), tierSelection.model());
+
                 var mcpServers = mcpCatalogBuilder.getServerNames();
-                log.info("Routing to agent, goal: {}, mcpServers: {}",
+                log.info("Tier routing: {} → {} / {} (source: {}), goal: {}, mcpServers: {}",
+                        tierSelection.tier(), tierSelection.agentId(), tierSelection.model(),
+                        tierSelection.source(),
                         text.length() > 100 ? text.substring(0, 100) + "..." : text,
                         mcpServers.isEmpty() ? "none" : String.join(", ", mcpServers));
                 agentRunning = true;
                 contentView.appendLine(new org.jline.utils.AttributedString("\u23f3 thinking...",
                         org.jline.utils.AttributedStyle.DEFAULT.foreground(245)));
+                eventLoop.setDirty();
+
+                // 更新 status bar 顯示 tier
+                String tierLabel = tierSelection.tier().icon() + " " + tierSelection.tier().value();
+                if (keywordTier != null) {
+                    tierLabel += " (\u672c\u8f2a)";
+                }
+                statusView.setStatusText(tierLabel + " \u00b7 " + tierSelection.agentId() + " \u00b7 " + tierSelection.model());
                 eventLoop.setDirty();
 
                 agentThread = Thread.startVirtualThread(() -> {
@@ -520,7 +571,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
                             var statusLine = new org.jline.utils.AttributedStringBuilder();
                             statusLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
-                                    "  └ Successfully loaded skill");
+                                    "  \u2514 Successfully loaded skill");
                             contentView.appendLine(statusLine.toAttributedString());
                             eventLoop.setDirty();
                         }
@@ -530,14 +581,13 @@ public class GrimoTuiRunner implements ApplicationRunner {
                         // 參考：javap AgentClient$Builder → mcpServerCatalog() + defaultMcpServers()
                         // 設計說明：每次取 McpCatalogBuilder 最新快取，/mcp-add 後即時生效
                         // volatile 保證 command thread 寫入後 virtual thread 能看到新值
+                        // 設計說明：使用 defaultWorkingDirectory 設定工作目錄，tierOptions 覆寫 model
                         var client = AgentClient.builder(model)
                                 .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
                                 .defaultMcpServers(mcpCatalogBuilder.getServerNames())
+                                .defaultWorkingDirectory(projectDir)
                                 .build();
-                        var response = client
-                                .goal(text)
-                                .workingDirectory(projectDir)
-                                .run();
+                        var response = client.run(text, tierOptions);
 
                         long duration = System.currentTimeMillis() - startTime;
                         if (response.isSuccessful()) {
@@ -558,6 +608,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     } finally {
                         agentRunning = false;
                         agentThread = null;
+                        currentTierSelection = null;
+                        statusView.setStatusText(originalStatusText);
                         // 清理 Grimo 建立的 symlink
                         workspaceProvisioner.cleanup(projectDir, provisionedSkills);
                         // agent 完成後 content 區大量變動，強制全螢幕重繪

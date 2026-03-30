@@ -1,6 +1,6 @@
 package io.github.samzhu.grimo.agent.advisor;
 
-import io.github.samzhu.grimo.SessionWriter;
+import io.github.samzhu.grimo.shared.session.SessionWriter;
 import org.junit.jupiter.api.Test;
 import org.springaicommunity.agents.client.AgentClientRequest;
 import org.springaicommunity.agents.client.AgentClientResponse;

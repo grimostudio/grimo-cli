@@ -82,6 +82,9 @@ dependencyManagement {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// 排除需要 Testcontainers/OTEL 的慢測試（開發迭代時不跑）
+	exclude("**/GrimoApplicationTests.class")
+	exclude("**/SandboxDockerIntegrationTest.class")
 }
 
 springBoot {
