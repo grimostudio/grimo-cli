@@ -1,10 +1,6 @@
-package io.github.samzhu.grimo.skill.analyzer;
+package io.github.samzhu.grimo.agent.tier;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
-import io.github.samzhu.grimo.agent.tier.Tier;
-import io.github.samzhu.grimo.agent.tier.TierOptionsFactory;
-import io.github.samzhu.grimo.agent.tier.TierRouter;
-import io.github.samzhu.grimo.agent.tier.TierSelection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springaicommunity.agents.client.AgentClient;

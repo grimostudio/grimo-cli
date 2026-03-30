@@ -1,6 +1,4 @@
-package io.github.samzhu.grimo.skill.analyzer;
-
-import io.github.samzhu.grimo.agent.tier.Tier;
+package io.github.samzhu.grimo.agent.tier;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
