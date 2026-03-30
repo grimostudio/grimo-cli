@@ -2,6 +2,7 @@ package io.github.samzhu.grimo.agent;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
+import io.github.samzhu.grimo.shared.tui.TuiTable;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
 
@@ -62,24 +63,29 @@ public class AgentCommands {
         }
 
         String defaultAgent = config.getDefaultAgent();
-        // auto-detect 時 defaultAgent 可能是 null，用第一個 available 的 agent
         if (defaultAgent == null) {
             defaultAgent = models.entrySet().stream()
                     .filter(e -> e.getValue().isAvailable())
                     .map(Map.Entry::getKey)
                     .findFirst().orElse("");
         }
-        var sb = new StringBuilder();
+
+        var table = TuiTable.builder()
+                .column("", 2)           // indicator
+                .column("ID", 10)        // agent name
+                .column("STATUS", 10)    // ready / not available
+                .column("MODEL", 0);     // fill remaining
+
         for (var entry : models.entrySet()) {
             String id = entry.getKey();
-            boolean active = id.equals(defaultAgent);
-            String indicator = active ? "> " : "  ";
+            String indicator = id.equals(defaultAgent) ? "> " : "  ";
             String status = entry.getValue().isAvailable() ? "ready" : "not available";
             String model = config.getAgentOption(id, "model");
             if (model == null) model = RECOMMENDED_MODELS.getOrDefault(id, "");
-            sb.append(String.format("  %s%-12s %-12s %s%n", indicator, id, status, model));
+            table.row(indicator, id, status, model);
         }
-        return sb.toString();
+
+        return table.build(60);
     }
 
     /**
