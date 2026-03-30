@@ -1,5 +1,6 @@
 package io.github.samzhu.grimo;
 
+import io.github.samzhu.grimo.shared.tui.DisplayWidth;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
 
@@ -105,8 +106,9 @@ public class GrimoMcpManagerView {
                     : (String) cfg.getOrDefault("url", "");
 
             String prefix = (i == selectedIndex) ? "  ❯ " : "    ";
-            String line = prefix + String.format("%-20s %-10s %s", name, type, detail);
-            if (line.length() > cols) line = line.substring(0, cols);
+            String namePad = DisplayWidth.padRight(name, 20);
+            String typePad = DisplayWidth.padRight(type, 10);
+            String line = DisplayWidth.padRight(prefix + namePad + " " + typePad + " " + detail, cols);
 
             AttributedStyle style = (i == selectedIndex) ? BRAND_STYLE : AttributedStyle.DEFAULT;
             lines.add(new AttributedString(line, style));
