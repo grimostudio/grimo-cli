@@ -4,6 +4,7 @@
 > Status: Draft
 > Phase: 3（核心差異化）
 > Parent: [PRD](2026-03-27-grimo-orchestration-platform-prd.md)
+> Depends: F2-d (WorkspaceProvisioner), F2-e (Worktree Isolation), F3 (Tier System)
 
 ## 問題
 
@@ -168,6 +169,8 @@ Skill 引用 sub-agent "logic-reviewer"：
 
 ### Parallel 模式
 
+每個 sub-agent 在獨立 git worktree 中工作（F2-e），避免並行修改衝突：
+
 ```
 使用者：/multi-review src/auth/
 
@@ -175,59 +178,78 @@ Grimo 讀 Skill metadata:
   subagents: [logic-review, arch-review]
   execution: parallel
 
-  ┌──────────────────┐
-  │ Sub-Agent 1      │  Virtual Thread 1
-  │ logic-review     │
-  │ tier: std        │
-  │ → claude / sonnet│
-  │                  │
-  │ goal = "Review   │
-  │ src/auth/ for    │
-  │ logic bugs"      │
-  └────────┬─────────┘
-           │
-           │ 平行
-           │
-  ┌────────▼─────────┐
-  │ Sub-Agent 2      │  Virtual Thread 2
-  │ arch-review      │
-  │ tier: std        │
-  │ → gemini / pro   │
-  │                  │
-  │ goal = "Review   │
-  │ src/auth/ for    │
-  │ architecture"    │
-  └────────┬─────────┘
-           │
-           ▼ CompletableFuture.allOf()
-  ┌──────────────────┐
-  │ 收集結果、分區顯示│
-  │                  │
-  │ ━━ logic-review ━│
-  │ 找到 3 個問題... │
-  │                  │
-  │ ━━ arch-review ━━│
-  │ 建議 2 個改善... │
-  └──────────────────┘
+  ┌──────────────────────────────────┐
+  │ Sub-Agent 1                      │  Virtual Thread 1
+  │ logic-review                     │
+  │ tier: std → claude / sonnet      │
+  │                                  │
+  │ Worktree: /tmp/grimo-aaa/       │  ← WorkspaceProvisioner.provision()
+  │ Branch:   grimo/logic-review-aaa │
+  │ Skills:   .agents/skills/ ✓     │
+  │                                  │
+  │ goal = "Review src/auth/ for     │
+  │         logic bugs"              │
+  └────────────┬─────────────────────┘
+               │
+               │ 平行（各自獨立 worktree，不衝突）
+               │
+  ┌────────────▼─────────────────────┐
+  │ Sub-Agent 2                      │  Virtual Thread 2
+  │ arch-review                      │
+  │ tier: std → gemini / pro         │
+  │                                  │
+  │ Worktree: /tmp/grimo-bbb/       │  ← WorkspaceProvisioner.provision()
+  │ Branch:   grimo/arch-review-bbb  │
+  │ Skills:   .agents/skills/ ✓     │
+  │                                  │
+  │ goal = "Review src/auth/ for     │
+  │         architecture"            │
+  └────────────┬─────────────────────┘
+               │
+               ▼ CompletableFuture.allOf()
+  ┌──────────────────────────────────┐
+  │ 收集結果 + 清理 worktrees        │
+  │                                  │
+  │ ━━ logic-review (branch: aaa) ━━│
+  │ 找到 3 個問題...                 │
+  │                                  │
+  │ ━━ arch-review (branch: bbb) ━━━│
+  │ 建議 2 個改善...                 │
+  │                                  │
+  │ Branches:                        │
+  │   → git merge grimo/logic-review-aaa│
+  │   → git merge grimo/arch-review-bbb │
+  └──────────────────────────────────┘
 ```
 
 ### Sequential 模式
+
+Sequential 模式中，後續 agent 的 worktree 基於前一步的 branch（繼承修改）：
 
 ```
 使用者：/plan-execute 重構 auth module
 
 Phase 1:
   planner sub-agent (pro tier → opus)
+  Worktree: /tmp/grimo-ccc/ on branch grimo/planner-ccc (from HEAD)
   goal = "分析需求，產出計劃：重構 auth module"
   → 結果：「3 步驟計劃：1. 抽取 interface 2. 實作 3. 補測試」
+  → cleanup worktree（分支保留）
 
   [使用者審閱：Enter 執行 / e 編輯 / q 取消]
 
 Phase 2:
   executor sub-agent (lite tier → flash)
-  goal = "根據計劃執行。計劃：1. 抽取 interface 2. 實作 3. 補測試"
+  Worktree: /tmp/grimo-ddd/ on branch grimo/executor-ddd (from grimo/planner-ccc)
+  goal = "根據計劃執行。計劃：{previous.result}"
   → 結果：「已完成所有步驟」
+  → cleanup worktree（分支保留）
+
+最終：
+  → git merge grimo/executor-ddd（包含 planner + executor 的所有變更）
 ```
+
+**`from grimo/planner-ccc`**：executor 的 worktree 基於 planner 的 branch 建立，自然繼承前一步的修改。
 
 ## 新增元件
 
@@ -245,28 +267,35 @@ Phase 2:
 ```java
 public class SubAgentDispatcher {
 
+    private final WorkspaceProvisioner workspaceProvisioner;
+    private final SkillRegistry skillRegistry;
+
     /**
      * 平行派遣多個 sub-agent，等待全部完成。
-     * 每個 sub-agent 在獨立的 Virtual Thread 上執行。
+     * 每個 sub-agent 在獨立的 git worktree + Virtual Thread 上執行。
+     * WorkspaceProvisioner 為每個 sub-agent 建立獨立 worktree + provision skills。
      */
     public List<SubAgentResult> dispatchParallel(
         List<SubAgentSpec> specs,
-        Path workingDirectory,
+        Path projectDir,
         McpServerCatalog mcpCatalog
     );
 
     /**
-     * 循序派遣 sub-agent，前一個的結果可塞入下一個的 goal。
+     * 循序派遣 sub-agent，每步在獨立 worktree 執行。
+     * 後續 agent 的 worktree 基於前一步的 branch（繼承修改）。
      * 支援 user-gate：在步驟間暫停等待使用者確認。
      */
     public List<SubAgentResult> dispatchSequential(
         List<SubAgentSpec> specs,
-        Path workingDirectory,
+        Path projectDir,
         McpServerCatalog mcpCatalog,
         boolean userGateBetweenSteps
     );
 }
 ```
+
+**Worktree 管理：** SubAgentDispatcher 內部呼叫 `workspaceProvisioner.provision()` 為每個 sub-agent 建立獨立 worktree，完成後 `cleanup()`。呼叫者不需要處理 worktree 生命週期。
 
 ## @mention 路由規則
 
@@ -288,7 +317,11 @@ public class SubAgentDispatcher {
 ❯ /multi-review src/auth/
 
 ⏺ 派遣 2 個 sub-agent...
+  ● Worktree(grimo/logic-review-aaa)
+    └ Isolated workspace created
   ⟳ logic-review (claude-code / sonnet)
+  ● Worktree(grimo/arch-review-bbb)
+    └ Isolated workspace created
   ⟳ arch-review (gemini-cli / pro)
 
 ━━━ logic-review 完成 (12s) ━━━
@@ -296,11 +329,16 @@ public class SubAgentDispatcher {
 1. AuthController.java:42 — null check missing
 2. TokenService.java:78 — race condition
 3. SessionManager.java:15 — unclosed resource
+  Branch: grimo/logic-review-aaa (1 commit)
 
 ━━━ arch-review 完成 (8s) ━━━
 建議 2 個改善：
 1. AuthController 違反 SRP，建議拆分
 2. TokenService 應透過 interface 注入
+  Branch: grimo/arch-review-bbb (0 commits)
+
+Branches:
+  → git merge grimo/logic-review-aaa
 ```
 
 ### Sequential 結果顯示
@@ -308,6 +346,8 @@ public class SubAgentDispatcher {
 ```
 ❯ /plan-execute 重構 auth module
 
+● Worktree(grimo/planner-ccc)
+  └ Isolated workspace created
 ⏺ Phase 1: 規劃中 (claude-code / opus)...
 
 ━━━ 計劃 ━━━
@@ -320,24 +360,31 @@ public class SubAgentDispatcher {
 
 ❯ [Enter]
 
+● Worktree(grimo/executor-ddd) from grimo/planner-ccc
+  └ Isolated workspace created
 ⏺ Phase 2: 執行中 (gemini-cli / flash)...
 
 ━━━ 執行結果 ━━━
 ✓ 已完成 4 個步驟
   Modified: 3 files, Added: 2 files
+  Branch: grimo/executor-ddd (5 commits)
+  → git merge grimo/executor-ddd
 ```
 
 ## 影響範圍
 
 | 檔案 | 變更 |
 |------|------|
-| `GrimoTuiRunner.java` | processInput 加入 @mention 解析、Skill 調度判斷 |
-| `GrimoContentView.java` | 分區顯示 sub-agent 結果 |
+| `GrimoTuiRunner.java` | processInput 加入 @mention 解析、Skill 調度判斷；移除 `agentRunning` 單一限制，改為多 agent 追蹤 |
+| `GrimoContentView.java` | 分區顯示 sub-agent 結果 + branch info |
 | `GrimoInputView.java` | @mention 自動補全 |
-| 新增 `orchestration/` package | SubAgentDispatcher、DefinitionLoader、SkillParser |
+| `WorkspaceProvisioner.java` | 已由 F2-e 擴充 worktree 支援，F4 直接使用 |
+| 新增 `agent/dispatch/` package | SubAgentDispatcher（注入 WorkspaceProvisioner）、DefinitionLoader、SkillParser、SubAgentResult |
 
 ## 參考
 
+- [F2-e: Git Worktree Isolation](2026-03-30-f2e-worktree-isolation.md) — WorkspaceProvisioner worktree 基礎設施
+- [Google Scion](https://github.com/GoogleCloudPlatform/scion) — 每個 agent 一個 container + git worktree + credentials
 - [Claude Code Sub-Agents](https://code.claude.com/docs/en/sub-agents) — 隔離 context、@mention、Agent tool
 - [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams) — 訊息傳遞、共享 task list
 - [Codex CLI Sub-Agents](https://developers.openai.com/codex/subagents) — TOML 定義、max_threads
