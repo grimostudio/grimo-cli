@@ -556,8 +556,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     // CLI agent（Claude/Gemini/Codex）原生掃描 .agents/skills/ 發現 skill
                     // Progressive Disclosure：agent 只讀 name+description，需要時才載入 body
                     var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
-                    var provisionedSkills = workspaceProvisioner.provision(
-                            projectDir, skillRegistry.listAll());
+                    // TODO(f2e-task4): replace with worktree-aware provision flow
+                    var worktreeInfo = workspaceProvisioner.provision(
+                            projectDir, "tmp-" + System.currentTimeMillis(), skillRegistry.listAll());
+                    var provisionedSkills = worktreeInfo.provisionedSkills();
                     try {
                         // 移除 "thinking..." 暫時狀態行（在顯示 skill 之前）
                         contentView.removeLastLine();
@@ -611,7 +613,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
                         currentTierSelection = null;
                         statusView.setStatusText(originalStatusText);
                         // 清理 Grimo 建立的 symlink
-                        workspaceProvisioner.cleanup(projectDir, provisionedSkills);
+                        // TODO(f2e-task5): replace with worktree-aware cleanup flow
+                        workspaceProvisioner.cleanup(worktreeInfo, projectDir);
                         // agent 完成後 content 區大量變動，強制全螢幕重繪
                         // 修正：JLine Display diff 可能遺漏 input 行的品牌色更新
                         screen.requestFullRedraw();

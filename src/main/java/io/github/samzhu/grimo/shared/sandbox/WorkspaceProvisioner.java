@@ -11,16 +11,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 派遣 agent 前準備工作目錄：將 Grimo 管理的 Skill symlink 到
+ * 派遣 agent 前準備工作目錄：建立 git worktree + 將 Grimo 管理的 Skill symlink 到
  * .agents/skills/（跨 agent 標準路徑），讓 CLI agent 原生發現。
  *
  * 設計說明：
- * - 使用 .agents/skills/ 路徑，Claude Code / Gemini CLI / Codex CLI 皆掃描
- * - symlink 而非複製，避免重複檔案
- * - 名稱衝突時以使用者的為優先，跳過 Grimo 版本（WARN log）
- * - cleanup() 只移除 Grimo 建立的 symlink，不刪除使用者自己的 skill
- * - 併發安全：GrimoTuiRunner 已有 agentRunning 守衛，同時只有一個 agent 執行
+ * - 統一模式：每次派遣都建獨立 git worktree（不分單一/多 agent）
+ * - Worktree 提供 3 個價值：(1) 隔離 agent 修改 (2) 為 F4 並行打基礎 (3) 使用者可先看 diff 再 merge
+ * - 非 git 目錄自動 fallback 到 CWD + symlink（現有行為）
+ * - 永遠不拋例外：worktree 建立失敗時 fallback 到 CWD（WARN log）
+ * - cleanup 前自動 commit 未提交變更，避免丟失 agent 的工作
+ * - 分支保留讓使用者可以 git merge grimo/<taskId>
  *
+ * @see <a href="https://git-scm.com/docs/git-worktree">Git Worktree Documentation</a>
+ * @see <a href="https://github.com/GoogleCloudPlatform/scion">Google Scion — worktree per agent</a>
  * @see <a href="https://agentskills.io/client-implementation/adding-skills-support">
  *      Agent Skills — .agents/skills/ cross-client convention</a>
  */
@@ -29,19 +32,88 @@ public class WorkspaceProvisioner {
     private static final Logger log = LoggerFactory.getLogger(WorkspaceProvisioner.class);
     private static final String AGENTS_SKILLS_DIR = ".agents/skills";
     private final Path skillsSourceDir;
+    private final GitHelper gitHelper;
 
-    public WorkspaceProvisioner(Path skillsSourceDir) {
+    public WorkspaceProvisioner(Path skillsSourceDir, GitHelper gitHelper) {
         this.skillsSourceDir = skillsSourceDir;
+        this.gitHelper = gitHelper;
     }
 
-    public List<String> provision(Path projectDir, List<SkillDefinition> skills) {
+    /**
+     * 準備 agent 工作區：建立 git worktree + provision skills。
+     * 非 git 目錄或 worktree 建立失敗時 fallback 到 CWD + symlink。
+     * 永遠不拋例外 — 失敗時回傳 isWorktree=false 的 WorktreeInfo。
+     *
+     * @param projectDir 使用者的專案目錄
+     * @param taskId 任務 ID（用於分支名稱 grimo/<taskId>）
+     * @param skills 要配置的 skill 列表
+     * @return WorktreeInfo 包含工作目錄、分支、baseSha、已配置 skill
+     */
+    public WorktreeInfo provision(Path projectDir, String taskId, List<SkillDefinition> skills) {
+        // 嘗試建立 git worktree
+        if (gitHelper.isGitRepo(projectDir)) {
+            try {
+                String baseSha = gitHelper.getHeadSha(projectDir);
+                // 設計說明：使用 taskId 組成目錄名稱，避免 createTempDirectory + delete 的 TOCTOU 競爭
+                // git worktree add 需要目錄不存在，它會自己建立
+                Path worktreeDir = Path.of(System.getProperty("java.io.tmpdir"),
+                        "grimo-worktree-" + taskId);
+                String branchName = "grimo/" + taskId;
+                gitHelper.createWorktree(projectDir, worktreeDir, branchName);
+
+                // 在 worktree 裡配置 skills
+                List<String> provisioned = provisionSkills(worktreeDir, skills);
+
+                return new WorktreeInfo(worktreeDir, branchName, baseSha, provisioned, true);
+            } catch (Exception e) {
+                log.warn("Failed to create worktree: {}, falling back to CWD", e.getMessage());
+            }
+        } else {
+            log.warn("Not a git repository, falling back to CWD mode");
+        }
+
+        // Fallback: CWD + symlink（現有行為）
+        List<String> provisioned = provisionSkills(projectDir, skills);
+        return new WorktreeInfo(projectDir, null, null, provisioned, false);
+    }
+
+    /**
+     * 清理工作區：移除 worktree 目錄 + skill symlinks。
+     * 保留分支（讓使用者可以 merge）。
+     *
+     * @param info provision() 回傳的 WorktreeInfo
+     * @param projectDir 使用者的專案目錄（worktree 模式需要在主 repo 執行 git worktree remove）
+     */
+    public void cleanup(WorktreeInfo info, Path projectDir) {
+        if (info.isWorktree()) {
+            try {
+                // 清理前先檢查未提交變更
+                if (gitHelper.hasUncommittedChanges(info.workDir())) {
+                    gitHelper.autoCommit(info.workDir());
+                }
+                // removeWorktree --force 會刪除整個 worktree 目錄（包含 .agents/skills/ symlinks）
+                // 所以 worktree 模式不需要單獨呼叫 cleanupSymlinks
+                gitHelper.removeWorktree(projectDir, info.workDir());
+            } catch (Exception e) {
+                log.warn("Failed to cleanup worktree: {}", e.getMessage());
+            }
+        } else {
+            // Fallback 模式：只移除 symlinks
+            cleanupSymlinks(info.workDir(), info.provisionedSkills());
+        }
+    }
+
+    /**
+     * 將 skill symlink 到目標目錄的 .agents/skills/。
+     */
+    private List<String> provisionSkills(Path targetDir, List<SkillDefinition> skills) {
         if (skills.isEmpty()) return List.of();
 
         var provisioned = new ArrayList<String>();
-        Path targetDir = projectDir.resolve(AGENTS_SKILLS_DIR);
+        Path agentsSkillsDir = targetDir.resolve(AGENTS_SKILLS_DIR);
 
         try {
-            Files.createDirectories(targetDir);
+            Files.createDirectories(agentsSkillsDir);
         } catch (IOException e) {
             log.error("Failed to create .agents/skills/ directory: {}", e.getMessage());
             return List.of();
@@ -54,9 +126,9 @@ public class WorkspaceProvisioner {
                 continue;
             }
 
-            Path targetSkillDir = targetDir.resolve(skill.name());
+            Path targetSkillDir = agentsSkillsDir.resolve(skill.name());
             if (Files.exists(targetSkillDir)) {
-                log.warn("Skill '{}' already exists in project .agents/skills/, skipping Grimo version", skill.name());
+                log.warn("Skill '{}' already exists in .agents/skills/, skipping Grimo version", skill.name());
                 continue;
             }
 
@@ -77,12 +149,14 @@ public class WorkspaceProvisioner {
         return provisioned;
     }
 
-    public void cleanup(Path projectDir, List<String> provisionedSkillNames) {
-        Path targetDir = projectDir.resolve(AGENTS_SKILLS_DIR);
+    /**
+     * 移除 Grimo 建立的 symlinks（不刪使用者 skill）。
+     */
+    private void cleanupSymlinks(Path targetDir, List<String> provisionedSkillNames) {
+        Path agentsSkillsDir = targetDir.resolve(AGENTS_SKILLS_DIR);
         int removed = 0;
-
         for (var name : provisionedSkillNames) {
-            Path symlink = targetDir.resolve(name);
+            Path symlink = agentsSkillsDir.resolve(name);
             if (Files.isSymbolicLink(symlink)) {
                 try {
                     Files.delete(symlink);
@@ -92,7 +166,6 @@ public class WorkspaceProvisioner {
                 }
             }
         }
-
         if (removed > 0) {
             log.debug("Cleaned up workspace: removed {} symlinks", removed);
         }

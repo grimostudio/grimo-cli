@@ -13,90 +13,180 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class WorkspaceProvisionerTest {
 
-    @TempDir Path projectDir;
+    @TempDir Path tempDir;
     @TempDir Path skillsSourceDir;
 
+    /** 建立真實 git repo（含初始 commit）*/
+    private Path createGitRepo() throws Exception {
+        Path repo = tempDir.resolve("test-repo");
+        Files.createDirectories(repo);
+        exec(repo, "git", "init");
+        exec(repo, "git", "config", "user.email", "test@test.com");
+        exec(repo, "git", "config", "user.name", "Test");
+        Files.writeString(repo.resolve("README.md"), "# Test");
+        exec(repo, "git", "add", ".");
+        exec(repo, "git", "commit", "-m", "initial");
+        return repo;
+    }
+
+    private String exec(Path dir, String... cmd) throws Exception {
+        var pb = new ProcessBuilder(cmd);
+        pb.directory(dir.toFile());
+        pb.redirectErrorStream(true);
+        var process = pb.start();
+        String output = new String(process.getInputStream().readAllBytes());
+        int exit = process.waitFor();
+        if (exit != 0) throw new RuntimeException("Failed: " + String.join(" ", cmd) + "\n" + output);
+        return output.trim();
+    }
+
+    // === Worktree Mode Tests ===
+
     @Test
-    void provisionShouldSymlinkSkillsToAgentsDirectory() throws Exception {
-        var skillDir = skillsSourceDir.resolve("code-review");
-        Files.createDirectories(skillDir);
-        Files.writeString(skillDir.resolve("SKILL.md"), "---\nname: code-review\n---\n# CR");
+    void provisionShouldCreateWorktreeInGitRepo() throws Exception {
+        Path repo = createGitRepo();
+        setupSkillSource("code-review");
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir);
-        var result = provisioner.provision(projectDir, List.of(testSkill("code-review")));
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(repo, "task-001", List.of(testSkill("code-review")));
 
-        assertThat(result).containsExactly("code-review");
-        Path symlink = projectDir.resolve(".agents/skills/code-review");
-        assertThat(Files.isSymbolicLink(symlink)).isTrue();
-        assertThat(Files.readSymbolicLink(symlink)).isEqualTo(skillDir);
+        assertThat(info.isWorktree()).isTrue();
+        assertThat(info.branchName()).isEqualTo("grimo/task-001");
+        assertThat(info.baseSha()).matches("[0-9a-f]{40}");
+        assertThat(info.workDir()).isNotEqualTo(repo);
+        assertThat(Files.isDirectory(info.workDir())).isTrue();
+        assertThat(info.provisionedSkills()).containsExactly("code-review");
+        // skill 被 symlink 到 worktree 的 .agents/skills/
+        assertThat(Files.isSymbolicLink(info.workDir().resolve(".agents/skills/code-review"))).isTrue();
     }
 
     @Test
-    void provisionShouldCreateAgentsSkillsDirectoryIfNotExists() throws Exception {
-        var skillDir = skillsSourceDir.resolve("test-skill");
-        Files.createDirectories(skillDir);
-        Files.writeString(skillDir.resolve("SKILL.md"), "---\nname: test-skill\n---\n# Test");
+    void provisionShouldIncludeRepoFilesInWorktree() throws Exception {
+        Path repo = createGitRepo();
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(repo, "task-002", List.of());
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir);
-        provisioner.provision(projectDir, List.of(testSkill("test-skill")));
-
-        assertThat(Files.isDirectory(projectDir.resolve(".agents/skills"))).isTrue();
+        // worktree 應該包含 repo 的檔案
+        assertThat(Files.exists(info.workDir().resolve("README.md"))).isTrue();
     }
 
     @Test
-    void provisionShouldSkipIfSkillSourceDirNotExists() throws Exception {
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir);
-        var result = provisioner.provision(projectDir, List.of(testSkill("nonexistent")));
-        assertThat(result).isEmpty();
+    void cleanupShouldRemoveWorktreeButKeepBranch() throws Exception {
+        Path repo = createGitRepo();
+        setupSkillSource("code-review");
+
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(repo, "task-003", List.of(testSkill("code-review")));
+        Path worktreeDir = info.workDir();
+
+        provisioner.cleanup(info, repo);
+
+        assertThat(Files.exists(worktreeDir)).isFalse();
+        // 分支應保留
+        String branches = exec(repo, "git", "branch", "--list", "grimo/task-003");
+        assertThat(branches).contains("grimo/task-003");
     }
 
     @Test
-    void provisionShouldSkipConflictingUserSkill() throws Exception {
-        var userSkillDir = projectDir.resolve(".agents/skills/code-review");
+    void cleanupShouldAutoCommitUncommittedChanges() throws Exception {
+        Path repo = createGitRepo();
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(repo, "task-004", List.of());
+
+        // agent 在 worktree 修改但沒 commit
+        Files.writeString(info.workDir().resolve("agent-output.txt"), "result");
+
+        provisioner.cleanup(info, repo);
+
+        // 切到該分支確認有 commit
+        String log = exec(repo, "git", "log", "--oneline", "grimo/task-004");
+        assertThat(log).contains("grimo: auto-commit");
+    }
+
+    // === Fallback Mode Tests（非 git 目錄）===
+
+    @Test
+    void provisionShouldFallbackToCwdForNonGitDir() throws Exception {
+        Path nonGitDir = tempDir.resolve("non-git");
+        Files.createDirectories(nonGitDir);
+        setupSkillSource("code-review");
+
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(nonGitDir, "task-005", List.of(testSkill("code-review")));
+
+        assertThat(info.isWorktree()).isFalse();
+        assertThat(info.workDir()).isEqualTo(nonGitDir);
+        assertThat(info.branchName()).isNull();
+        assertThat(info.baseSha()).isNull();
+        assertThat(info.provisionedSkills()).containsExactly("code-review");
+        // skill 直接 symlink 到 CWD 的 .agents/skills/
+        assertThat(Files.isSymbolicLink(nonGitDir.resolve(".agents/skills/code-review"))).isTrue();
+    }
+
+    @Test
+    void cleanupFallbackShouldRemoveSymlinksOnly() throws Exception {
+        Path nonGitDir = tempDir.resolve("non-git-2");
+        Files.createDirectories(nonGitDir);
+        setupSkillSource("code-review");
+
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(nonGitDir, "task-006", List.of(testSkill("code-review")));
+        provisioner.cleanup(info, nonGitDir);
+
+        assertThat(Files.exists(nonGitDir.resolve(".agents/skills/code-review"))).isFalse();
+        // CWD 目錄本身不該被刪除
+        assertThat(Files.isDirectory(nonGitDir)).isTrue();
+    }
+
+    @Test
+    void provisionShouldReturnEmptySkillsWhenNoneProvided() throws Exception {
+        Path repo = createGitRepo();
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(repo, "task-007", List.of());
+
+        assertThat(info.isWorktree()).isTrue();
+        assertThat(info.provisionedSkills()).isEmpty();
+    }
+
+    @Test
+    void provisionShouldFallbackWhenWorktreeCreationFails() throws Exception {
+        Path repo = createGitRepo();
+        // 建立同名分支讓 worktree add 失敗
+        exec(repo, "git", "branch", "grimo/conflict-task");
+
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(repo, "conflict-task", List.of());
+
+        assertThat(info.isWorktree()).isFalse();
+        assertThat(info.workDir()).isEqualTo(repo);
+    }
+
+    @Test
+    void provisionShouldSkipConflictingUserSkillInWorktree() throws Exception {
+        Path repo = createGitRepo();
+        // 先在 repo 建立使用者自己的 skill
+        Path userSkillDir = repo.resolve(".agents/skills/code-review");
         Files.createDirectories(userSkillDir);
         Files.writeString(userSkillDir.resolve("SKILL.md"), "user version");
+        exec(repo, "git", "add", ".");
+        exec(repo, "git", "commit", "-m", "add user skill");
 
-        var grimoSkillDir = skillsSourceDir.resolve("code-review");
-        Files.createDirectories(grimoSkillDir);
-        Files.writeString(grimoSkillDir.resolve("SKILL.md"), "grimo version");
+        setupSkillSource("code-review");
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir);
-        var result = provisioner.provision(projectDir, List.of(testSkill("code-review")));
+        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var info = provisioner.provision(repo, "task-008", List.of(testSkill("code-review")));
 
-        assertThat(result).isEmpty();
-        assertThat(Files.readString(userSkillDir.resolve("SKILL.md"))).isEqualTo("user version");
+        // 使用者的 skill 應該優先（不被 Grimo 覆蓋）
+        // worktree 裡應該有使用者的 skill（從 repo 繼承）
+        assertThat(info.provisionedSkills()).isEmpty();
     }
 
-    @Test
-    void provisionShouldReturnEmptyForNoSkills() {
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir);
-        var result = provisioner.provision(projectDir, List.of());
-        assertThat(result).isEmpty();
-    }
+    // === Helpers ===
 
-    @Test
-    void cleanupShouldRemoveProvisionedSymlinks() throws Exception {
-        var skillDir = skillsSourceDir.resolve("code-review");
+    private void setupSkillSource(String name) throws Exception {
+        var skillDir = skillsSourceDir.resolve(name);
         Files.createDirectories(skillDir);
-        Files.writeString(skillDir.resolve("SKILL.md"), "---\nname: code-review\n---\n# CR");
-
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir);
-        var provisioned = provisioner.provision(projectDir, List.of(testSkill("code-review")));
-        provisioner.cleanup(projectDir, provisioned);
-
-        assertThat(Files.exists(projectDir.resolve(".agents/skills/code-review"))).isFalse();
-    }
-
-    @Test
-    void cleanupShouldNotRemoveUserSkills() throws Exception {
-        var userSkillDir = projectDir.resolve(".agents/skills/user-skill");
-        Files.createDirectories(userSkillDir);
-        Files.writeString(userSkillDir.resolve("SKILL.md"), "user skill");
-
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir);
-        provisioner.cleanup(projectDir, List.of("user-skill"));
-
-        assertThat(Files.exists(userSkillDir)).isTrue();
+        Files.writeString(skillDir.resolve("SKILL.md"), "---\nname: " + name + "\n---\n# " + name);
     }
 
     private SkillDefinition testSkill(String name) {

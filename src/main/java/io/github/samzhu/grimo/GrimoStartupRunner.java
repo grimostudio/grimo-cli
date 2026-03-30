@@ -85,7 +85,7 @@ public class GrimoStartupRunner {
 
     @Bean
     WorkspaceProvisioner workspaceProvisioner(WorkspaceManager workspaceManager) {
-        return new WorkspaceProvisioner(workspaceManager.skillsDir());
+        return new WorkspaceProvisioner(workspaceManager.skillsDir(), new io.github.samzhu.grimo.shared.sandbox.GitHelper());
     }
 
     @Bean
