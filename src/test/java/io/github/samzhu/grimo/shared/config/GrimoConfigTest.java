@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -174,5 +175,108 @@ class GrimoConfigTest {
         boolean removed = config.removeMcpServer("nonexistent");
 
         assertThat(removed).isFalse();
+    }
+
+    @Test
+    void getSkillTiersShouldReturnFallbackListPerTier() throws IOException {
+        var configFile = tempDir.resolve("config.yaml");
+        Files.writeString(configFile, """
+            skill-tiers:
+              lite:
+                - agent: gemini
+                  model: gemini-2.5-flash
+                - agent: claude
+                  model: claude-haiku-4
+              std:
+                - agent: claude
+                  model: claude-sonnet-4
+              pro:
+                - agent: claude
+                  model: claude-opus-4
+            """);
+
+        var config = new GrimoConfig(configFile);
+        var tiers = config.getSkillTiers();
+
+        assertThat(tiers).containsKey("lite");
+        assertThat(tiers.get("lite")).hasSize(2);
+        assertThat(tiers.get("lite").getFirst().get("agent")).isEqualTo("gemini");
+        assertThat(tiers.get("lite").getFirst().get("model")).isEqualTo("gemini-2.5-flash");
+        assertThat(tiers).containsKey("std");
+        assertThat(tiers).containsKey("pro");
+    }
+
+    @Test
+    void getSkillTiersShouldReturnEmptyWhenNotConfigured() {
+        var config = new GrimoConfig(tempDir.resolve("config.yaml"));
+        assertThat(config.getSkillTiers()).isEmpty();
+    }
+
+    @Test
+    void getSkillOverridesShouldReturnOverridesMap() throws IOException {
+        var configFile = tempDir.resolve("config.yaml");
+        Files.writeString(configFile, """
+            skill-overrides:
+              deep-research:
+                tier: pro
+              tdd-workflow:
+                agent: claude
+                model: claude-opus-4
+            """);
+
+        var config = new GrimoConfig(configFile);
+        var overrides = config.getSkillOverrides();
+
+        assertThat(overrides).containsKey("deep-research");
+        assertThat(overrides.get("deep-research").get("tier")).isEqualTo("pro");
+        assertThat(overrides).containsKey("tdd-workflow");
+        assertThat(overrides.get("tdd-workflow").get("agent")).isEqualTo("claude");
+    }
+
+    @Test
+    void getSkillOverridesShouldReturnEmptyWhenNotConfigured() {
+        var config = new GrimoConfig(tempDir.resolve("config.yaml"));
+        assertThat(config.getSkillOverrides()).isEmpty();
+    }
+
+    @Test
+    void getTierKeywordsShouldReturnKeywordsPerTier() throws IOException {
+        var configFile = tempDir.resolve("config.yaml");
+        Files.writeString(configFile, """
+            tier-keywords:
+              pro:
+                - 仔細想
+                - think hard
+              lite:
+                - 快速
+                - quickly
+            """);
+
+        var config = new GrimoConfig(configFile);
+        var keywords = config.getTierKeywords();
+
+        assertThat(keywords).containsKey("pro");
+        assertThat(keywords.get("pro")).contains("仔細想", "think hard");
+        assertThat(keywords).containsKey("lite");
+        assertThat(keywords.get("lite")).contains("快速", "quickly");
+    }
+
+    @Test
+    void getTierKeywordsShouldReturnEmptyWhenNotConfigured() {
+        var config = new GrimoConfig(tempDir.resolve("config.yaml"));
+        assertThat(config.getTierKeywords()).isEmpty();
+    }
+
+    @Test
+    void setSkillOverrideShouldPersist() {
+        var configFile = tempDir.resolve("config.yaml");
+        var config = new GrimoConfig(configFile);
+
+        config.setSkillOverride("deep-research", Map.of("tier", "pro"));
+
+        var reloaded = new GrimoConfig(configFile);
+        var overrides = reloaded.getSkillOverrides();
+        assertThat(overrides).containsKey("deep-research");
+        assertThat(overrides.get("deep-research").get("tier")).isEqualTo("pro");
     }
 }

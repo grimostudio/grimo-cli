@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -131,6 +132,59 @@ public class GrimoConfig {
     public synchronized String getSandboxMode() {
         String mode = getNestedString("sandbox", "mode");
         return mode != null ? mode : "local";
+    }
+
+    /**
+     * 取得 skill-tiers 設定：每個 tier 對應一個 agent+model fallback list。
+     * 回傳格式：Map<tierName, List<Map<"agent"|"model", value>>>
+     *
+     * 設計說明：
+     * - 每級可配多組 agent+model，按順序 fallback
+     * - 回傳原始結構，TierRouter 負責解析與 isAvailable() 檢查
+     */
+    @SuppressWarnings("unchecked")
+    public synchronized Map<String, List<Map<String, String>>> getSkillTiers() {
+        var data = load();
+        var tiers = (Map<String, List<Map<String, String>>>) data.get("skill-tiers");
+        return tiers != null ? tiers : Map.of();
+    }
+
+    /**
+     * 取得 skill-overrides 設定：per-skill 的 tier 或 agent+model 覆寫。
+     * 回傳格式：Map<skillName, Map<"tier"|"agent"|"model", value>>
+     *
+     * 兩種形式：
+     * - 形式 A：{ tier: "pro" } → 走 tier fallback
+     * - 形式 B：{ agent: "claude", model: "claude-opus-4" } → 直接使用
+     */
+    @SuppressWarnings("unchecked")
+    public synchronized Map<String, Map<String, String>> getSkillOverrides() {
+        var data = load();
+        var overrides = (Map<String, Map<String, String>>) data.get("skill-overrides");
+        return overrides != null ? overrides : Map.of();
+    }
+
+    /**
+     * 設定特定 skill 的 tier/agent/model 覆寫（寫入 skill-overrides 區段）。
+     */
+    @SuppressWarnings("unchecked")
+    public synchronized void setSkillOverride(String skillName, Map<String, String> override) {
+        var data = load();
+        var overrides = (Map<String, Map<String, String>>)
+                data.computeIfAbsent("skill-overrides", k -> new LinkedHashMap<>());
+        overrides.put(skillName, new LinkedHashMap<>(override));
+        save(data);
+    }
+
+    /**
+     * 取得 tier-keywords 設定：每個 tier 對應的觸發關鍵字列表。
+     * 回傳格式：Map<tierName, List<keyword>>
+     */
+    @SuppressWarnings("unchecked")
+    public synchronized Map<String, List<String>> getTierKeywords() {
+        var data = load();
+        var keywords = (Map<String, List<String>>) data.get("tier-keywords");
+        return keywords != null ? keywords : Map.of();
     }
 
     public synchronized void save(Map<String, Object> data) {
