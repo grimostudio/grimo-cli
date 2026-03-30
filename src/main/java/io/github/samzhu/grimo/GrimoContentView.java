@@ -145,7 +145,13 @@ public class GrimoContentView implements TuiComponent {
     /**
      * 渲染 content 區域為 List<AttributedString>。
      *
-     * @param cols 終端機寬度（用於截斷超寬行）
+     * 設計說明：
+     * - 超寬行用 columnSplitLength(cols) wrap（不截斷），保證內容不被吃掉
+     * - 底部對齊：內容少時上方填空白，多時只顯示最後 viewHeight 行
+     * - scroll offset 索引 stored lines，render 時動態 wrap
+     * - 借鑑 OpenCode scrollbox stickyScroll=true 的底部吸附行為
+     *
+     * @param cols 終端機寬度（用於 wrap 超寬行）
      * @param viewHeight content 區可用行數
      * @return 固定 viewHeight 行的列表
      */
@@ -160,43 +166,46 @@ public class GrimoContentView implements TuiComponent {
             return result;
         }
 
+        // 取要顯示的 stored lines 範圍
+        int endIndex, startIndex;
         if (totalLines <= viewHeight) {
-            // 底部對齊：上方填空白
-            for (int i = 0; i < viewHeight - totalLines; i++) {
-                result.add(AttributedString.EMPTY);
-            }
-            for (var line : lines) {
-                result.add(truncate(line, cols));
-            }
+            startIndex = 0;
+            endIndex = totalLines;
+        } else if (autoFollow) {
+            endIndex = totalLines;
+            startIndex = Math.max(0, endIndex - viewHeight);
         } else {
-            // 根據 scrollOffset 取可見範圍
-            int endIndex;
-            if (autoFollow) {
-                endIndex = totalLines;
-            } else {
-                endIndex = Math.min(totalLines, scrollOffset);
-                if (endIndex < viewHeight) {
-                    endIndex = viewHeight;
-                }
-            }
-            int startIndex = Math.max(0, endIndex - viewHeight);
+            endIndex = Math.min(totalLines, scrollOffset);
+            if (endIndex < viewHeight) endIndex = viewHeight;
+            startIndex = Math.max(0, endIndex - viewHeight);
+        }
 
-            for (int i = startIndex; i < startIndex + viewHeight && i < totalLines; i++) {
-                result.add(truncate(lines.get(i), cols));
+        // 將 visible stored lines wrap 到 cols（不截斷）
+        var wrappedVisible = new ArrayList<AttributedString>();
+        for (int i = startIndex; i < endIndex && i < totalLines; i++) {
+            var line = lines.get(i);
+            if (line.columnLength() <= cols) {
+                wrappedVisible.add(line);
+            } else {
+                wrappedVisible.addAll(line.columnSplitLength(cols));
             }
         }
 
-        // 確保行數正確
+        // 底部對齊
+        if (wrappedVisible.size() < viewHeight) {
+            for (int i = 0; i < viewHeight - wrappedVisible.size(); i++) {
+                result.add(AttributedString.EMPTY);
+            }
+            result.addAll(wrappedVisible);
+        } else {
+            // 取最後 viewHeight 行（底部對齊，自動捲到最新）
+            int skip = wrappedVisible.size() - viewHeight;
+            result.addAll(wrappedVisible.subList(skip, wrappedVisible.size()));
+        }
+
         while (result.size() < viewHeight) {
             result.add(AttributedString.EMPTY);
         }
         return result;
-    }
-
-    private AttributedString truncate(AttributedString line, int maxWidth) {
-        if (line.columnLength() <= maxWidth) {
-            return line;
-        }
-        return line.columnSubSequence(0, maxWidth);
     }
 }
