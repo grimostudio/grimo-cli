@@ -1,6 +1,7 @@
 package io.github.samzhu.grimo;
 
 import io.github.samzhu.grimo.shared.tui.DisplayWidth;
+import io.github.samzhu.grimo.shared.tui.TuiComponent;
 import io.github.samzhu.grimo.shared.tui.TuiStatusBar;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
@@ -15,7 +16,7 @@ import java.util.List;
  * - 一般對話：灰色文字
  * - Skill 執行時：tier icon 用對應色彩（lite=green, std=gray, pro=yellow）
  */
-public class GrimoStatusView {
+public class GrimoStatusView implements TuiComponent {
 
     private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.foreground(245);
     private static final AttributedStyle LITE_STYLE = AttributedStyle.DEFAULT.foreground(2);   // green
@@ -41,6 +42,7 @@ public class GrimoStatusView {
         this.tierStyle = style;
     }
 
+    @Override
     public List<AttributedString> render(int cols) {
         if (tierIcon != null && tierStyle != null) {
             var iconStyle = switch (tierStyle) {

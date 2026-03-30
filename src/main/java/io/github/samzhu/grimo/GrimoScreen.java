@@ -5,6 +5,8 @@ import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.Display;
 
+import io.github.samzhu.grimo.shared.tui.Layout;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -85,7 +87,13 @@ public class GrimoScreen {
     public void render() {
         if (rows <= 0 || cols <= 0) return;
 
-        int contentHeight = Math.max(1, rows - INPUT_HEIGHT - STATUS_HEIGHT);
+        // 設計說明：使用 Layout.vertical() 替換手算，與 TUI framework 一致
+        // 借鑑 Ratatui Layout + OpenCode flexGrow
+        int[] heights = Layout.vertical(rows, 0,
+                new Layout.Fill(),                    // content（填滿剩餘）
+                new Layout.Fixed(INPUT_HEIGHT),       // input（固定 3 行）
+                new Layout.Fixed(STATUS_HEIGHT));     // status（固定 1 行）
+        int contentHeight = Math.max(1, heights[0]);
 
         List<AttributedString> allLines = new ArrayList<>(rows);
 

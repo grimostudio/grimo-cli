@@ -1,6 +1,10 @@
 package io.github.samzhu.grimo;
 
 import io.github.samzhu.grimo.shared.tui.DisplayWidth;
+import io.github.samzhu.grimo.shared.tui.TuiComponent;
+import org.jline.utils.AttributedString;
+
+import java.util.List;
 
 /**
  * 渲染靜態 Banner：左側可愛方塊幽靈吉祥物 + 右側環境狀態。
@@ -13,7 +17,14 @@ import io.github.samzhu.grimo.shared.tui.DisplayWidth;
  *
  * @see <a href="https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit">ANSI 256 Color Reference</a>
  */
-public class BannerRenderer {
+public class BannerRenderer implements TuiComponent {
+
+    @Override
+    public List<AttributedString> render(int width) {
+        // TuiComponent 契約：BannerRenderer 需要額外參數，此方法供介面相容
+        // 實際渲染由 render(version, agentId, ..., cols) 處理
+        return List.of();
+    }
 
     // ANSI 256 色碼
     private static final String BRAND = "\033[38;5;67m";    // 品牌色 steel blue（#5F87AF）

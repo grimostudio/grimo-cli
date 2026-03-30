@@ -1,5 +1,6 @@
 package io.github.samzhu.grimo;
 
+import io.github.samzhu.grimo.shared.tui.TuiComponent;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
@@ -16,7 +17,7 @@ import java.util.List;
  * - 上下各有分隔線（共 3 行高）
  * - 渲染統一由 GrimoScreen → Display.update() 處理
  */
-public class GrimoInputView {
+public class GrimoInputView implements TuiComponent {
 
     /** 品牌標誌色 steel blue */
     private static final AttributedStyle BRAND_STYLE = AttributedStyle.DEFAULT.foreground(67);
@@ -204,6 +205,7 @@ public class GrimoInputView {
      */
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GrimoInputView.class);
 
+    @Override
     public List<AttributedString> render(int cols) {
         // 在 lock 下快照 buffer 內容，避免 render thread 和 input thread race condition
         String snapshot;
