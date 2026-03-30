@@ -5,19 +5,49 @@ import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
+
 /**
- * Spring Shell CLI commands for managing agent models.
+ * Agent 管理指令：統一的 /agent-use 處理 agent + model 切換。
  *
  * 設計說明：
- * - 使用 AgentModelRegistry（取代 AgentProviderRegistry）
- * - 全部都是 CLI agent，移除 TYPE 欄位
- * - /agent-model 切換 model 名稱（持久化到 config.yaml）
+ * - 合併原本的 /agent-use 和 /agent-model 為單一指令
+ * - 懶人原則：只指定 agent → 自動帶推薦模型或記憶的模型
+ * - Per-agent 模型記憶：切到 opus 後換 gemini 再換回 claude，記住 opus
+ * - 智慧匹配：簡寫 "opus" → "claude-opus-4-6"
+ *
+ * @see <a href="https://code.claude.com/docs/en/model-config">Claude Code Model Config</a>
+ * @see <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a>
+ * @see <a href="https://github.com/openai/codex">Codex CLI</a>
  */
 @Component
 public class AgentCommands {
 
     private final AgentModelRegistry registry;
     private final GrimoConfig config;
+
+    /**
+     * 各 CLI agent 的推薦預設模型（對齊各 CLI 官方預設）。
+     */
+    static final Map<String, String> RECOMMENDED_MODELS = Map.of(
+            "claude", "claude-sonnet-4-6",
+            "gemini", "gemini-2.5-pro",
+            "codex", "o4-mini"
+    );
+
+    /**
+     * 簡寫 → 完整模型 ID 對應表。
+     * key 格式：agentId + ":" + alias
+     */
+    static final Map<String, String> MODEL_ALIASES = Map.ofEntries(
+            Map.entry("claude:opus", "claude-opus-4-6"),
+            Map.entry("claude:sonnet", "claude-sonnet-4-6"),
+            Map.entry("claude:haiku", "claude-haiku-4-5"),
+            Map.entry("gemini:pro", "gemini-2.5-pro"),
+            Map.entry("gemini:flash", "gemini-2.5-flash"),
+            Map.entry("codex:o4-mini", "o4-mini"),
+            Map.entry("codex:o3", "o3")
+    );
 
     public AgentCommands(AgentModelRegistry registry, GrimoConfig config) {
         this.registry = registry;
@@ -40,18 +70,52 @@ public class AgentCommands {
         return sb.toString();
     }
 
-    @Command(name = "agent-use", description = "Switch default agent")
-    public String use(String agentId) {
+    /**
+     * 統一切換 agent + model。
+     *
+     * 用法：
+     *   /agent-use claude          → claude + 記憶模型 or 推薦預設
+     *   /agent-use claude opus     → claude + claude-opus-4-6（智慧匹配 + 存記憶）
+     *   /agent-use gemini flash    → gemini + gemini-2.5-flash
+     *
+     * @param input agent ID，可選空格後接 model hint
+     */
+    @Command(name = "agent-use", description = "Switch agent (auto-picks model)")
+    public String use(String input) {
+        String[] parts = input.trim().split("\\s+", 2);
+        String agentId = parts[0];
+        String modelHint = parts.length > 1 ? parts[1] : null;
+
+        // 驗證 agent 存在
         if (registry.get(agentId) == null) {
             return "Agent not found: " + agentId + ". Run '/agent-list' to see available agents.";
         }
+
+        // 解析 model
+        String model;
+        if (modelHint != null) {
+            model = resolveModel(agentId, modelHint);
+            config.setAgentOption(agentId, "model", model);
+        } else {
+            // 讀記憶，沒有就用推薦預設
+            model = config.getAgentOption(agentId, "model");
+            if (model == null) {
+                model = RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
+            }
+        }
+
         config.setDefaultAgent(agentId);
-        return "Default agent switched to: " + agentId;
+        config.setDefaultModel(model);
+
+        return "Switched to " + agentId + " \u00b7 " + model;
     }
 
-    @Command(name = "agent-model", description = "Switch default model")
-    public String model(String modelName) {
-        config.setDefaultModel(modelName);
-        return "Default model switched to: " + modelName;
+    /**
+     * 智慧匹配：簡寫 alias → 完整模型 ID。
+     * 先查 alias 表，不匹配則直接當完整 model ID。
+     */
+    private String resolveModel(String agentId, String hint) {
+        String aliasKey = agentId + ":" + hint.toLowerCase();
+        return MODEL_ALIASES.getOrDefault(aliasKey, hint);
     }
 }
