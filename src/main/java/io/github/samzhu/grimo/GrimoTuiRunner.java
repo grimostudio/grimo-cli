@@ -511,6 +511,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     contentView.appendCommandOutput(output);
                     sessionWriter.writeCommandMessage(text, output);
                 }
+                // 設計說明：command 執行後刷新 status bar
+                // /agent-use 切換 agent/model 後，status bar 要即時反映
+                refreshStatusBar();
             } catch (Exception e) {
                 String errorMsg = "Error: " + e.getMessage();
                 contentView.appendError(errorMsg);
@@ -649,6 +652,32 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 contentView.appendError(e.getMessage());
             }
         }
+    }
+
+    /**
+     * 從 config 重新讀取 agent/model，更新 status bar。
+     * /agent-use 等指令執行後呼叫，確保即時反映切換結果。
+     */
+    private void refreshStatusBar() {
+        String agentId = grimoConfig.getDefaultAgent();
+        if (agentId == null) agentId = resolveAgentId(List.of());
+        String model = grimoConfig.getAgentOption(agentId, "model");
+        if (model == null) model = grimoConfig.getDefaultModel();
+        if (model == null) model = AgentCommands.RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
+
+        String workspacePath = workspaceManager.root().toString()
+                .replace(System.getProperty("user.home"), "~");
+        long agentCount = agentModelRegistry.listAll().values().stream()
+                .filter(m -> m.isAvailable()).count();
+        int skillCount = skillRegistry.listAll().size();
+        int mcpCount = grimoConfig.getMcpServers().size();
+        int taskCount = taskSchedulerService.getScheduledTaskIds().size();
+
+        String newStatus = agentId + " · " + model + " │ " + workspacePath
+                + " │ " + (int) agentCount + " agent · " + skillCount + " skill · "
+                + mcpCount + " mcp · " + taskCount + " task";
+        this.originalStatusText = newStatus;
+        statusView.setStatusText(newStatus);
     }
 
     // === 載入步驟方法（靜默執行，無動畫）===
