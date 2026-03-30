@@ -99,6 +99,25 @@ class GitHelperTest {
     }
 
     @Test
+    void deleteBranchShouldRemoveBranch() throws Exception {
+        Path repo = createGitRepo();
+        var helper = new GitHelper();
+        Path worktreeDir = tempDir.resolve("worktree-del");
+        helper.createWorktree(repo, worktreeDir, "grimo/to-delete");
+        helper.removeWorktree(repo, worktreeDir);
+
+        // branch should exist before delete
+        String before = exec(repo, "git", "branch", "--list", "grimo/to-delete");
+        assertThat(before).contains("grimo/to-delete");
+
+        helper.deleteBranch(repo, "grimo/to-delete");
+
+        // branch should be gone after delete
+        String after = exec(repo, "git", "branch", "--list", "grimo/to-delete");
+        assertThat(after.trim()).isEmpty();
+    }
+
+    @Test
     void hasUncommittedChangesShouldDetectModifiedFiles() throws Exception {
         Path repo = createGitRepo();
         var helper = new GitHelper();

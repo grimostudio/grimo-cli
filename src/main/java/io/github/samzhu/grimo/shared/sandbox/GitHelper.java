@@ -61,6 +61,15 @@ public class GitHelper {
     }
 
     /**
+     * 刪除本地分支（force delete）。
+     * 用於純對話無檔案變更時，清理不需要的 worktree 分支。
+     */
+    public void deleteBranch(Path repoDir, String branchName) {
+        exec(repoDir, "git", "branch", "-D", branchName);
+        log.debug("Deleted branch: {}", branchName);
+    }
+
+    /**
      * 檢查 worktree 是否有未提交變更（modified + untracked）。
      */
     public boolean hasUncommittedChanges(Path worktreeDir) {
