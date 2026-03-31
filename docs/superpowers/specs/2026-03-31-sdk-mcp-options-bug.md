@@ -135,3 +135,18 @@ private AgentOptions resolveMcpServers(AgentOptions options) {
 ## 發現方式
 
 使用 depx skill 反編譯 `spring-ai-agent-client-0.10.0-SNAPSHOT.jar` 和 `spring-ai-claude-agent-0.10.0-SNAPSHOT.jar`，追蹤完整呼叫鏈。
+
+## 版本追蹤
+
+| 版本 | 狀態 | 備註 |
+|------|------|------|
+| 0.10.0-SNAPSHOT | Bug 存在 | 初次發現 |
+| 0.11.0 GA | **Bug 仍存在** | main 與 v0.11.0 tag 一致，無修復 commit |
+
+## Grimo Workaround
+
+Commit `8cc722b`: 主對話改回 DEV mode（不使用 per-request disallowedTools）。
+隔離由 `/dev` 指令的 git worktree 提供，不依賴 SDK 工具限制。
+
+待 upstream 修復後，可恢復 per-request options 傳遞。
+追蹤 issue: TBD（待開 GitHub issue）
