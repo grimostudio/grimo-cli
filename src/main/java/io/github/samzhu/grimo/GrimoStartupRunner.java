@@ -117,8 +117,8 @@ public class GrimoStartupRunner {
     }
 
     /**
-     * ChannelEventListener 使用 @ApplicationModuleListener 監聽 OutgoingMessageEvent，
-     * 必須是 Spring bean 才能被 Spring Modulith 事件機制發現。
+     * ChannelEventListener 使用 @EventListener 監聽 OutgoingMessageEvent，
+     * 必須是 Spring bean 才能被 Spring 事件機制發現。
      */
     @Bean
     ChannelEventListener channelEventListener(ChannelRegistry channelRegistry) {

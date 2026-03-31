@@ -1,7 +1,7 @@
 package io.github.samzhu.grimo.channel;
 
 import io.github.samzhu.grimo.shared.event.OutgoingMessageEvent;
-import org.springframework.modulith.events.ApplicationModuleListener;
+import org.springframework.context.event.EventListener;
 
 /**
  * Listens for {@link OutgoingMessageEvent} domain events and routes them
@@ -25,7 +25,7 @@ public class ChannelEventListener {
      * and forwarding the message. If no adapter is registered for the channel type,
      * the event is silently ignored.
      */
-    @ApplicationModuleListener
+    @EventListener
     public void onOutgoingMessage(OutgoingMessageEvent event) {
         registry.get(event.channelType()).ifPresent(adapter -> {
             adapter.send(new OutgoingMessage(
