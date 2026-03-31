@@ -541,11 +541,12 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 if (model == null) {
                     throw new IllegalStateException("Agent not found: " + tierSelection.agentId());
                 }
-                // 設計說明：主對話預設 PLAN mode — 禁止修改程式碼
-                // Skill 宣告 metadata.grimo.execution=isolated 時，由 Dev Mode 流程處理（Phase B）
+                // 設計說明：主對話使用 DEV mode — 跟 Claude Code 預設行為一致
+                // SDK bug: 有 MCP 時 ClaudeAgentOptions 被 DefaultAgentOptions.from() 覆蓋
+                // 導致 disallowedTools 丟失（instanceof ClaudeAgentOptions → false）
+                // 隔離由 /dev 指令的 worktree 提供，不依賴工具限制
                 var tierOptions = tierOptionsFactory.build(
-                        tierSelection.agentId(), tierSelection.model(),
-                        TierOptionsFactory.ExecutionMode.PLAN);
+                        tierSelection.agentId(), tierSelection.model());
 
                 var mcpServers = mcpCatalogBuilder.getServerNames();
                 log.info("Tier routing: {} → {} / {} (source: {}), goal: {}, mcpServers: {}",
