@@ -3,6 +3,7 @@ package io.github.samzhu.grimo.mcp;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.List;
 import java.util.Map;
@@ -20,7 +21,8 @@ class McpCommandsTest {
     void setUp() {
         config = mock(GrimoConfig.class);
         catalogBuilder = mock(McpCatalogBuilder.class);
-        commands = new McpCommands(config, catalogBuilder);
+        var eventPublisher = mock(ApplicationEventPublisher.class);
+        commands = new McpCommands(config, catalogBuilder, eventPublisher);
     }
 
     // === /mcp（列表）===
