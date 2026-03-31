@@ -196,12 +196,12 @@ Phase A：Plan Mode 基礎
   → 主對話改用 Plan Mode options（disallowedTools）
   → 驗證：主對話 agent 不能修改檔案
 
-Phase B：Dev Mode 實作
+Phase B：Dev Mode 實作 ✅ Done
   → /dev 指令
   → Skill metadata.grimo.execution 自動觸發
   → Worktree 生命週期（建立 → 工作 → diff → merge options → cleanup）
 
-Phase C：移除 per-message worktree
+Phase C：移除 per-message worktree ✅ Done
   → 刪除現有 per-message 邏輯
   → 清理 smart cleanup、displayDiffSummary
 ```

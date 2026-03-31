@@ -70,6 +70,9 @@
 |------|------|------|
 | **AgentSwitchedEvent** | Agent Switched Event | `/agent-use` 執行後由 AgentCommands 發布。TUI 的 @EventListener 接收後自動刷新 status bar。 |
 | **McpCatalogChangedEvent** | MCP Catalog Changed Event | MCP server 新增/移除後發布。TUI 自動更新 mcp count。 |
+| **DevModeRunner** | Dev Mode Runner | Dev Mode 生命週期管理。建 worktree → dispatch agent（DEV 全開）→ diff summary → 發布事件。由 /dev 指令或 skill 自動觸發。 |
+| **DevModeEnteredEvent** | Dev Mode Entered Event | Dev Mode 進入時發布。TUI 顯示 worktree 資訊。 |
+| **DevModeCompletedEvent** | Dev Mode Completed Event | Dev Mode 完成時發布。TUI 顯示 diff summary + merge 提示。 |
 
 已有的 events：`IncomingMessageEvent`、`OutgoingMessageEvent`、`TaskExecutionEvent`
 
