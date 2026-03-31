@@ -15,6 +15,8 @@ import io.github.samzhu.grimo.shared.sandbox.WorkspaceProvisioner;
 import io.github.samzhu.grimo.shared.sandbox.WorktreeInfo;
 import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
+import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
+import io.github.samzhu.grimo.shared.event.McpCatalogChangedEvent;
 import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
@@ -28,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
 import org.springframework.shell.core.command.CommandContext;
 import org.springframework.shell.core.command.CommandExecutor;
@@ -511,9 +514,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     contentView.appendCommandOutput(output);
                     sessionWriter.writeCommandMessage(text, output);
                 }
-                // 設計說明：command 執行後刷新 status bar
-                // /agent-use 切換 agent/model 後，status bar 要即時反映
-                refreshStatusBar();
             } catch (Exception e) {
                 String errorMsg = "Error: " + e.getMessage();
                 contentView.appendError(errorMsg);
@@ -652,6 +652,25 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 contentView.appendError(e.getMessage());
             }
         }
+    }
+
+    /**
+     * 設計說明：Command → Event → TUI 解耦
+     * AgentCommands.use() publish event → 這裡自動刷新 status bar
+     * 不再需要 command 執行後手動呼叫 refreshStatusBar()
+     */
+    @EventListener
+    void on(AgentSwitchedEvent event) {
+        if (statusView == null) return; // TUI 尚未初始化
+        refreshStatusBar();
+        if (eventLoop != null) eventLoop.setDirty();
+    }
+
+    @EventListener
+    void on(McpCatalogChangedEvent event) {
+        if (statusView == null) return;
+        refreshStatusBar();
+        if (eventLoop != null) eventLoop.setDirty();
     }
 
     /**
