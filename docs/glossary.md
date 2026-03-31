@@ -144,3 +144,8 @@
 | **TuiStatusBar** | TUI Status Bar | 單行狀態列元件。truncate 感知 CJK，保證精確 width。 |
 | **TuiSelector** | TUI Selector | 可捲動選擇器。渲染 selected/unselected 項目列表，每行保證精確寬度。用於 slash menu、agent 選擇。 |
 | **TuiMessage** | TUI Message | 對話訊息格式化。inline 模式（2 行 icon+detail）和 block 模式（多行 wrap + role icon）。借鑑 OpenCode InlineTool/BlockTool。 |
+| **TextSelection** | Text Selection | App 層文字選取模型。使用 buffer-absolute 座標（不受 viewport 滾動影響）。滑鼠拖曳選取，放開自動複製到系統剪貼簿（auto-copy on release）。參考 tmux/WezTerm/Claude Code fullscreen mode。 |
+| **SelectionRange** | Selection Range | 正規化的選取範圍 record（start ≤ end）。`colsForRow()` 回傳某行在選取範圍內的列範圍，用於逐行渲染反白 highlight。 |
+| **BufferLine** | Buffer Line | 螢幕 buffer 行 metadata record。`wrapped` 標記 wrap 延續行（複製時不加 \n），`selectable` 標記是否可選取（separator 行不可選）。 |
+| **ClipboardWriter** | Clipboard Writer | 系統剪貼簿寫入。主要用 pbcopy（macOS）/ xclip（Linux），SSH 遠端 fallback 到 OSC 52。參考 tmux/neovim 做法。 |
+| **AutoScroller** | Auto Scroller | 拖曳邊緣自動捲動。50ms timer（參考 tmux），拖到 content 區頂/底部時自動捲動並擴大選取範圍。 |

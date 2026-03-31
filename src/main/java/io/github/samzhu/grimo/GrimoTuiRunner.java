@@ -696,13 +696,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
                         org.jline.utils.AttributedStyle.DEFAULT.foreground(245)));
                 eventLoop.setDirty();
 
-                // 更新 status bar 顯示 tier
-                String tierLabel = tierSelection.tier().icon() + " " + tierSelection.tier().value();
-                if (keywordTier != null) {
-                    tierLabel += " (\u672c\u8f2a)";
-                }
-                statusView.setStatusText(tierLabel + " \u00b7 " + tierSelection.agentId() + " \u00b7 " + tierSelection.model());
-                eventLoop.setDirty();
+                // 設計說明：主對話不顯示 tier（tier 是給 skill dispatch 用的）。
+                // 使用者選的 agent+model 已經顯示在正常 status bar，不需要額外的 tier 標示。
 
                 agentThread = Thread.startVirtualThread(() -> {
                     long startTime = System.currentTimeMillis();

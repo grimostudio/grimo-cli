@@ -109,6 +109,16 @@ void on(AgentSwitchedEvent event) { ... }
 
 `shared/` 是基礎設施層，不應 import `agent/`、`skill/`、`task/` 等功能包。如需跨模組傳遞資料，用 interface 或 event。
 
+#### 文字選取：auto-copy on release
+
+TUI 在 alternate screen + SGR mouse tracking 下，終端原生選取被攔截。App 層實作文字選取：
+
+- **座標系統**：buffer-absolute（不受 viewport 滾動影響），`GrimoScreen.screenToBuffer()` 轉換時需扣除底部對齊的 padding
+- **複製觸發**：滑鼠放開自動複製（auto-copy on release），不用按鍵。macOS 上 Cmd+C 被終端攔截、Ctrl+C 是中斷信號，都不可靠
+- **剪貼簿**：`pbcopy`（macOS）/ `xclip`（Linux）為主，OSC 52 為 SSH 備援。參考 tmux/Claude Code fullscreen mode
+- **反白渲染**：`GrimoScreen.applySelectionHighlight()` 在 `Display.update()` 前疊加 `AttributedStyle.INVERSE`
+- **主對話不顯示 tier**：tier 是給 skill dispatch 用的，主對話 status bar 保持使用者選的 agent+model
+
 #### GrimoTuiRunner 重構方向
 
 目前是 God Object（21 個建構子參數、13+ 職責）。重構目標：拆分為獨立的 lifecycle 和 event listener，每個只管一件事。詳見 `docs/superpowers/specs/2026-03-31-event-driven-tui-refactor.md`。
