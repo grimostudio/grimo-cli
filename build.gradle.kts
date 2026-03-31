@@ -38,12 +38,13 @@ dependencies {
     implementation("org.springframework.modulith:spring-modulith-events-api")
     implementation("org.springframework.shell:spring-shell-starter-ffm")
 
-    // Spring AI Community — agent-client libraries (Library mode, NOT starter)
-    implementation("org.springaicommunity.agents:spring-ai-agent-model:0.10.0-SNAPSHOT")
-    implementation("org.springaicommunity.agents:spring-ai-agent-client:0.10.0-SNAPSHOT")
-    implementation("org.springaicommunity.agents:spring-ai-claude-agent:0.10.0-SNAPSHOT")
-    implementation("org.springaicommunity.agents:spring-ai-gemini:0.10.0-SNAPSHOT")
-    implementation("org.springaicommunity.agents:spring-ai-codex-agent:0.10.0-SNAPSHOT")
+    // Spring AI Community — agent-client 0.11.0 GA (Maven Central)
+    // Known issue: MCP Options Bug (see docs/superpowers/specs/2026-03-31-sdk-mcp-options-bug.md)
+    implementation("org.springaicommunity.agents:agent-model:0.11.0")
+    implementation("org.springaicommunity.agents:agent-client-core:0.11.0")
+    implementation("org.springaicommunity.agents:agent-claude:0.11.0")
+    implementation("org.springaicommunity.agents:agent-gemini:0.11.0")
+    implementation("org.springaicommunity.agents:agent-codex:0.11.0")
 
     // Channels
     implementation("org.telegram:telegrambots-springboot-longpolling-starter:9.0.0")
