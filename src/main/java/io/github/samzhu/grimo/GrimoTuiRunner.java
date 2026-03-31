@@ -566,51 +566,19 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
                 agentThread = Thread.startVirtualThread(() -> {
                     long startTime = System.currentTimeMillis();
-                    // 設計說明：統一 worktree 模式 — 每次派遣都在獨立 git worktree 工作
-                    // 非 git 目錄 fallback 到 CWD（現有行為）
-                    // 參考：Google Scion — 每個 agent 一個 container + git worktree
+                    // 設計說明：主對話 Plan Mode — 直接在 CWD 工作，不建 worktree
+                    // Worktree 隔離由 Dev Mode（Phase B）處理：skill metadata.grimo.execution=isolated 或 /dev 指令
+                    // 參考：Claude Code 預設行為 — 直接在 CWD，worktree 是可選的
                     var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
-                    var taskId = java.util.UUID.randomUUID().toString().substring(0, 8);
-                    var worktree = workspaceProvisioner.provision(
-                            projectDir, taskId, skillRegistry.listAll());
                     try {
-                        // 移除 "thinking..." 暫時狀態行（在顯示 skill 之前）
+                        // 移除 "thinking..." 暫時狀態行
                         contentView.removeLastLine();
 
-                        // 在 Content 區顯示已配置的 skill（對齊 Claude Code 風格）
-                        for (var skillName : worktree.provisionedSkills()) {
-                            var nameLine = new org.jline.utils.AttributedStringBuilder();
-                            nameLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(2), "\u25cf ");
-                            nameLine.append("Skill(" + skillName + ")");
-                            contentView.appendLine(nameLine.toAttributedString());
-
-                            var statusLine = new org.jline.utils.AttributedStringBuilder();
-                            statusLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
-                                    "  \u2514 Successfully loaded skill");
-                            contentView.appendLine(statusLine.toAttributedString());
-                            eventLoop.setDirty();
-                        }
-
-                        // 顯示 worktree 資訊（只有 worktree 模式）
-                        if (worktree.isWorktree()) {
-                            var wtLine = new org.jline.utils.AttributedStringBuilder();
-                            wtLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(2), "\u25cf ");
-                            wtLine.append("Worktree(" + worktree.branchName() + ")");
-                            contentView.appendLine(wtLine.toAttributedString());
-
-                            var wtStatus = new org.jline.utils.AttributedStringBuilder();
-                            wtStatus.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
-                                    "  \u2514 Isolated workspace created");
-                            contentView.appendLine(wtStatus.toAttributedString());
-                            eventLoop.setDirty();
-                        }
-
-                        // 設計說明：workingDirectory 指向 worktree（隔離模式）或 CWD（fallback）
-                        // AgentClient.Builder.defaultWorkingDirectory 覆寫 AgentModel 的 workingDirectory
+                        // 設計說明：直接用 CWD，Plan Mode 下 agent 的 disallowedTools 限制修改
                         var client = AgentClient.builder(model)
                                 .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
                                 .defaultMcpServers(mcpCatalogBuilder.getServerNames())
-                                .defaultWorkingDirectory(worktree.workDir())
+                                .defaultWorkingDirectory(projectDir)
                                 .build();
                         var response = client.run(text, tierOptions);
 
@@ -619,13 +587,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
                             log.info("Agent response received: success=true, duration={}ms, resultLength={}",
                                     duration, response.getResult() != null ? response.getResult().length() : 0);
 
-                            // 設計說明：worktree 模式 + agent 有 commit → 顯示 diff 摘要
-                            // 讓使用者知道 agent 改了什麼、在哪個分支、如何 merge
-                            if (worktree.isWorktree()) {
-                                displayDiffSummary(projectDir, worktree, duration);
-                            }
-
-                            // 顯示 agent 的文字回覆
                             if (response.getResult() != null && !response.getResult().isBlank()) {
                                 contentView.appendAiReply(response.getResult());
                             }
@@ -645,8 +606,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
                         agentThread = null;
                         currentTierSelection = null;
                         statusView.setStatusText(originalStatusText);
-                        // 清理 worktree 或 symlinks
-                        workspaceProvisioner.cleanup(worktree, projectDir);
                         screen.requestFullRedraw();
                         eventLoop.setDirty();
                     }
