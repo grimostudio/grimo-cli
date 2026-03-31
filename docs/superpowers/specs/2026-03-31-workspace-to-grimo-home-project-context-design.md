@@ -128,11 +128,12 @@ public class ProjectContext {
 | `MarkdownTaskStore` | `workspaceManager.tasksDir()` | `grimoHome.tasksDir()` |
 | `WorkspaceProvisioner` | `workspaceManager.skillsDir()` | `grimoHome.skillsDir()` |
 | `GrimoStartupRunner`（`skillsDir` Path bean） | `workspaceManager.skillsDir()` 獨立 `@Bean` | 改為 `grimoHome.skillsDir()` 或移除獨立 bean |
-| `SessionWriter` | `workspaceManager.root().resolve("projects")` + encoded CWD + `sessions/` | `projectContext.dataDir()`（session 直接放 dataDir 根目錄，對齊 Claude Code） |
+| `SessionWriter` | 在 `GrimoTuiRunner` 手動建構，傳入 `Path sessionsBaseDir` | 改為 Spring `@Bean`，注入 `ProjectContext`。session 直接放 dataDir 根目錄（對齊 Claude Code） |
+| `GrimoSessionAdvisor` | 建構子注入 `SessionWriter`，呼叫 `writeUserMessage()` / `writeAssistantMessage()` | `SessionWriter` 改為 bean 後，自動注入不需改動 advisor 程式碼 |
 | `GrimoTuiRunner`（Splash） | `workspaceManager.root()` 顯示路徑 | `projectContext.displayPath()` |
 | `GrimoTuiRunner`（Status Bar） | `workspaceManager.root()` 顯示路徑 | `projectContext.displayPath()` |
 | `GrimoStartupRunner` | `workspaceManager.initialize()` | `grimoHome.initialize()` + `projectContext.initialize()` |
-| `DevModeRunner` | 無（目前不存 dispatch 紀錄） | 透過 `SessionWriter` 寫入 dispatch 事件 + meta.json |
+| `DevModeRunner` | 無（目前不存 dispatch 紀錄） | 注入 `SessionWriter` bean，呼叫新增的 dispatch 方法 |
 
 ### Bean 註冊
 
@@ -146,9 +147,16 @@ GrimoHome grimoHome() {
 ProjectContext projectContext(GrimoHome grimoHome) {
     return new ProjectContext(grimoHome);
 }
+
+@Bean
+SessionWriter sessionWriter(ProjectContext projectContext) {
+    return new SessionWriter(projectContext.dataDir());
+}
 ```
 
 取代目前 `GrimoStartupRunner` 中的 `workspaceManager(GrimoProperties)` bean。
+
+**`SessionWriter` 改為 Spring Bean 的理由**：目前 `SessionWriter` 在 `GrimoTuiRunner` 中手動建構，但 `DevModeRunner`（`@Component`）和 `GrimoSessionAdvisor`（`@Component`）都需要使用它。改為 bean 後，三個消費者共享同一個 `SessionWriter` 實例，dispatch 事件和主對話寫入同一個 session 檔案。
 
 ### 狀態列 / Splash 改動
 
