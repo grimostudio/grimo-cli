@@ -26,6 +26,7 @@
 ├── tasks/                   ← GrimoHome.tasksDir()
 ├── agents/                  ← GrimoHome.agentsDir()
 ├── logs/                    ← GrimoHome.logsDir()
+├── conversations/           ← 已棄用，不再建立新目錄（既有資料保留不刪除）
 └── projects/                ← GrimoHome.projectsDir()
     └── {encoded-cwd}/       ← ProjectContext.dataDir()
         └── sessions/        ← ProjectContext.sessionsDir()
@@ -95,7 +96,13 @@ public class ProjectContext {
     public Path dataDir()      { return dataDir; }
     public Path sessionsDir()  { return dataDir.resolve("sessions"); }
 
-    private String encodePath(Path p) { /* URL-encode or Base64 */ }
+    /**
+     * 沿用既有編碼方式：非英數字元替換為 '-'
+     * 例如 /Users/samzhu/workspace/grimo-cli → -Users-samzhu-workspace-grimo-cli
+     */
+    private String encodePath(Path p) {
+        return p.toString().replaceAll("[^a-zA-Z0-9]", "-");
+    }
 }
 ```
 
@@ -104,8 +111,9 @@ public class ProjectContext {
 | 移除目標 | 說明 |
 |---------|------|
 | `WorkspaceManager` | 功能拆分到 `GrimoHome` + `ProjectContext` |
-| `GrimoProperties.workspace` | 不再需要外部配置 |
+| `GrimoProperties` record | `workspace` 是唯一欄位，移除後整個 record 為空，一併刪除 |
 | `application.yaml` 的 `grimo.workspace` | 路徑固定，無需配置 |
+| `conversationsDir()` | 未使用，`GrimoHome.initialize()` 不再建立此目錄（既有目錄保留不刪） |
 
 ### 消費者遷移
 
@@ -115,6 +123,7 @@ public class ProjectContext {
 | `SkillLoader` | `workspaceManager.skillsDir()` | `grimoHome.skillsDir()` |
 | `MarkdownTaskStore` | `workspaceManager.tasksDir()` | `grimoHome.tasksDir()` |
 | `WorkspaceProvisioner` | `workspaceManager.skillsDir()` | `grimoHome.skillsDir()` |
+| `GrimoStartupRunner`（`skillsDir` Path bean） | `workspaceManager.skillsDir()` 獨立 `@Bean` | 改為 `grimoHome.skillsDir()` 或移除獨立 bean |
 | `SessionWriter` | `workspaceManager.root().resolve("projects")` | `projectContext.sessionsDir()` |
 | `GrimoTuiRunner`（Splash） | `workspaceManager.root()` 顯示路徑 | `projectContext.displayPath()` |
 | `GrimoTuiRunner`（Status Bar） | `workspaceManager.root()` 顯示路徑 | `projectContext.displayPath()` |
