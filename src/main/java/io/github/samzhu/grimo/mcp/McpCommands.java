@@ -1,6 +1,8 @@
 package io.github.samzhu.grimo.mcp;
 
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
+import io.github.samzhu.grimo.shared.event.McpCatalogChangedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.shell.core.command.annotation.Argument;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.shell.core.command.annotation.Option;
@@ -36,10 +38,12 @@ public class McpCommands {
 
     private final GrimoConfig config;
     private final McpCatalogBuilder catalogBuilder;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public McpCommands(GrimoConfig config, McpCatalogBuilder catalogBuilder) {
+    public McpCommands(GrimoConfig config, McpCatalogBuilder catalogBuilder, ApplicationEventPublisher eventPublisher) {
         this.config = config;
         this.catalogBuilder = catalogBuilder;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -163,6 +167,7 @@ public class McpCommands {
         // === 寫入 + 重建 ===
         config.setMcpServer(name, serverDef);
         catalogBuilder.rebuild();
+        eventPublisher.publishEvent(new McpCatalogChangedEvent(catalogBuilder.getServerNames()));
 
         return "Added: " + name + " (" + transport + ")";
     }
@@ -185,6 +190,7 @@ public class McpCommands {
         }
 
         catalogBuilder.rebuild();
+        eventPublisher.publishEvent(new McpCatalogChangedEvent(catalogBuilder.getServerNames()));
         return "Removed: " + name;
     }
 }
