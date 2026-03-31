@@ -539,7 +539,11 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 if (model == null) {
                     throw new IllegalStateException("Agent not found: " + tierSelection.agentId());
                 }
-                var tierOptions = tierOptionsFactory.build(tierSelection.agentId(), tierSelection.model());
+                // 設計說明：主對話預設 PLAN mode — 禁止修改程式碼
+                // Skill 宣告 metadata.grimo.execution=isolated 時，由 Dev Mode 流程處理（Phase B）
+                var tierOptions = tierOptionsFactory.build(
+                        tierSelection.agentId(), tierSelection.model(),
+                        TierOptionsFactory.ExecutionMode.PLAN);
 
                 var mcpServers = mcpCatalogBuilder.getServerNames();
                 log.info("Tier routing: {} → {} / {} (source: {}), goal: {}, mcpServers: {}",
