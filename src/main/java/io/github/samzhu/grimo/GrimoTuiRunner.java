@@ -16,6 +16,8 @@ import io.github.samzhu.grimo.shared.sandbox.WorktreeInfo;
 import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
+import io.github.samzhu.grimo.shared.event.DevModeEnteredEvent;
+import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;
 import io.github.samzhu.grimo.shared.event.McpCatalogChangedEvent;
 import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
@@ -633,6 +635,73 @@ public class GrimoTuiRunner implements ApplicationRunner {
     void on(McpCatalogChangedEvent event) {
         if (statusView == null) return;
         refreshStatusBar();
+        if (eventLoop != null) eventLoop.setDirty();
+    }
+
+    @EventListener
+    void on(DevModeEnteredEvent event) {
+        if (contentView == null) return;
+
+        var wtLine = new org.jline.utils.AttributedStringBuilder();
+        wtLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(2), "\u26a1 ");
+        wtLine.append("Dev Mode (" + event.branchName() + ")");
+        contentView.appendLine(wtLine.toAttributedString());
+
+        var statusLine = new org.jline.utils.AttributedStringBuilder();
+        statusLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
+                "  \u2514 Worktree created, agent working with full access...");
+        contentView.appendLine(statusLine.toAttributedString());
+
+        if (eventLoop != null) eventLoop.setDirty();
+    }
+
+    @EventListener
+    void on(DevModeCompletedEvent event) {
+        if (contentView == null) return;
+
+        float seconds = event.durationMs() / 1000f;
+
+        if (event.hasChanges()) {
+            var headerLine = new org.jline.utils.AttributedStringBuilder();
+            headerLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(2),
+                    "\u23fa Dev Mode completed (" + String.format("%.0fs", seconds) + ")");
+            contentView.appendLine(headerLine.toAttributedString());
+
+            var branchLine = new org.jline.utils.AttributedStringBuilder();
+            branchLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
+                    "  Branch: " + event.branchName());
+            contentView.appendLine(branchLine.toAttributedString());
+
+            if (!event.diffStat().isBlank()) {
+                for (String line : event.diffStat().split("\n")) {
+                    var diffLine = new org.jline.utils.AttributedStringBuilder();
+                    diffLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
+                            "  " + line.trim());
+                    contentView.appendLine(diffLine.toAttributedString());
+                }
+            }
+
+            var commitLine = new org.jline.utils.AttributedStringBuilder();
+            commitLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
+                    "  Commits: " + event.commitCount());
+            contentView.appendLine(commitLine.toAttributedString());
+
+            var mergeLine = new org.jline.utils.AttributedStringBuilder();
+            mergeLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(67),
+                    "  \u2192 git merge " + event.branchName());
+            contentView.appendLine(mergeLine.toAttributedString());
+        } else {
+            var line = new org.jline.utils.AttributedStringBuilder();
+            line.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
+                    "\u23fa Dev Mode completed (" + String.format("%.0fs", seconds) + ") \u2014 no file changes");
+            contentView.appendLine(line.toAttributedString());
+        }
+
+        if (event.result() != null && !event.result().isBlank()) {
+            contentView.appendAiReply(event.result());
+        }
+
+        contentView.appendLine(org.jline.utils.AttributedString.EMPTY);
         if (eventLoop != null) eventLoop.setDirty();
     }
 
