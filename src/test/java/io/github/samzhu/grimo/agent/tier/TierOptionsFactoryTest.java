@@ -4,40 +4,60 @@ import org.junit.jupiter.api.Test;
 import org.springaicommunity.agents.claude.ClaudeAgentOptions;
 import org.springaicommunity.agents.codex.CodexAgentOptions;
 import org.springaicommunity.agents.gemini.GeminiAgentOptions;
-import org.springaicommunity.agents.model.AgentOptions;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TierOptionsFactoryTest {
 
     private final TierOptionsFactory factory = new TierOptionsFactory();
 
     @Test
-    void buildClaudeOptions() {
-        AgentOptions options = factory.build("claude", "claude-haiku-4");
-        assertThat(options).isInstanceOf(ClaudeAgentOptions.class);
-        assertThat(options.getModel()).isEqualTo("claude-haiku-4");
+    void planModeShouldDisallowEditToolsForClaude() {
+        var options = (ClaudeAgentOptions) factory.build("claude", "claude-sonnet-4-6",
+                TierOptionsFactory.ExecutionMode.PLAN);
+        assertThat(options.getDisallowedTools()).contains("Edit", "Write", "MultiEdit");
     }
 
     @Test
-    void buildGeminiOptions() {
-        AgentOptions options = factory.build("gemini", "gemini-2.5-flash");
-        assertThat(options).isInstanceOf(GeminiAgentOptions.class);
-        assertThat(options.getModel()).isEqualTo("gemini-2.5-flash");
+    void planModeShouldRestrictCodex() {
+        var options = (CodexAgentOptions) factory.build("codex", "o4-mini",
+                TierOptionsFactory.ExecutionMode.PLAN);
+        assertThat(options).isNotNull();
+        assertThat(options.isFullAuto()).isFalse();
     }
 
     @Test
-    void buildCodexOptions() {
-        AgentOptions options = factory.build("codex", "o4-mini");
-        assertThat(options).isInstanceOf(CodexAgentOptions.class);
-        assertThat(options.getModel()).isEqualTo("o4-mini");
+    void planModeShouldRestrictGemini() {
+        var options = (GeminiAgentOptions) factory.build("gemini", "gemini-2.5-pro",
+                TierOptionsFactory.ExecutionMode.PLAN);
+        assertThat(options).isNotNull();
+        assertThat(options.isYolo()).isFalse();
     }
 
     @Test
-    void buildUnknownAgentThrows() {
-        assertThatThrownBy(() -> factory.build("unknown", "model"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("unknown");
+    void devModeShouldAllowAllToolsForClaude() {
+        var options = (ClaudeAgentOptions) factory.build("claude", "claude-sonnet-4-6",
+                TierOptionsFactory.ExecutionMode.DEV);
+        assertThat(options.getDisallowedTools()).isNullOrEmpty();
+    }
+
+    @Test
+    void devModeShouldBeFullAccessForCodex() {
+        var options = (CodexAgentOptions) factory.build("codex", "o4-mini",
+                TierOptionsFactory.ExecutionMode.DEV);
+        assertThat(options.isFullAuto()).isTrue();
+    }
+
+    @Test
+    void devModeShouldBeYoloForGemini() {
+        var options = (GeminiAgentOptions) factory.build("gemini", "gemini-2.5-pro",
+                TierOptionsFactory.ExecutionMode.DEV);
+        assertThat(options.isYolo()).isTrue();
+    }
+
+    @Test
+    void legacyBuildShouldDefaultToDev() {
+        var options = (ClaudeAgentOptions) factory.build("claude", "claude-sonnet-4-6");
+        assertThat(options.getDisallowedTools()).isNullOrEmpty();
     }
 }

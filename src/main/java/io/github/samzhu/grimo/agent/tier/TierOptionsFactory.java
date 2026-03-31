@@ -7,48 +7,87 @@ import org.springaicommunity.agents.model.AgentOptions;
 import org.springaicommunity.agents.codexsdk.types.ApprovalPolicy;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
- * 根據 agentId 建構對應的 per-request AgentOptions（含 tier 指定的 model）。
+ * 根據 agentId + ExecutionMode 建構對應的 per-request AgentOptions。
  *
  * 設計說明：
- * - 每個 CLI agent 需要不同的 AgentOptions 子型別（ClaudeAgentOptions / GeminiAgentOptions / CodexAgentOptions）
- * - 集中管理各 agent 的共用設定（yolo=true, timeout, fullAuto 等）
- * - 在 AgentClient.run(goalText, agentOptions) 傳入，覆寫 AgentModel 的 defaultOptions
+ * - PLAN mode（主對話）：禁止檔案修改工具，agent 只能讀程式碼、寫 docs、回答問題
+ *   Claude: disallowedTools=["Edit","Write","MultiEdit"]
+ *   Codex:  ApprovalPolicy.SMART + fullAuto=false
+ *   Gemini: yolo=false
+ * - DEV mode（開發模式）：全開，搭配 worktree 隔離
+ *   所有 agent: yolo=true, 無工具限制
  *
- * @see <a href="https://spring-ai-community.github.io/agent-client/">AgentClient API</a>
+ * @see <a href="https://code.claude.com/docs/en/cli-reference">Claude Code Permission Modes</a>
+ * @see <a href="https://developers.openai.com/codex/concepts/sandboxing">Codex Sandbox Modes</a>
  */
 public class TierOptionsFactory {
 
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(10);
 
     /**
-     * 建構指定 agent 的 AgentOptions，使用 tier 選定的 model。
-     *
-     * @param agentId agent ID（"claude", "gemini", "codex"）
-     * @param model   tier 選定的 model 名稱
-     * @return 對應的 AgentOptions 子型別
-     * @throws IllegalArgumentException 如果 agentId 未知
+     * 執行模式：決定 agent 的權限等級。
+     * PLAN = 主對話，限制檔案修改
+     * DEV = 開發模式，全開
      */
+    public enum ExecutionMode {
+        PLAN,
+        DEV
+    }
+
+    /** 向後相容：預設 DEV mode（現有行為不變） */
     public AgentOptions build(String agentId, String model) {
+        return build(agentId, model, ExecutionMode.DEV);
+    }
+
+    /**
+     * 建構指定 agent + mode 的 AgentOptions。
+     */
+    public AgentOptions build(String agentId, String model, ExecutionMode mode) {
         return switch (agentId) {
-            case "claude" -> ClaudeAgentOptions.builder()
-                    .model(model)
-                    .yolo(true)
-                    .timeout(DEFAULT_TIMEOUT)
-                    .build();
-            case "gemini" -> GeminiAgentOptions.builder()
-                    .model(model)
-                    .yolo(true)
-                    .timeout(DEFAULT_TIMEOUT)
-                    .build();
-            case "codex" -> CodexAgentOptions.builder()
-                    .model(model)
-                    .fullAuto(true)
-                    .approvalPolicy(ApprovalPolicy.NEVER)
-                    .timeout(DEFAULT_TIMEOUT)
-                    .build();
+            case "claude" -> buildClaude(model, mode);
+            case "gemini" -> buildGemini(model, mode);
+            case "codex" -> buildCodex(model, mode);
             default -> throw new IllegalArgumentException("Unknown agent: " + agentId);
         };
+    }
+
+    private ClaudeAgentOptions buildClaude(String model, ExecutionMode mode) {
+        var builder = ClaudeAgentOptions.builder()
+                .model(model)
+                .yolo(true)
+                .timeout(DEFAULT_TIMEOUT);
+
+        if (mode == ExecutionMode.PLAN) {
+            builder.disallowedTools(List.of("Edit", "Write", "MultiEdit"));
+        }
+
+        return builder.build();
+    }
+
+    private GeminiAgentOptions buildGemini(String model, ExecutionMode mode) {
+        return GeminiAgentOptions.builder()
+                .model(model)
+                .yolo(mode == ExecutionMode.DEV)
+                .timeout(DEFAULT_TIMEOUT)
+                .build();
+    }
+
+    private CodexAgentOptions buildCodex(String model, ExecutionMode mode) {
+        var builder = CodexAgentOptions.builder()
+                .model(model)
+                .timeout(DEFAULT_TIMEOUT);
+
+        if (mode == ExecutionMode.PLAN) {
+            builder.approvalPolicy(ApprovalPolicy.SMART);
+            builder.fullAuto(false);
+        } else {
+            builder.approvalPolicy(ApprovalPolicy.NEVER);
+            builder.fullAuto(true);
+        }
+
+        return builder.build();
     }
 }
