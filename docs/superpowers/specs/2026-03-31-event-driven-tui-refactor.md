@@ -42,7 +42,7 @@ TuiEventListener:
 
 ## 設計
 
-### Phase 1：Event 基礎 + Status Bar 解耦
+### Phase 1：Event 基礎 + Status Bar 解耦 ✅ Done
 
 修正 `@ApplicationModuleListener` → `@EventListener`，定義 UI 相關 events，將 `refreshStatusBar()` 改為 event-driven。
 

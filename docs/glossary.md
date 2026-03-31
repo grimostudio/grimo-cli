@@ -68,8 +68,8 @@
 
 | 名詞 | 英文 | 說明 |
 |------|------|------|
-| **AgentChangedEvent** | Agent Changed Event | agent/model 切換時由命令層發布。TUI 監聽後更新 Status 區。 |
-| **ResourceCountChangedEvent** | Resource Count Changed Event | skill/mcp/task 數量變更時發布。TUI 監聽後更新 Status 區資源計數。 |
+| **AgentSwitchedEvent** | Agent Switched Event | `/agent-use` 執行後由 AgentCommands 發布。TUI 的 @EventListener 接收後自動刷新 status bar。 |
+| **McpCatalogChangedEvent** | MCP Catalog Changed Event | MCP server 新增/移除後發布。TUI 自動更新 mcp count。 |
 
 已有的 events：`IncomingMessageEvent`、`OutgoingMessageEvent`、`TaskExecutionEvent`
 
