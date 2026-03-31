@@ -133,7 +133,7 @@ public class ProjectContext {
 | `GrimoTuiRunner`（Splash） | `workspaceManager.root()` 顯示路徑 | `projectContext.displayPath()` |
 | `GrimoTuiRunner`（Status Bar） | `workspaceManager.root()` 顯示路徑 | `projectContext.displayPath()` |
 | `GrimoStartupRunner` | `workspaceManager.initialize()` | `grimoHome.initialize()` + `projectContext.initialize()` |
-| `DevModeRunner` | 無（目前不存 dispatch 紀錄） | 注入 `SessionWriter` bean，呼叫新增的 dispatch 方法 |
+| `DevModeRunner` | 無（目前不存 dispatch 紀錄） | 不變 — 既有 `DevModeEnteredEvent` / `DevModeCompletedEvent` 已帶足夠資訊，新增 `SessionEventListener` 監聽即可 |
 
 ### Bean 註冊
 
@@ -156,7 +156,21 @@ SessionWriter sessionWriter(ProjectContext projectContext) {
 
 取代目前 `GrimoStartupRunner` 中的 `workspaceManager(GrimoProperties)` bean。
 
-**`SessionWriter` 改為 Spring Bean 的理由**：目前 `SessionWriter` 在 `GrimoTuiRunner` 中手動建構，但 `DevModeRunner`（`@Component`）和 `GrimoSessionAdvisor`（`@Component`）都需要使用它。改為 bean 後，三個消費者共享同一個 `SessionWriter` 實例，dispatch 事件和主對話寫入同一個 session 檔案。
+**`SessionWriter` 改為 Spring Bean 的理由**：目前 `SessionWriter` 在 `GrimoTuiRunner` 中手動建構，但 `GrimoSessionAdvisor`（`@Component`）需要使用它。改為 bean 後，消費者共享同一個 `SessionWriter` 實例。
+
+**Event-driven dispatch 紀錄（Spring Modulith 解耦）**：`DevModeRunner` **不直接注入** `SessionWriter`。它已經發布 `DevModeEnteredEvent` / `DevModeCompletedEvent`（現有設計），新增一個 `SessionEventListener` 監聽這些 event 來寫入 dispatch 紀錄。這遵守 Spring Modulith 模組邊界：`agent/` 不依賴 `shared/session/`。
+
+```
+DevModeRunner → publish(DevModeEnteredEvent) →
+  ├── TuiEventListener      → UI 更新（已有）
+  └── SessionEventListener  → 寫入主 session JSONL + dispatches/
+
+DevModeRunner → publish(DevModeCompletedEvent) →
+  ├── TuiEventListener      → UI 更新（已有）
+  └── SessionEventListener  → 寫入主 session JSONL + meta.json
+```
+
+`SessionEventListener` 放在 `shared/session/` 包內，注入 `SessionWriter`。`DevModeRunner` 完全不知道 session 持久化的存在。
 
 ### 狀態列 / Splash 改動
 
@@ -280,12 +294,14 @@ Append-only，記錄 dispatch 生命週期。需要深入追溯時使用。
 
 | 元件 | 改動 |
 |------|------|
-| `SessionWriter` | 新增 `writeDispatchEntered()` / `writeDispatchCompleted()`；session 檔案改為直接放在 `dataDir/` 下 |
-| `SessionWriter` | 新增 `dispatchesDir()` 方法（回傳 `dataDir/{sessionId}/dispatches/`） |
-| `DevModeRunner` | 透過 `SessionWriter` 寫入 dispatch 事件和 meta.json |
+| `SessionWriter` | 新增 `writeDispatchEntered()` / `writeDispatchCompleted()`、`dispatchesDir()` 方法；session 檔案改為直接放在 `dataDir/` 下 |
+| `SessionEventListener`（**新增**） | `shared/session/` 包內的 `@EventListener`，監聯 `DevModeEnteredEvent` / `DevModeCompletedEvent`，呼叫 `SessionWriter` 寫入 dispatch 紀錄 |
+| `DevModeEnteredEvent` | 確認已包含足夠欄位（taskId、agent、model、tier、branchName、workDir）。如不足需擴充 |
+| `DevModeCompletedEvent` | 確認已包含足夠欄位（taskId、hasChanges、commitCount、diffStat、duration、summary、externalSessionPaths）。如不足需擴充 |
+| `DevModeRunner` | **不改** — 已發布上述 event，dispatch 持久化由 `SessionEventListener` 處理 |
 | `ProjectContext` | 移除 `sessionsDir()`，只提供 `dataDir()` |
 
-`DevModeRunner` 已有所有需要的資訊（taskId、agent、model、tier、WorktreeInfo、diff stats、duration），只需在 entered 和 cleanup 階段呼叫 `SessionWriter` 的新方法。
+Event-driven 設計確保 `agent/` 模組不依賴 `shared/session/`，遵守 Spring Modulith 模組邊界。
 
 ## 錯誤處理
 
@@ -300,7 +316,8 @@ Append-only，記錄 dispatch 生命週期。需要深入追溯時使用。
 | `ProjectContext` | 單元測試：注入假的 CWD 和 `GrimoHome`，驗證 `displayPath()` tilde 縮寫、`dataDir()` encoded path 正確 |
 | `SessionWriter` | 單元測試：驗證 session 檔案放在 `dataDir/{sessionId}.jsonl`、dispatch 事件正確寫入主 session、`dispatches/` 目錄和 meta.json 正確建立 |
 | 消費者遷移 | 既有測試改注入新的 `GrimoHome` / `ProjectContext`，確認行為不變 |
-| Dispatch 紀錄 | `DevModeRunner` 測試驗證 dispatch entered/completed 事件寫入主 session + meta.json 寫入 `{sessionId}/dispatches/` |
+| `SessionEventListener` | 單元測試：發布 `DevModeEnteredEvent` / `DevModeCompletedEvent`，驗證 listener 正確呼叫 `SessionWriter` 寫入 dispatch 紀錄 |
+| Dispatch 端到端 | 整合測試：`DevModeRunner` 發布 event → `SessionEventListener` 寫入 → 驗證主 session JSONL 含 dispatch 摘要 + `{sessionId}/dispatches/` 含 meta.json |
 
 ## Glossary 更新
 
