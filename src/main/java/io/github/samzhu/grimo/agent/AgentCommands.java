@@ -2,7 +2,9 @@ package io.github.samzhu.grimo.agent;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
+import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
 import io.github.samzhu.grimo.shared.tui.TuiTable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
 
@@ -26,6 +28,7 @@ public class AgentCommands {
 
     private final AgentModelRegistry registry;
     private final GrimoConfig config;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 各 CLI agent 的推薦預設模型（對齊各 CLI 官方預設）。
@@ -50,9 +53,11 @@ public class AgentCommands {
             Map.entry("codex:o3", "o3")
     );
 
-    public AgentCommands(AgentModelRegistry registry, GrimoConfig config) {
+    public AgentCommands(AgentModelRegistry registry, GrimoConfig config,
+                         ApplicationEventPublisher eventPublisher) {
         this.registry = registry;
         this.config = config;
+        this.eventPublisher = eventPublisher;
     }
 
     @Command(name = "agent-list", description = "List all configured agents")
@@ -127,6 +132,7 @@ public class AgentCommands {
 
         config.setDefaultAgent(agentId);
         config.setDefaultModel(model);
+        eventPublisher.publishEvent(new AgentSwitchedEvent(agentId, model));
 
         return "Switched to " + agentId + " \u00b7 " + model;
     }

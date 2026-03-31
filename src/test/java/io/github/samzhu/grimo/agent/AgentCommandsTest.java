@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springaicommunity.agents.model.AgentModel;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,7 +42,8 @@ class AgentCommandsTest {
         when(codexModel.isAvailable()).thenReturn(true);
         registry.register("codex", codexModel);
 
-        commands = new AgentCommands(registry, config);
+        var eventPublisher = mock(ApplicationEventPublisher.class);
+        commands = new AgentCommands(registry, config, eventPublisher);
     }
 
     @Test
