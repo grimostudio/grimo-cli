@@ -50,6 +50,7 @@ public class GrimoEventLoop {
 
     private final AtomicBoolean dirty = new AtomicBoolean(false);
     private volatile boolean running = true;
+    private Runnable onResize;
 
     /**
      * 按鍵處理回呼介面：由 GrimoTuiRunner 實作具體的業務邏輯。
@@ -94,7 +95,7 @@ public class GrimoEventLoop {
         Attributes savedAttributes = terminal.enterRawMode();
         terminal.puts(Capability.enter_ca_mode);    // alternate screen buffer
         terminal.puts(Capability.keypad_xmit);      // application keypad mode
-        terminal.trackMouse(Terminal.MouseTracking.Normal);
+        terminal.trackMouse(Terminal.MouseTracking.Button);
         terminal.flush();
 
         // SIGINT handler：委派給 keyHandler，走跟 BindingReader 相同的 OP_CTRL_C 路徑。
@@ -114,6 +115,7 @@ public class GrimoEventLoop {
 
         // 終端機大小變化 → resize + 重繪
         terminal.handle(Terminal.Signal.WINCH, signal -> {
+            if (onResize != null) onResize.run();
             screen.resize(terminal.getSize());
             screen.clear();
             setDirty();
@@ -196,6 +198,13 @@ public class GrimoEventLoop {
     public void stop() {
         running = false;
         setDirty(); // 喚醒 render thread 讓它退出
+    }
+
+    /**
+     * 設定 resize 時的回呼（用於取消選取）
+     */
+    public void setOnResize(Runnable onResize) {
+        this.onResize = onResize;
     }
 
     /**

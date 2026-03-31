@@ -1,5 +1,6 @@
 package io.github.samzhu.grimo;
 
+import io.github.samzhu.grimo.shared.tui.BufferLine;
 import io.github.samzhu.grimo.shared.tui.TuiComponent;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
@@ -30,10 +31,14 @@ public class GrimoContentView implements TuiComponent {
     private int scrollOffset = 0;
     private boolean autoFollow = true;
 
+    /** 完整 wrapped line cache（所有歷史行 wrap 後的結果） */
+    private List<BufferLine> wrappedCache = new ArrayList<>();
+    private int cachedCols = -1;
+
     /**
      * 初始化 banner 文字（純 ANSI 字串，逐行加入 lines）。
      */
-    public void setBannerText(String bannerText) {
+    public synchronized void setBannerText(String bannerText) {
         for (String line : bannerText.split("\n")) {
             // fromAnsi() 正確解析 ANSI escape codes 為 style 資訊
             lines.add(AttributedString.fromAnsi(line));
@@ -43,61 +48,71 @@ public class GrimoContentView implements TuiComponent {
     /**
      * 附加使用者輸入：❯ 前綴 + 深色背景行。
      */
-    public void appendUserInput(String text) {
+    public synchronized void appendUserInput(String text) {
         var sb = new AttributedStringBuilder();
         sb.styled(BRAND_STYLE, "❯ ");
         sb.styled(DARK_BG, text);
         lines.add(sb.toAttributedString());
         lines.add(AttributedString.EMPTY);
         scrollToBottomIfAutoFollow();
+        incrementalCacheUpdate(sb.toAttributedString());
+        incrementalCacheUpdate(AttributedString.EMPTY);
     }
 
     /**
      * 附加 AI 回覆：⏺ 前綴 + 一般文字。
      */
-    public void appendAiReply(String text) {
+    public synchronized void appendAiReply(String text) {
         var sb = new AttributedStringBuilder();
         sb.styled(BRAND_STYLE, "⏺ ");
         sb.append(text);
         lines.add(sb.toAttributedString());
         lines.add(AttributedString.EMPTY);
         scrollToBottomIfAutoFollow();
+        incrementalCacheUpdate(sb.toAttributedString());
+        incrementalCacheUpdate(AttributedString.EMPTY);
     }
 
     /**
      * 附加命令輸出：直接顯示（無前綴），每行加 2 格縮排。
      */
-    public void appendCommandOutput(String text) {
+    public synchronized void appendCommandOutput(String text) {
         for (String line : text.split("\n")) {
-            lines.add(new AttributedString("  " + line));
+            var as = new AttributedString("  " + line);
+            lines.add(as);
+            incrementalCacheUpdate(as);
         }
         lines.add(AttributedString.EMPTY);
         scrollToBottomIfAutoFollow();
+        incrementalCacheUpdate(AttributedString.EMPTY);
     }
 
     /**
      * 附加錯誤訊息：⚠ 前綴 + 紅色文字。
      */
-    public void appendError(String text) {
+    public synchronized void appendError(String text) {
         var sb = new AttributedStringBuilder();
         sb.styled(AttributedStyle.DEFAULT.foreground(196), "⚠ " + text);
         lines.add(sb.toAttributedString());
         lines.add(AttributedString.EMPTY);
         scrollToBottomIfAutoFollow();
+        incrementalCacheUpdate(sb.toAttributedString());
+        incrementalCacheUpdate(AttributedString.EMPTY);
     }
 
     /**
      * 附加一行原始 AttributedString（用於 streaming 等特殊場景）。
      */
-    public void appendLine(AttributedString line) {
+    public synchronized void appendLine(AttributedString line) {
         lines.add(line);
         scrollToBottomIfAutoFollow();
+        incrementalCacheUpdate(line);
     }
 
     /**
      * 移除最後一行（用於移除 "thinking..." 等暫時狀態行）。
      */
-    public void removeLastLine() {
+    public synchronized void removeLastLine() {
         if (!lines.isEmpty()) {
             lines.removeLast();
         }
@@ -106,20 +121,22 @@ public class GrimoContentView implements TuiComponent {
     /**
      * 清空所有內容。
      */
-    public void clear() {
+    public synchronized void clear() {
         lines.clear();
         scrollOffset = 0;
         autoFollow = true;
+        wrappedCache.clear();
+        cachedCols = -1;
     }
 
     // === 滾動控制 ===
 
-    public void scrollUp(int count) {
+    public synchronized void scrollUp(int count) {
         scrollOffset = Math.max(0, scrollOffset - count);
         autoFollow = false;
     }
 
-    public void scrollDown(int count) {
+    public synchronized void scrollDown(int count) {
         scrollOffset = Math.min(maxOffset(), scrollOffset + count);
         if (scrollOffset >= maxOffset()) {
             autoFollow = true;
@@ -136,8 +153,102 @@ public class GrimoContentView implements TuiComponent {
         }
     }
 
+    /**
+     * 重建 wrapped line cache。
+     * 設計說明：對所有 lines 做 columnSplitLength(cols)，建立 BufferLine list。
+     * wrapped=true 標記同一原始行的延續行（TextSelection 擷取文字時不加 \n）。
+     */
+    private void rebuildWrappedCache(int cols) {
+        wrappedCache = new ArrayList<>();
+        for (var line : lines) {
+            if (line.columnLength() <= cols) {
+                wrappedCache.add(BufferLine.of(line));
+            } else {
+                var splits = line.columnSplitLength(cols);
+                for (int j = 0; j < splits.size(); j++) {
+                    wrappedCache.add(j == 0
+                            ? BufferLine.of(splits.get(j))
+                            : BufferLine.wrapped(splits.get(j)));
+                }
+            }
+        }
+        cachedCols = cols;
+    }
+
+    private void incrementalCacheUpdate(AttributedString newLine) {
+        if (cachedCols > 0) {
+            if (newLine.columnLength() <= cachedCols) {
+                wrappedCache.add(BufferLine.of(newLine));
+            } else {
+                var splits = newLine.columnSplitLength(cachedCols);
+                for (int j = 0; j < splits.size(); j++) {
+                    wrappedCache.add(j == 0
+                            ? BufferLine.of(splits.get(j))
+                            : BufferLine.wrapped(splits.get(j)));
+                }
+            }
+        }
+    }
+
+    /**
+     * 取得完整 wrapped line cache（供 GrimoScreen 組裝統一 buffer）。
+     */
+    public synchronized List<BufferLine> getBufferLines(int cols) {
+        if (cachedCols != cols) {
+            rebuildWrappedCache(cols);
+        }
+        return List.copyOf(wrappedCache);
+    }
+
+    /**
+     * 取得 viewport 起始行在 wrapped cache 中的 index。
+     * 用於 screenToBuffer 轉換。
+     *
+     * 設計說明：scrollOffset 是 unwrapped lines 索引，需轉換為 wrapped cache 索引。
+     * 複製 render() 的 startIndex 邏輯確保座標對齊。
+     */
+    public synchronized int getViewportStart(int cols, int viewHeight) {
+        if (cachedCols != cols) {
+            rebuildWrappedCache(cols);
+        }
+        int totalLines = lines.size();
+        if (totalLines == 0 || viewHeight <= 0) return 0;
+
+        // 複製 render() 的 startIndex 計算邏輯（unwrapped 座標）
+        int startIndex;
+        if (totalLines <= viewHeight) {
+            startIndex = 0;
+        } else if (autoFollow) {
+            startIndex = Math.max(0, totalLines - viewHeight);
+        } else {
+            int endIndex = Math.min(totalLines, scrollOffset);
+            if (endIndex < viewHeight) endIndex = viewHeight;
+            startIndex = Math.max(0, endIndex - viewHeight);
+        }
+
+        // 把 unwrapped startIndex 轉成 wrappedCache 索引
+        return unwrappedToWrappedIndex(startIndex);
+    }
+
+    /**
+     * 把 unwrapped line 索引轉為 wrappedCache 中的行號。
+     * 遍歷 wrappedCache，計數非 wrapped 行（每個代表一個 unwrapped line 的開頭）。
+     */
+    private int unwrappedToWrappedIndex(int unwrappedIndex) {
+        int unwrapped = 0;
+        for (int i = 0; i < wrappedCache.size(); i++) {
+            if (unwrapped == unwrappedIndex) return i;
+            if (i + 1 < wrappedCache.size() && !wrappedCache.get(i + 1).wrapped()) {
+                unwrapped++;
+            } else if (i + 1 >= wrappedCache.size()) {
+                unwrapped++;
+            }
+        }
+        return wrappedCache.size();
+    }
+
     @Override
-    public List<AttributedString> render(int width) {
+    public synchronized List<AttributedString> render(int width) {
         // TuiComponent 契約：回傳所有內容（自然高度），容器負責捲動
         return render(width, Integer.MAX_VALUE);
     }
@@ -155,7 +266,7 @@ public class GrimoContentView implements TuiComponent {
      * @param viewHeight content 區可用行數
      * @return 固定 viewHeight 行的列表
      */
-    public List<AttributedString> render(int cols, int viewHeight) {
+    public synchronized List<AttributedString> render(int cols, int viewHeight) {
         List<AttributedString> result = new ArrayList<>(viewHeight);
         int totalLines = lines.size();
 

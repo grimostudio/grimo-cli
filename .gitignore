@@ -39,3 +39,5 @@ out/
 grimo.log
 .superpowers
 .superpowers/
+.depx/
+TODO.md

@@ -40,8 +40,13 @@ import org.springframework.shell.core.command.CommandParser;
 import org.springframework.shell.core.command.CommandRegistry;
 import org.springframework.stereotype.Component;
 
+import io.github.samzhu.grimo.shared.tui.AutoScroller;
+import io.github.samzhu.grimo.shared.tui.ClipboardWriter;
+import io.github.samzhu.grimo.shared.tui.TextSelection;
+
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -115,6 +120,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private GrimoScreen screen;
     private GrimoEventLoop eventLoop;
     private SessionWriter sessionWriter;
+    private TextSelection textSelection;
+    private AutoScroller autoScroller;
+    private ClipboardWriter clipboardWriter;
 
     public GrimoTuiRunner(Terminal terminal,
                            WorkspaceManager workspaceManager,
@@ -220,7 +228,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
         slashMenuView = new GrimoSlashMenuView(menuItems);
 
         mcpManagerView = new GrimoMcpManagerView();
-        screen = new GrimoScreen(terminal, contentView, inputView, statusView, slashMenuView, mcpManagerView);
+        textSelection = new TextSelection();
+        clipboardWriter = new ClipboardWriter();
+        screen = new GrimoScreen(terminal, contentView, inputView, statusView,
+                slashMenuView, mcpManagerView, textSelection);
 
         // === Session 對話存檔 ===
         String cwd = System.getProperty("user.dir");
@@ -232,6 +243,24 @@ public class GrimoTuiRunner implements ApplicationRunner {
         // === Phase 5: 啟動 TUI 事件迴圈（阻塞） ===
         log.debug("Grimo TUI setup complete, starting raw JLine event loop.");
         eventLoop = new GrimoEventLoop(terminal, screen, new TuiKeyHandler());
+
+        autoScroller = new AutoScroller(
+            () -> contentView.scrollUp(1),
+            () -> contentView.scrollDown(1),
+            delta -> textSelection.dragTo(
+                    textSelection.getCursorRow() + delta,
+                    textSelection.getCursorCol()),
+            () -> eventLoop.setDirty()
+        );
+
+        eventLoop.setOnResize(() -> {
+            textSelection.cancel();
+            autoScroller.stop();
+        });
+
+        // StatusView 的暫時訊息消失後需要觸發重繪
+        statusView.setDirtyCallback(() -> eventLoop.setDirty());
+
         eventLoop.run();
 
         // 事件迴圈結束（/exit），終止 Spring Boot JVM
@@ -250,6 +279,46 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
         @Override
         public void handleKey(String operation, String lastBinding) {
+            // Ctrl+C 有選取時 → 複製到剪貼簿（參考 Claude Code 行為）
+            // 設計說明：macOS raw mode 下，Ctrl+C 可能被 BindingReader 當成 CHAR（\003），
+            // 而非匹配到 OP_CTRL_C binding。同時檢查 operation 和 lastBinding 確保捕捉到。
+            log.info("[KEY] op={} lastBinding={} selectionActive={}",
+                    operation, lastBinding != null ? String.format("0x%02x", (int) lastBinding.charAt(0)) : "null",
+                    textSelection.isActive());
+            boolean isCtrlC = GrimoEventLoop.OP_CTRL_C.equals(operation)
+                    || (lastBinding != null && lastBinding.length() == 1 && lastBinding.charAt(0) == '\003');
+            if (textSelection.isActive()) {
+                if (isCtrlC) {
+                    var buffer = screen.getScreenBuffer();
+                    log.info("[SELECT] Ctrl+C: buffer={} size={} range={}",
+                            buffer != null ? "present" : "NULL",
+                            buffer != null ? buffer.size() : 0,
+                            textSelection.getRange());
+                    if (buffer != null) {
+                        String text = textSelection.finish(buffer);
+                        log.info("[SELECT] Ctrl+C: extracted text='{}' len={}",
+                                text != null ? text.substring(0, Math.min(80, text.length())) : "null",
+                                text != null ? text.length() : 0);
+                        if (text != null && !text.isEmpty()) {
+                            clipboardWriter.copy(terminal, text);
+                            statusView.setTemporaryMessage(
+                                    "✓ Copied!", Duration.ofSeconds(2));
+                            log.info("[SELECT] Ctrl+C copied to clipboard: len={}", text.length());
+                        } else {
+                            log.info("[SELECT] Ctrl+C: text was empty, nothing copied");
+                        }
+                    } else {
+                        log.info("[SELECT] Ctrl+C: buffer was null, canceling");
+                        textSelection.cancel();
+                    }
+                    autoScroller.stop();
+                    return; // 不傳遞 Ctrl+C 到下層（不觸發退出流程）
+                }
+                // 其他鍵 → 取消選取
+                log.info("[SELECT] Key '{}' cancels selection", operation);
+                textSelection.cancel();
+                autoScroller.stop();
+            }
             if (screen.isMcpManagerVisible()) {
                 handleMcpManagerKey(operation, lastBinding);
             } else if (screen.isSlashMenuVisible()) {
@@ -261,12 +330,80 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
         @Override
         public void handleMouse(MouseEvent event) {
-            if (event.getType() == MouseEvent.Type.Wheel) {
-                if (event.getButton() == MouseEvent.Button.WheelUp) {
-                    contentView.scrollUp(3);
-                } else if (event.getButton() == MouseEvent.Button.WheelDown) {
-                    contentView.scrollDown(3);
+            // Overlay 可見時只保留滾輪
+            if (screen.isSlashMenuVisible() || screen.isMcpManagerVisible()) {
+                if (event.getType() == MouseEvent.Type.Wheel) {
+                    handleWheel(event);
                 }
+                return;
+            }
+
+            // DEBUG: 追蹤所有滑鼠事件類型
+            log.info("[MOUSE] type={} button={} x={} y={} modifiers={}",
+                    event.getType(), event.getButton(), event.getX(), event.getY(), event.getModifiers());
+
+            switch (event.getType()) {
+                case Wheel -> handleWheel(event);
+                case Pressed -> {
+                    if (event.getButton() == MouseEvent.Button.Button1) {
+                        int contentHeight = screen.getRows() - 4; // 3 input + 1 status
+                        int bufferRow = screen.screenToBuffer(event.getY(), contentHeight);
+                        log.info("[SELECT] Pressed: screenY={} bufferRow={} x={} contentHeight={}",
+                                event.getY(), bufferRow, event.getX(), contentHeight);
+                        if (bufferRow >= 0) {
+                            textSelection.startAt(bufferRow, event.getX());
+                        }
+                        autoScroller.stop();
+                    }
+                }
+                case Dragged -> {
+                    if (textSelection.isActive()) {
+                        int contentHeight = screen.getRows() - 4;
+                        int bufferRow = screen.screenToBuffer(event.getY(), contentHeight);
+                        if (bufferRow >= 0) {
+                            textSelection.dragTo(bufferRow, event.getX());
+                        }
+                        autoScroller.update(event.getY(), contentHeight);
+                    }
+                }
+                case Released -> {
+                    // 放開滑鼠 → 自動複製到剪貼簿 + 清除選取
+                    // 設計說明：macOS 上 Cmd+C 被終端攔截、Ctrl+C 是中斷信號，
+                    // 都無法可靠地作為「複製選取文字」的觸發。
+                    // 改為 auto-copy on release，跟原始設計一致。
+                    if (event.getButton() == MouseEvent.Button.Button1 && textSelection.isActive()) {
+                        autoScroller.stop();
+                        int contentHeight = screen.getRows() - 4;
+                        int bufferRow = screen.screenToBuffer(event.getY(), contentHeight);
+                        if (bufferRow >= 0) {
+                            textSelection.dragTo(bufferRow, event.getX());
+                        }
+                        var buffer = screen.getScreenBuffer();
+                        if (buffer != null) {
+                            String text = textSelection.finish(buffer);
+                            log.info("[SELECT] Released: extracted text='{}' len={}",
+                                    text != null ? text.substring(0, Math.min(80, text.length())) : "null",
+                                    text != null ? text.length() : 0);
+                            if (text != null && !text.isEmpty()) {
+                                clipboardWriter.copy(terminal, text);
+                                statusView.setTemporaryMessage(
+                                        "✓ Copied!", Duration.ofSeconds(2));
+                                eventLoop.setDirty();
+                            }
+                        } else {
+                            textSelection.cancel();
+                        }
+                    }
+                }
+                default -> {}
+            }
+        }
+
+        private void handleWheel(MouseEvent event) {
+            if (event.getButton() == MouseEvent.Button.WheelUp) {
+                contentView.scrollUp(3);
+            } else if (event.getButton() == MouseEvent.Button.WheelDown) {
+                contentView.scrollDown(3);
             }
         }
     }

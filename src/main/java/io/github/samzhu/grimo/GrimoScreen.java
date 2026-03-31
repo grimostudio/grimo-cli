@@ -3,12 +3,18 @@ package io.github.samzhu.grimo;
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
+import org.jline.utils.AttributedStringBuilder;
+import org.jline.utils.AttributedStyle;
 import org.jline.utils.Display;
 
+import io.github.samzhu.grimo.shared.tui.BufferLine;
 import io.github.samzhu.grimo.shared.tui.Layout;
+import io.github.samzhu.grimo.shared.tui.SelectionRange;
+import io.github.samzhu.grimo.shared.tui.TextSelection;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 畫面組合器：收集各 View 的 render 結果，組合成完整畫面。
@@ -35,9 +41,13 @@ public class GrimoScreen {
     private final GrimoStatusView statusView;
     private final GrimoSlashMenuView slashMenuView;
     private final GrimoMcpManagerView mcpManagerView;
+    private final TextSelection textSelection;
 
     private int rows;
     private int cols;
+    private int contentViewportStart;
+    private int wrappedContentSize;
+    private List<BufferLine> screenBuffer;
     private volatile boolean slashMenuVisible = false;
     private volatile boolean mcpManagerVisible = false;
     private volatile boolean forceFullRedraw = false;
@@ -45,13 +55,15 @@ public class GrimoScreen {
     public GrimoScreen(Terminal terminal, GrimoContentView contentView,
                         GrimoInputView inputView, GrimoStatusView statusView,
                         GrimoSlashMenuView slashMenuView,
-                        GrimoMcpManagerView mcpManagerView) {
+                        GrimoMcpManagerView mcpManagerView,
+                        TextSelection textSelection) {
         this.display = new Display(terminal, true);
         this.contentView = contentView;
         this.inputView = inputView;
         this.statusView = statusView;
         this.slashMenuView = slashMenuView;
         this.mcpManagerView = mcpManagerView;
+        this.textSelection = textSelection;
     }
 
     public void resize(Size size) {
@@ -74,6 +86,101 @@ public class GrimoScreen {
 
     public boolean isMcpManagerVisible() {
         return mcpManagerVisible;
+    }
+
+    /**
+     * 組裝統一 buffer（content + input + status）。
+     * 供 TextSelection.finish() 使用。
+     */
+    private void assembleScreenBuffer(int contentHeight) {
+        var bufferLines = contentView.getBufferLines(cols);
+        wrappedContentSize = bufferLines.size();
+        contentViewportStart = contentView.getViewportStart(cols, contentHeight);
+        screenBuffer = new ArrayList<>(bufferLines);
+        // input 文字行（3 行中只取中間那行）
+        var inputLines = inputView.render(cols);
+        if (inputLines.size() >= 3) {
+            screenBuffer.add(BufferLine.of(inputLines.get(1)));
+        }
+        // status 行
+        var statusLines = statusView.render(cols);
+        if (!statusLines.isEmpty()) {
+            screenBuffer.add(BufferLine.of(statusLines.getFirst()));
+        }
+    }
+
+    /**
+     * 螢幕行號 → buffer 行號。不可選行回傳 -1。
+     *
+     * 設計說明：Content 區底部對齊 — 內容少於 viewport 時上方有空白 padding。
+     * 例如 12 行內容在 32 行 viewport 中，screenRow 0-19 是空白，20-31 才有內容。
+     * 必須扣除 padding 行數才能正確映射到 buffer index。
+     */
+    public int screenToBuffer(int screenRow, int contentHeight) {
+        if (screenRow < contentHeight) {
+            // 計算底部對齊的 padding：content 區上方的空白行數
+            int paddingRows = Math.max(0, contentHeight - wrappedContentSize);
+            if (screenRow < paddingRows) {
+                return -1; // 空白 padding 行，不可選
+            }
+            return contentViewportStart + (screenRow - paddingRows);
+        }
+        int inputSepTop = contentHeight;
+        int inputTextRow = contentHeight + 1;
+        int inputSepBot = contentHeight + 2;
+        int statusRow = rows - 1;
+        if (screenRow == inputSepTop || screenRow == inputSepBot) {
+            return -1;
+        }
+        if (screenRow == inputTextRow) {
+            return wrappedContentSize;
+        }
+        if (screenRow == statusRow) {
+            return wrappedContentSize + 1;
+        }
+        return -1;
+    }
+
+    public List<BufferLine> getScreenBuffer() {
+        return screenBuffer;
+    }
+
+    public int getContentViewportStart() {
+        return contentViewportStart;
+    }
+
+    /**
+     * 對選取範圍的行加上 inverse style。
+     * 設計說明：用 AttributedStyle.INVERSE 做反白（所有終端支援 ANSI \033[7m）
+     */
+    private List<AttributedString> applySelectionHighlight(
+            List<AttributedString> screenLines, int contentHeight) {
+        SelectionRange range = textSelection.getRange();
+        if (range == null) return screenLines;
+
+        var result = new ArrayList<>(screenLines);
+        for (int screenRow = 0; screenRow < screenLines.size(); screenRow++) {
+            int bufferRow = screenToBuffer(screenRow, contentHeight);
+            if (bufferRow < 0) continue;
+            var line = screenLines.get(screenRow);
+            var span = range.colsForRow(bufferRow, line.columnLength());
+            if (span.isEmpty()) continue;
+            result.set(screenRow, applyInvertStyle(line, span.get().start(), span.get().end()));
+        }
+        return result;
+    }
+
+    /**
+     * 對一行的指定列範圍套用 inverse style。
+     * columnSubSequence 已處理 CJK 雙寬字元邊界。
+     */
+    private AttributedString applyInvertStyle(AttributedString line, int startCol, int endCol) {
+        var builder = new AttributedStringBuilder();
+        builder.append(line.columnSubSequence(0, startCol));
+        builder.styled(AttributedStyle.INVERSE,
+                line.columnSubSequence(startCol, endCol).toString());
+        builder.append(line.columnSubSequence(endCol, line.columnLength()));
+        return builder.toAttributedString();
     }
 
     /**
@@ -148,6 +255,12 @@ public class GrimoScreen {
         int cursorRow = contentHeight + 1; // +1 跳過上方 separator
         int cursorCol = inputView.getCursorCol();
         int cursorPos = cursorRow * (cols + 1) + cursorCol;
+
+        // 組裝 buffer（供 selection text extraction 和 highlight 用）
+        assembleScreenBuffer(contentHeight);
+
+        // 選取反白渲染
+        allLines = applySelectionHighlight(allLines, contentHeight);
 
         // 強制全螢幕重繪（解決 Display diff 在 content 大量變動時不更新 input 行的問題）
         // 設計說明：JLine Display.update() 的 diff 演算法在多行同時變化時可能遺漏部分行更新

@@ -7,6 +7,7 @@ import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -25,9 +26,16 @@ public class GrimoStatusView implements TuiComponent {
     private String statusText;
     private String tierIcon;   // null = 不顯示 tier icon
     private String tierStyle;  // "lite" / "std" / "pro"
+    private volatile String temporaryMessage;
+    private Runnable setDirty;
 
     public GrimoStatusView(String statusText) {
         this.statusText = statusText;
+    }
+
+    /** 注入重繪回呼（在 TuiRunner 初始化後設定） */
+    public void setDirtyCallback(Runnable setDirty) {
+        this.setDirty = setDirty;
     }
 
     public void setStatusText(String statusText) {
@@ -42,8 +50,30 @@ public class GrimoStatusView implements TuiComponent {
         this.tierStyle = style;
     }
 
+    /**
+     * 顯示暫時訊息（如 "✓ Copied!"），duration 後自動恢復。
+     */
+    public void setTemporaryMessage(String message, Duration duration) {
+        this.temporaryMessage = message;
+        Thread.ofVirtual().name("grimo-temp-msg").start(() -> {
+            try {
+                Thread.sleep(duration.toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            this.temporaryMessage = null;
+            if (setDirty != null) setDirty.run();  // 觸發重繪恢復正常 status
+        });
+    }
+
     @Override
     public List<AttributedString> render(int cols) {
+        String tempMsg = this.temporaryMessage;
+        if (tempMsg != null) {
+            return List.of(TuiStatusBar.of(tempMsg,
+                    AttributedStyle.DEFAULT.foreground(2), cols));  // green
+        }
+
         if (tierIcon != null && tierStyle != null) {
             var iconStyle = switch (tierStyle) {
                 case "lite" -> LITE_STYLE;
