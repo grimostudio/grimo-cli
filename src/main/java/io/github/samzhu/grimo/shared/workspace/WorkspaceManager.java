@@ -48,14 +48,14 @@ public class WorkspaceManager {
             # Agent 設定
             #agents:
             #  default: claude          # 預設使用的 agent（claude / gemini / codex）
-            #  model: claude-sonnet-4-5 # 預設模型
+            #  model: claude-sonnet-4-6 # 預設模型
 
             # Per-agent 設定
             #agent-options:
             #  claude:
-            #    model: claude-sonnet-4-5
+            #    model: claude-sonnet-4-6
             #  gemini:
-            #    model: gemini-2.5-flash
+            #    model: gemini-2.5-pro
             #  codex:
             #    model: o4-mini
 
@@ -86,19 +86,19 @@ public class WorkspaceManager {
                 - agent: gemini
                   model: gemini-2.5-flash
                 - agent: claude
-                  model: claude-haiku-4
+                  model: claude-haiku-4-5
                 - agent: codex
                   model: o4-mini
               std:
                 - agent: claude
-                  model: claude-sonnet-4
+                  model: claude-sonnet-4-6
                 - agent: gemini
                   model: gemini-2.5-pro
                 - agent: codex
                   model: o4-mini
               pro:
                 - agent: claude
-                  model: claude-opus-4
+                  model: claude-opus-4-6
                 - agent: gemini
                   model: gemini-2.5-pro
                 - agent: codex
