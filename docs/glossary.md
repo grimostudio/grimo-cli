@@ -102,6 +102,9 @@
 | **TierOptionsFactory** | Tier Options Factory | 根據 agentId 建構對應的 per-request `AgentOptions` 子型別（ClaudeAgentOptions / GeminiAgentOptions / CodexAgentOptions），含 tier 選定的 model。在 `AgentClient.run(goalText, agentOptions)` 傳入以覆寫 defaultOptions。 |
 | **TierKeywordDetector** | Tier Keyword Detector | 從使用者輸入偵測 tier 關鍵字（如「仔細想」→ pro）。只影響該輪，不改 session 設定。多 tier 同時匹配取最高（PRO > STD > LITE）。 |
 | **SkillAnalyzer** | Skill Analyzer | 安裝 Skill 時用 lite tier agent 自動分析 Skill body 複雜度，判定 tier 並寫入 metadata。已標 grimo.tier 的 Skill 跳過分析。 |
+| **Plan Mode** | Plan Mode | 主對話預設模式。Agent 可讀程式碼、寫 docs，但禁止修改 src/。Claude 用 disallowedTools，Codex 用 ApprovalPolicy.SMART。 |
+| **Dev Mode** | Dev Mode | 開發模式。Agent 全開（yolo=true），搭配 worktree 隔離。由 skill metadata.grimo.execution=isolated 自動觸發，或使用者 /dev 指令。 |
+| **ExecutionMode** | Execution Mode | `TierOptionsFactory.ExecutionMode` enum: PLAN（限制）/ DEV（全開）。決定 agent 的工具權限等級。 |
 | **Worktree** | Worktree | 每次 agent 派遣時建立的獨立 git worktree。Agent 在 worktree 中工作，完成後使用者決定是否 merge。非 git 目錄 fallback 到 CWD（現有行為）。 |
 | **WorktreeInfo** | Worktree Info | `WorktreeInfo(workDir, branchName, baseSha, provisionedSkills, isWorktree)` record。記錄 worktree 的工作目錄、分支名稱、建立時的 HEAD SHA、已配置 skill。 |
 | **GitHelper** | Git Helper | Git CLI 操作工具。封裝 worktree 建立/移除、diff、auto-commit 等操作。使用 ProcessBuilder 執行 git 指令。 |
