@@ -20,6 +20,8 @@ log 不足以確認根本問題時, 請嘗試多加 log, 重新測試後, 再來
 
 開發過程中整理 docs/glossary.md, 這樣比較好跟用戶對焦 跟釐清
 
+採用 Event-driven 設計, 透過 Spring Modulith 利用 event 解耦
+
 ## Project Overview
 
 Grimo is a locally-hosted AI assistant platform built as a Spring Shell CLI. It provides pluggable communication channels (Telegram, LINE), task scheduling with Markdown persistence, and a unified agent provider model that treats LLM APIs and CLI tools equally. Design spec: `docs/superpowers/specs/2026-03-22-grimo-openclaw-design-zh-TW.md`.
@@ -57,7 +59,10 @@ Single Gradle module. Module boundaries enforced by **Spring Modulith** package 
 | `agent/` | Unified `AgentProvider` interface, provider registry (`ConcurrentHashMap`, not Spring DI), auto-detection, routing |
 | `skill/` | `SKILL.md` hot-loading from workspace, skill registry, built-in skills |
 | `mcp/` | MCP client connections to external tool servers |
-| `shared/` | Domain events, config loading, workspace path management |
+| `home/` | GrimoHome — 全域 app 資料目錄 (~/.grimo) 管理 |
+| `project/` | ProjectContext — CWD 專案身份、per-project 資料目錄 |
+| `config/` | GrimoConfig — YAML 設定讀寫 |
+| `shared/` | Domain events, session persistence, TUI framework, sandbox |
 
 ### Key Design Decisions
 

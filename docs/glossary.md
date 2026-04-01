@@ -9,7 +9,7 @@
 │                                                  │
 │   ✦     Grimo v0.0.1                            │
 │ ▄████▄  claude-cli · unknown                    │
-│ █●██●█  ~/workspace/grimo-cli                    │  ← Content 區
+│ █●██●█  ~/projects/grimo-cli                    │  ← Content 區
 │ ██████  1 agent · 0 skill                       │
 │ ▀▄▀▀▄▀                                          │
 │                                                  │
@@ -25,7 +25,7 @@
 ├──────────────────────────────────────────────────┤  ← 分隔線
 │ ❯ /ag█                                          │  ← Input 區
 ├──────────────────────────────────────────────────┤  ← 分隔線
-│ claude · claude-sonnet-4-6 │ ~/workspace/grimo │ 1 agent · 0 mcp│  ← Status 區
+│ claude · claude-sonnet-4-6 │ ~/projects/grimo │ 1 agent · 0 mcp│  ← Status 區
 └──────────────────────────────────────────────────┘
 ```
 
@@ -60,8 +60,8 @@
 
 | 名詞 | 英文 | 說明 |
 |------|------|------|
-| **GrimoHome** | Grimo Home | `~/.grimo`，應用程式全域資料目錄，存放 config、skills、tasks、agents、logs。路徑固定，不可配置。 |
-| **ProjectContext** | Project Context | 啟動時的 CWD，代表目前操作的專案。專案資料存放在 `~/.grimo/projects/{encoded-cwd}/`。 |
+| **GrimoHome** | Grimo Home | `~/.grimo`，應用程式全域資料目錄，存放 config、skills、tasks、agents、logs。路徑固定，不可配置。位於獨立 top-level 模組 `home/`。 |
+| **ProjectContext** | Project Context | 啟動時的 CWD，代表目前操作的專案。專案資料存放在 `~/.grimo/projects/{encoded-cwd}/`。位於獨立 top-level 模組 `project/`。 |
 | **Session** | Session | 一次 TUI 啟動到結束的對話歷程。以 UUID 識別，存為 JSONL 檔案。可透過 `--resume` 恢復。 |
 | **Session 檔案** | Session File | `~/.grimo/projects/<encoded-cwd>/<session-uuid>.jsonl`。對齊 Claude Code 結構。每行一個 JSON 物件（含 uuid、parentUuid 支援對話樹），append-only。附屬資料目錄 `<session-uuid>/dispatches/` 存放 sub-agent 派遣紀錄。 |
 | **Dispatch 紀錄** | Dispatch Record | sub-agent 派遣的 metadata 和事件，歸屬於 session。主 session JSONL 含摘要事件（`dispatch-entered` / `dispatch-completed`），附屬目錄含 `{taskId}.meta.json`。 |
@@ -103,7 +103,7 @@
 | **Agent Skill** | Agent Skill | 各 CLI agent 自己的 skill（如 `.claude/skills/`、`.gemini/agents/`）。由 agent 自己讀取和執行，Grimo 不介入。 |
 | **Portable MCP** | Portable MCP | Spring AI Community Agent Client 的 MCP 轉換機制。在 `config.yaml` 統一定義 MCP server（stdio/sse/http），SDK 自動轉成各 CLI agent 的原生格式（Claude: `--mcp-config` JSON、Gemini: settings.json、Codex: 原生格式）。Grimo 不需處理轉換邏輯。 |
 | **McpServerCatalog** | MCP Server Catalog | 所有 MCP server 定義的 immutable 集合。由 `McpCatalogBuilder` 從 `config.yaml` 建構，傳入 `AgentClient.Builder.mcpServerCatalog()` 後由 SDK 處理分發。 |
-| **WorkspaceProvisioner** | Workspace Provisioner | 派遣 agent 前將 Grimo 管理的 Skill symlink 到工作目錄 `.agents/skills/`（跨 agent 標準路徑）。CLI agent（Claude/Gemini/Codex）原生發現 skill，Progressive Disclosure 自然運作。Grimo 的環境準備層，不同於 SDK 的 `LocalSandbox`（agent 執行隔離層）。 |
+| **WorktreeProvisioner** | Worktree Provisioner | 派遣 agent 前建立獨立 git worktree + 將 Grimo 管理的 Skill symlink 到 `.agents/skills/`（跨 agent 標準路徑），讓 CLI agent 原生發現。完成後清理 worktree、保留有變更的分支。位於 `shared.sandbox` package。 |
 | **Sandbox** | Sandbox | Agent 執行環境。Local 模式直接使用工作目錄（symlink skill）；Docker/E2B 模式使用隔離容器（Phase B/C）。由 `SandboxDetector` 偵測可用後端，`WorkspaceProvisioner` 負責環境配置。 |
 | **TierRouter** | Tier Router | 解析 tier 來源（6 級優先順序：關鍵字 > session /tier > skill-overrides > skill metadata > 自動分析 > 預設 std），查 fallback list（每級多組 agent+model，依序 isAvailable()），回傳 `TierSelection(agentId, model, tier, source)`。 |
 | **TierOptionsFactory** | Tier Options Factory | 根據 agentId 建構對應的 per-request `AgentOptions` 子型別（ClaudeAgentOptions / GeminiAgentOptions / CodexAgentOptions），含 tier 選定的 model。在 `AgentClient.run(goalText, agentOptions)` 傳入以覆寫 defaultOptions。 |
@@ -135,7 +135,7 @@
 | Tier 偵測 | `TierKeywordDetector` | config.yaml `tier-keywords` 字串比對 |
 | Tier 指令 | `TierCommands` | Spring Shell @Command: `/tier`, `/skill-tier` |
 | Skill 分析 | `SkillAnalyzer` | AgentClient + lite tier → JSON 回應解析 |
-| Worktree 隔離 | `WorkspaceProvisioner` + `GitHelper` | `git worktree add/remove` via ProcessBuilder |
+| Worktree 隔離 | `WorktreeProvisioner` + `GitHelper` | `git worktree add/remove` via ProcessBuilder |
 
 ## TUI 框架術語
 
