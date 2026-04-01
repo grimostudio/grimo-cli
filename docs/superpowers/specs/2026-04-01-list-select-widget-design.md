@@ -75,30 +75,47 @@ public class ListSelect<T> implements Renderable {
 
 ### 2. 渲染規格
 
-**渲染範例（maxVisible=5，共 8 項，selectedIndex=3）：**
+**渲染範例（maxVisible=7，共 8 項，selectedIndex=3，viewportStart=1）：**
 
 ```
-  ↑ 2 more                          ← scroll hint（灰色，只在有隱藏項時顯示）
+  ↑ 1 more                          ← scroll hint（灰色，上方有 1 項隱藏）
   gemini        Gemini 2.5 Pro      ← 一般項（預設色）
 > claude        Claude Sonnet 4.6   ← 選中項（BRAND_COLOR 67 + `>` 前綴）
   codex         OpenAI Codex        ← 一般項
   ollama        Local Ollama        ← 一般項
-  ↓ 1 more                          ← scroll hint
+  local-llm     Local LLM           ← 一般項
+  ↓ 1 more                          ← scroll hint（下方有 1 項隱藏）
 ```
 
 **渲染規則：**
-- 每行格式：`前綴(2) + label(固定寬) + gap(2) + description(填滿)`
+- 每行格式：`前綴(2) + label(固定寬) + gap(2) + description(填滿，灰色 ANSI 245)`
   - 選中項前綴 `> `，其他 `  `
   - label 欄寬用 `Layout.horizontal(width, 2, Fixed(labelMaxWidth+2), Fill())` 計算
-  - description 用灰色（ANSI 245）
-- Scroll hint 格式：`  ↑ N more` / `  ↓ N more`，灰色
-- Scroll hint **佔用 maxVisible 行數**（不是額外的）— 這樣 overlay 高度固定
+- Scroll hint 格式：`  ↑ N more` / `  ↓ N more`，灰色（ANSI 245）
+- Scroll hint **佔用 maxVisible 行數**（不是額外的）— overlay 高度固定
+- `scrollHintCount` = 上下隱藏項的 hint 數量之和（0、1 或 2）：
+  - 上方有隱藏項 → 顯示 `↑ N more`，佔 1 行
+  - 下方有隱藏項 → 顯示 `↓ N more`，佔 1 行
+  - 都沒有隱藏 → 不顯示 hint，0 行
+- `visibleItemSlots = maxVisible - scrollHintCount`（item 實際可用行數）
 - 空列表渲染 0 行
+- `getVisibleCount()` 回傳 `min(items.size(), maxVisible)` — overlay 高度計算用
 
 **Viewport scrolling 邏輯：**
+
 ```
+每次 moveUp/moveDown 後重新計算 scrollHintCount 和 visibleItemSlots：
+
+scrollHintCount:
+  hasAbove = (viewportStart > 0)
+  hasBelow = (viewportStart + visibleItemSlots < items.size())
+  scrollHintCount = (hasAbove ? 1 : 0) + (hasBelow ? 1 : 0)
+
+visibleItemSlots = maxVisible - scrollHintCount
+
 moveDown():
   selectedIndex = min(selectedIndex + 1, items.size() - 1)
+  重新計算 scrollHintCount / visibleItemSlots
   if selectedIndex >= viewportStart + visibleItemSlots:
       viewportStart = selectedIndex - visibleItemSlots + 1
 
@@ -106,8 +123,8 @@ moveUp():
   selectedIndex = max(selectedIndex - 1, 0)
   if selectedIndex < viewportStart:
       viewportStart = selectedIndex
+  重新計算 scrollHintCount / visibleItemSlots
 ```
-其中 `visibleItemSlots = maxVisible - scrollHintCount`（scroll hints 佔位）。
 
 ### 3. Overlay 整合
 
@@ -115,8 +132,9 @@ moveUp():
 
 **Screen.java 新增：**
 - field: `private ListSelect<?> listSelect`
-- 建構子加參數（或 setter）
-- `setListSelectVisible(boolean)` / `isListSelectVisible()`
+- setter: `setListSelect(ListSelect<?> listSelect)` — 設定要顯示的 ListSelect 實例
+- `setListSelectVisible(boolean visible)` — 設定為 true 時**同時關閉 slashMenu/mcpPanel**（overlay 互斥）
+- `isListSelectVisible()`
 - render() 中新增 overlay 分支（跟 slashMenu/mcpPanel 並行，互斥）
 
 **GrimoTuiRunner.java 新增：**
@@ -132,16 +150,18 @@ if (screen.isListSelectVisible()) {
 ```
 
 ```java
-private void handleListSelectInput(int op) {
-    switch (op) {
+// EventLoop.KeyHandler 傳入 String operation（不是 int）
+private void handleListSelectInput(String operation) {
+    switch (operation) {
         case EventLoop.OP_UP -> agentListSelect.moveUp();
         case EventLoop.OP_DOWN -> agentListSelect.moveDown();
         case EventLoop.OP_ENTER -> {
             var selected = agentListSelect.getSelected();
             screen.setListSelectVisible(false);
             if (selected != null) {
-                // 等同使用者輸入 /agent-use <selected>
-                processAgentUse(selected.value());
+                // 直接呼叫 AgentCommands.use()，等同 /agent-use <agentId>
+                String result = agentCommands.use(selected.value());
+                appendCommandOutput(result);
             }
         }
         case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> {
@@ -151,6 +171,8 @@ private void handleListSelectInput(int op) {
     eventLoop.setDirty();
 }
 ```
+
+> 設計說明：`agentCommands` 是已注入的 `AgentCommands` bean（GrimoTuiRunner 建構子已有）。`appendCommandOutput()` 是現有的輸出方法。不需要新增 `processAgentUse()` helper。
 
 ### 4. /agent-use 互動化
 
@@ -167,9 +189,8 @@ if (trimmed.equals("/agent-use") || trimmed.equals("agent-use")) {
 
 ```java
 private void showAgentPicker() {
-    var agents = agentModelRegistry.listAll();
+    var agents = agentModelRegistry.listAvailable();
     var items = agents.entrySet().stream()
-        .filter(e -> e.getValue().isAvailable())
         .map(e -> new ListSelect.Item<>(
             e.getKey(),                          // label: "claude"
             getAgentDescription(e.getKey()),     // description: "Claude Sonnet 4.6"
@@ -199,6 +220,8 @@ private void showAgentPicker() {
 | `moveDownScrollsViewport` | 選到底部邊界 → viewport 下移 |
 | `moveUpScrollsViewport` | 選到頂部邊界 → viewport 上移 |
 | `scrollHintShowsCount` | `↑ 2 more` 數字正確 |
+| `scrollHintOnlyBottomWhenAtTop` | 列表頂部只顯示 `↓ N more`，不顯示 `↑` |
+| `descriptionRenderedInGray` | description 使用 ANSI 245 灰色 |
 | `getSelectedReturnsCorrectItem` | getSelected() 回傳 selectedIndex 的 Item |
 | `linearNavigationNoWrap` | 到頂再 moveUp 不變，到底再 moveDown 不變 |
 | `cjkLabelRendersCorrectWidth` | CJK label 寬度正確（2 column per char） |
