@@ -26,20 +26,20 @@ import java.util.List;
  * @see <a href="https://agentskills.io/client-implementation/adding-skills-support">
  *      Agent Skills — .agents/skills/ cross-client convention</a>
  */
-public class WorkspaceProvisioner {
+public class WorktreeProvisioner {
 
-    private static final Logger log = LoggerFactory.getLogger(WorkspaceProvisioner.class);
+    private static final Logger log = LoggerFactory.getLogger(WorktreeProvisioner.class);
     private static final String AGENTS_SKILLS_DIR = ".agents/skills";
     private final Path skillsSourceDir;
     private final GitHelper gitHelper;
 
-    public WorkspaceProvisioner(Path skillsSourceDir, GitHelper gitHelper) {
+    public WorktreeProvisioner(Path skillsSourceDir, GitHelper gitHelper) {
         this.skillsSourceDir = skillsSourceDir;
         this.gitHelper = gitHelper;
     }
 
     /**
-     * 準備 agent 工作區：建立 git worktree + provision skills。
+     * 準備 agent worktree：建立 git worktree + provision skills。
      * 非 git 目錄或 worktree 建立失敗時 fallback 到 CWD + symlink。
      * 永遠不拋例外 — 失敗時回傳 isWorktree=false 的 WorktreeInfo。
      *
@@ -184,7 +184,7 @@ public class WorkspaceProvisioner {
             }
         }
         if (removed > 0) {
-            log.debug("Cleaned up workspace: removed {} symlinks", removed);
+            log.debug("Cleaned up worktree: removed {} symlinks", removed);
         }
     }
 }

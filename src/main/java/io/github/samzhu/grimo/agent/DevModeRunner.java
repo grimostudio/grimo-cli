@@ -9,7 +9,7 @@ import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.shared.event.DevModeEnteredEvent;
 import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;
 import io.github.samzhu.grimo.shared.sandbox.GitHelper;
-import io.github.samzhu.grimo.shared.sandbox.WorkspaceProvisioner;
+import io.github.samzhu.grimo.shared.sandbox.WorktreeProvisioner;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,7 +37,7 @@ public class DevModeRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DevModeRunner.class);
 
-    private final WorkspaceProvisioner workspaceProvisioner;
+    private final WorktreeProvisioner worktreeProvisioner;
     private final GitHelper gitHelper;
     private final AgentModelRegistry agentModelRegistry;
     private final TierRouter tierRouter;
@@ -48,7 +48,7 @@ public class DevModeRunner {
     private final ApplicationEventPublisher eventPublisher;
     private final AtomicReference<Tier> sessionTier;
 
-    public DevModeRunner(WorkspaceProvisioner workspaceProvisioner,
+    public DevModeRunner(WorktreeProvisioner worktreeProvisioner,
                          GitHelper gitHelper,
                          AgentModelRegistry agentModelRegistry,
                          TierRouter tierRouter,
@@ -58,7 +58,7 @@ public class DevModeRunner {
                          SkillRegistry skillRegistry,
                          ApplicationEventPublisher eventPublisher,
                          AtomicReference<Tier> sessionTier) {
-        this.workspaceProvisioner = workspaceProvisioner;
+        this.worktreeProvisioner = worktreeProvisioner;
         this.gitHelper = gitHelper;
         this.agentModelRegistry = agentModelRegistry;
         this.tierRouter = tierRouter;
@@ -105,7 +105,7 @@ public class DevModeRunner {
         // 建 worktree
         var skillNames = skillRegistry.listAll().stream()
                 .map(io.github.samzhu.grimo.skill.loader.SkillDefinition::name).toList();
-        var worktree = workspaceProvisioner.provision(projectDir, taskId, skillNames);
+        var worktree = worktreeProvisioner.provision(projectDir, taskId, skillNames);
 
         // 發布進入事件
         eventPublisher.publishEvent(new DevModeEnteredEvent(
@@ -133,7 +133,7 @@ public class DevModeRunner {
             String result = response.getResult();
 
             // Cleanup（auto-commits uncommitted changes, preserves branch if changes exist）
-            workspaceProvisioner.cleanup(worktree, projectDir);
+            worktreeProvisioner.cleanup(worktree, projectDir);
 
             // Diff summary
             int commitCount = 0;
@@ -169,7 +169,7 @@ public class DevModeRunner {
             log.error("Dev Mode failed: {}ms, error={}", duration, e.getMessage(), e);
 
             try {
-                workspaceProvisioner.cleanup(worktree, projectDir);
+                worktreeProvisioner.cleanup(worktree, projectDir);
             } catch (Exception ce) {
                 log.warn("Dev Mode cleanup failed: {}", ce.getMessage());
             }

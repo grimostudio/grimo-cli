@@ -11,7 +11,7 @@ import io.github.samzhu.grimo.agent.tier.TierRouter;
 import io.github.samzhu.grimo.agent.tier.TierSelection;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.shared.sandbox.GitHelper;
-import io.github.samzhu.grimo.shared.sandbox.WorkspaceProvisioner;
+import io.github.samzhu.grimo.shared.sandbox.WorktreeProvisioner;
 import io.github.samzhu.grimo.shared.sandbox.WorktreeInfo;
 import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.config.GrimoConfig;
@@ -91,7 +91,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final CommandExecutor commandExecutor;
     private final CommandRegistry commandRegistry;
     private final McpCatalogBuilder mcpCatalogBuilder;
-    private final WorkspaceProvisioner workspaceProvisioner;
+    private final WorktreeProvisioner worktreeProvisioner;
     private final GitHelper gitHelper;
     private final SandboxDetector sandboxDetector;
     private final TierRouter tierRouter;
@@ -142,7 +142,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                            CommandExecutor commandExecutor,
                            CommandRegistry commandRegistry,
                            McpCatalogBuilder mcpCatalogBuilder,
-                           WorkspaceProvisioner workspaceProvisioner,
+                           WorktreeProvisioner worktreeProvisioner,
                            GitHelper gitHelper,
                            SandboxDetector sandboxDetector,
                            TierRouter tierRouter,
@@ -165,7 +165,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
         this.commandExecutor = commandExecutor;
         this.commandRegistry = commandRegistry;
         this.mcpCatalogBuilder = mcpCatalogBuilder;
-        this.workspaceProvisioner = workspaceProvisioner;
+        this.worktreeProvisioner = worktreeProvisioner;
         this.gitHelper = gitHelper;
         this.sandboxDetector = sandboxDetector;
         this.tierRouter = tierRouter;

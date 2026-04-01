@@ -11,7 +11,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class WorkspaceProvisionerTest {
+class WorktreeProvisionerTest {
 
     @TempDir Path tempDir;
     @TempDir Path skillsSourceDir;
@@ -67,7 +67,7 @@ class WorkspaceProvisionerTest {
         lastRepoDir = repo;
         setupSkillSource("code-review");
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-001", List.of("code-review"));
         createdWorktrees.add(info);
 
@@ -85,7 +85,7 @@ class WorkspaceProvisionerTest {
     void provisionShouldIncludeRepoFilesInWorktree() throws Exception {
         Path repo = createGitRepo();
         lastRepoDir = repo;
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-002", List.of());
         createdWorktrees.add(info);
 
@@ -99,7 +99,7 @@ class WorkspaceProvisionerTest {
         lastRepoDir = repo;
         setupSkillSource("code-review");
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-003", List.of("code-review"));
         createdWorktrees.add(info);
         Path worktreeDir = info.workDir();
@@ -115,7 +115,7 @@ class WorkspaceProvisionerTest {
     @Test
     void cleanupShouldAutoCommitUncommittedChanges() throws Exception {
         Path repo = createGitRepo();
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-004", List.of());
 
         // agent 在 worktree 修改但沒 commit
@@ -136,7 +136,7 @@ class WorkspaceProvisionerTest {
         Files.createDirectories(nonGitDir);
         setupSkillSource("code-review");
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(nonGitDir, "task-005", List.of("code-review"));
 
         assertThat(info.isWorktree()).isFalse();
@@ -154,7 +154,7 @@ class WorkspaceProvisionerTest {
         Files.createDirectories(nonGitDir);
         setupSkillSource("code-review");
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(nonGitDir, "task-006", List.of("code-review"));
         provisioner.cleanup(info, nonGitDir);
 
@@ -167,7 +167,7 @@ class WorkspaceProvisionerTest {
     void provisionShouldReturnEmptySkillsWhenNoneProvided() throws Exception {
         Path repo = createGitRepo();
         lastRepoDir = repo;
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-007", List.of());
         createdWorktrees.add(info);
 
@@ -182,7 +182,7 @@ class WorkspaceProvisionerTest {
         // 建立同名分支讓 worktree add 失敗
         exec(repo, "git", "branch", "grimo/conflict-task");
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "conflict-task", List.of());
         createdWorktrees.add(info);
 
@@ -203,7 +203,7 @@ class WorkspaceProvisionerTest {
 
         setupSkillSource("code-review");
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-008", List.of("code-review"));
         createdWorktrees.add(info);
 
@@ -218,7 +218,7 @@ class WorkspaceProvisionerTest {
         lastRepoDir = repo;
         setupSkillSource("code-review");
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-pure", List.of("code-review"));
         createdWorktrees.add(info);
 
@@ -235,7 +235,7 @@ class WorkspaceProvisionerTest {
         Path repo = createGitRepo();
         lastRepoDir = repo;
 
-        var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
+        var provisioner = new WorktreeProvisioner(skillsSourceDir, new GitHelper());
         var info = provisioner.provision(repo, "task-code", List.of());
         createdWorktrees.add(info);
 
