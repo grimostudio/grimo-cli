@@ -65,8 +65,31 @@ package io.github.samzhu.grimo.session;
 
 > 設計說明：SessionEventListener 用 `@EventListener` 監聽 `DevModeEnteredEvent` / `DevModeCompletedEvent`。Phase 1 把這些 event 搬到 `agent/` 後，session 模組需宣告 `"agent"` 依賴。
 
+**解決 agent ↔ session 循環依賴：**
+
+`GrimoSessionAdvisor`（`agent/advisor/`）直接注入 `SessionWriter`（`session/`），造成 `agent → session` 依賴。同時 `session → agent`（監聽 DevMode events）。Spring Modulith 禁止雙向依賴。
+
+**解法：** `GrimoSessionAdvisor` 改為發布 `AgentCallRecordedEvent`（留在 `agent/`），`SessionEventListener` 新增監聽此 event 並寫入 SessionWriter。agent 不再直接 import session。
+
+```java
+// agent/AgentCallRecordedEvent.java（新增）
+public record AgentCallRecordedEvent(String goal, String result, String sessionId) {}
+
+// agent/advisor/GrimoSessionAdvisor.java（修改）
+// Before: 直接呼叫 sessionWriter.writeXxx()
+// After:  eventPublisher.publishEvent(new AgentCallRecordedEvent(...))
+
+// session/SessionEventListener.java（新增監聽）
+@EventListener
+void on(AgentCallRecordedEvent event) {
+    sessionWriter.writeAssistantMessage(event.result());
+}
+```
+
+**依賴方向：** `session → agent`（單向），`agent` 不依賴 `session`。
+
 **allowedDependencies 影響：**
-- `agent` 的 `"shared::session"` → `"session"`
+- `agent` 的 `"shared::session"` → **移除**（不再需要 session 依賴）
 
 #### 1c. Event 歸屬出版者
 
@@ -88,14 +111,23 @@ package io.github.samzhu.grimo.session;
 
 **allowedDependencies 連鎖更新：**
 
-| 模組 | 新增依賴 | 移除 | 原因 |
-|------|---------|------|------|
-| `session` | `"agent"` | — | 監聽 DevMode events（在 agent/ 裡） |
-| `channel` | — | `"shared::event"` → 移除 | events 搬入 channel/ 自己 |
-| `agent` | — | `"shared::event"`, `"shared::session"`, `"shared::sandbox"` | events 在自己模組；改為 `"sandbox"`, `"session"` |
-| `task` | — | `"shared::event"` → 移除 | events 搬入 task/ 自己 |
-| `mcp` | — | `"shared::event"` → 移除 | events 搬入 mcp/ 自己（but McpCommands publishes, not consumes） |
-| `skill` | — | `"shared::event"` → 移除 | skill 不 publish/consume events |
+**完整 allowedDependencies（Phase 1 完成後）：**
+
+| 模組 | 完整 After | 變更說明 |
+|------|-----------|---------|
+| `agent` | `"sandbox", "config", "mcp", "skill::registry", "skill::loader"` | 移除 shared::*；events 在自己裡；不再依賴 session（循環解除） |
+| `session` | `"agent", "project"` | 新模組；監聽 agent events + 使用 ProjectContext.dataDir |
+| `sandbox` | (無) | 新模組，無外部依賴 |
+| `task` | (無) | events 搬入自己；移除 shared::* |
+| `mcp` | `"config"` | events 搬入自己；移除 shared::* |
+| `channel` | (無) | events 搬入自己；移除 shared::* |
+| `skill` | (無) | 移除 shared::* |
+| `tui` | `"agent", "mcp"` | Phase 2 需要：TuiEventBridge 監聽 AgentSwitchedEvent + McpCatalogChangedEvent |
+| `home` | (無) | 不變 |
+| `project` | `"home"` | 不變 |
+| `config` | (無) | 不變 |
+
+> 設計說明：`tui/` 需在 Phase 2 加入 `"agent"` 和 `"mcp"` 依賴（TuiEventBridge 監聽這些模組的 events）。Phase 1 時 tui/ 不動（events 還是被 root package 的 GrimoTuiRunner 監聽）。
 
 > 設計說明：root package（GrimoTuiRunner 等）不是 module，可自由 import 任何模組的 event。不需宣告 allowedDependencies。
 
@@ -199,7 +231,12 @@ GrimoTuiRunner rename 為 `TuiAdapter`，只保留：
 - Input 接收 → 轉發給 CommandExecutor 或 ChatDispatcher
 - Output 接收 → 渲染到 ContentView
 
-**估計 ~300 lines（從 1120 lines 精簡）。**
+**額外提取（讓 TuiAdapter 降到 ~400 lines）：**
+- 啟動初始化（detectAgents, loadSkills, restoreTasks, detectSandbox）→ 搬到 `GrimoStartupRunner`（已是 bean factory，加 `@PostConstruct` 或 `ApplicationRunner` 初始化）
+- `buildMenuItems()` → 搬到 CommandDispatcher 或內聯
+- `resolveAgentId()` → 搬到 ChatDispatcher
+
+**估計 ~350-400 lines（從 1120 lines 精簡）。**
 
 ### Phase 3：統一 Port 介面
 
