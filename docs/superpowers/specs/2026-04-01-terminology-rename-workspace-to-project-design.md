@@ -1,185 +1,214 @@
-# 術語正名：workspace → home + project
+# 術語正名 + 模組提升：workspace → home + project + config
 
-> Sub-project 1 of 4: TUI 重構系列。基礎性變更，其他 sub-project 建立在正確術語之上。
+> Sub-project 1 of 4: TUI 重構系列。基礎性變更 — 消滅 workspace 術語、提升核心模組為 top-level、消除反向依賴。
 
 ## 目標
 
-消除 codebase 中殘留的 "workspace" 概念，正名為語意精確的 `home`（全域 app 資料）與 `project`（CWD 專案身份），並同步更新 glossary。
+1. 消除 codebase 中殘留的 "workspace" 概念
+2. 將 GrimoHome、ProjectContext、GrimoConfig 從 `shared/` 提升為獨立 top-level 模組
+3. 消除 `shared → skill::loader` 反向依賴
+4. 更新 glossary 和 CLAUDE.md
 
 ## 背景
 
-前一輪重構（2026-03-31）已完成核心轉換：
-- `WorkspaceManager` → `GrimoHome` + `ProjectContext`（新類別已建立）
-- `GrimoProperties` 移除，`~/.grimo` 路徑固定
+### 已完成
+前一輪重構（2026-03-31）已建立 `GrimoHome` + `ProjectContext`（取代 `WorkspaceManager`），但留在 `shared.workspace` package。
 
-但殘留以下問題：
-1. `GrimoHome` 和 `ProjectContext` 仍共存於 `shared.workspace` package — 語意不精確
-2. `WorkspaceProvisioner`（`shared.sandbox`）名稱描述的是廢棄概念，而非它實際做的事
-3. 變數名 `workspacePath`、`workspaceProvisioner` 散佈多個檔案
-4. Modulith `allowedDependencies` 全部指向 `"shared::workspace"`
-5. Glossary 的 layout 圖和術語條目未完全更新
+### 問題
+1. **`shared/` 是 catch-all 反模式** — Spring Modulith [明確不鼓勵](https://docs.spring.io/spring-modulith/reference/fundamentals.html) shared/common 模組。目前 `shared/` 裝了 6 個不同關注點（config、event、workspace、session、tui、sandbox），其中 tui/sandbox/session 不是真正共用
+2. **`shared → skill::loader` 反向依賴** — 基礎設施層依賴功能模組，違反依賴方向原則。`WorkspaceProvisioner.provision()` 的 `List<SkillDefinition>` 參數造成
+3. **殘留的 "workspace" 術語** — 變數名、註解、glossary 散佈多處
+
+### 架構願景
+
+本次是 4 個 sub-project 的第一步，逐步消滅 `shared/` catch-all：
+
+```
+Sub-project 1（本次）：home/, project/, config/ 提升 + 術語正名 + 消除反向依賴
+Sub-project 2：tui/ 模組化（TUI = Adapter，跟 channel 平行）
+Sub-project 3：新 UI 組件設計
+Sub-project 4：sandbox/, session/ 提升 + event 歸屬出版者 + 六角架構解耦
+```
+
+SP4 完成後 `shared/` 模組完全消滅，所有子包已升為獨立 top-level 模組。
 
 ## 設計
 
-### 1. Package 拆分
+### 1. 模組提升：shared 子包 → top-level 模組
 
-將 `shared.workspace` 拆為兩個語意明確的 package：
+依據 Spring Modulith 原則：每個 top-level package 是一個獨立應用模組。只有真正跨模組共用的才留 shared — 但 config、home、project 各自是獨立關注點，應為獨立模組。
 
-| Before | After | 內容 | NamedInterface |
-|--------|-------|------|----------------|
-| `shared.workspace` | `shared.home` | `GrimoHome` | `"home"` |
-| | `shared.project` | `ProjectContext` | `"project"` |
+| Before | After | 內容 | 原因 |
+|--------|-------|------|------|
+| `shared.workspace.GrimoHome` | `home.GrimoHome` | 全域 app 資料 (~/.grimo) | 獨立關注點，所有模組間接使用 |
+| `shared.workspace.ProjectContext` | `project.ProjectContext` | CWD 專案身份 | 獨立關注點，session + tui 使用 |
+| `shared.config.GrimoConfig` | `config.GrimoConfig` | YAML 設定讀寫 | 獨立關注點，agent/mcp/task/channel 直接 import |
+
+> 設計說明：`ProjectContext` 的建構子依賴 `GrimoHome`（需要 `projectsDir()` 路徑）。提升後 `project/` 模組宣告 `allowedDependencies = { "home" }`。這是正常的基礎設施依賴，不是循環。
 
 **檔案異動：**
 
 ```
-src/main/java/io/github/samzhu/grimo/shared/workspace/
-  ├── GrimoHome.java           → shared/home/GrimoHome.java
-  ├── ProjectContext.java       → shared/project/ProjectContext.java
-  └── package-info.java         → 刪除
+刪除：
+  src/main/java/.../shared/workspace/package-info.java
+  src/main/java/.../shared/config/package-info.java
 
-src/main/java/io/github/samzhu/grimo/shared/home/
-  └── package-info.java         → 新建（@NamedInterface("home")）
+搬移 + 改 package：
+  shared/workspace/GrimoHome.java      → home/GrimoHome.java
+  shared/workspace/ProjectContext.java  → project/ProjectContext.java
+  shared/config/GrimoConfig.java        → config/GrimoConfig.java
 
-src/main/java/io/github/samzhu/grimo/shared/project/
-  └── package-info.java         → 新建（@NamedInterface("project")）
+新建 package-info.java：
+  home/package-info.java     → @ApplicationModule
+  project/package-info.java  → @ApplicationModule(allowedDependencies = { "home" })
+  config/package-info.java   → @ApplicationModule
 
-src/test/java/io/github/samzhu/grimo/shared/workspace/
-  ├── GrimoHomeTest.java        → shared/home/GrimoHomeTest.java
-  └── ProjectContextTest.java   → shared/project/ProjectContextTest.java
+搬移測試：
+  test/.../shared/workspace/GrimoHomeTest.java     → test/.../home/GrimoHomeTest.java
+  test/.../shared/workspace/ProjectContextTest.java → test/.../project/ProjectContextTest.java
 ```
 
-**package 聲明與 import 更新：**
-- `GrimoHome.java`: `package ...shared.home;`
-- `ProjectContext.java`: `package ...shared.project;`
-- `GrimoTuiRunner.java`: import 改為 `shared.home.GrimoHome` + `shared.project.ProjectContext`
-- `GrimoStartupRunner.java`: 同上
+### 2. Modulith allowedDependencies 全面更新
 
-### 2. Modulith allowedDependencies 更新
+所有模組的 `"shared::workspace"` 和 `"shared::config"` 需改為 top-level 模組依賴：
 
-目前 5 個模組宣告 `"shared::workspace"`。經查，**沒有任何模組的 Java 類別直接 import `shared.workspace`**（只有 root package 的 `GrimoTuiRunner` 和 `GrimoStartupRunner` 使用）。
-
-但為了模組邊界正確性和未來擴展，按實際依賴精確宣告：
-
-| 模組 | Before | After | 原因 |
+| 模組 | Before | After | 說明 |
 |------|--------|-------|------|
-| `agent` | `"shared::workspace"` | `"shared::home"` | DevModeRunner 透過 bean 間接使用 GrimoHome 路徑 |
-| `skill` | `"shared::workspace"` | `"shared::home"` | SkillLoader/SkillCommands 使用 skillsDir（來自 GrimoHome） |
-| `task` | `"shared::workspace"` | `"shared::home"` | MarkdownTaskStore 使用 tasksDir（來自 GrimoHome） |
-| `mcp` | `"shared::workspace"` | `"shared::home"` | McpCatalogBuilder 間接使用 config（來自 GrimoHome） |
-| `channel` | `"shared::workspace"` | `"shared::home"` | 保留備用（channel adapter 可能需 home 路徑） |
+| `agent` | `"shared::workspace", "shared::config"` | `"home", "config"` | AgentCommands/Configuration/TierRouter 直接 import GrimoConfig |
+| `skill` | `"shared::workspace", "shared::config"` | `"home"` | SkillLoader 透過 bean 取得 skillsDir；不直接 import GrimoConfig |
+| `task` | `"shared::workspace", "shared::config"` | `"home"` | MarkdownTaskStore 透過 bean 取得 tasksDir |
+| `mcp` | `"shared::workspace", "shared::config"` | `"config"` | McpCatalogBuilder/McpCommands 直接 import GrimoConfig |
+| `channel` | `"shared::workspace", "shared::config"` | `"config"` | 保留 config 依賴備用 |
+| `shared` | `"skill::loader"` | **(移除)** | 反向依賴消除後不再需要 |
+| `project` | (new) | `"home"` | ProjectContext 建構子需 GrimoHome |
 
-> 設計說明：目前各模組透過 `@Bean` 注入 `Path` 物件（如 `skillsDir`、`tasksDir`），不直接 import `GrimoHome`。但 Modulith 邊界宣告的是「允許依賴」而非「目前已依賴」，保留 `"shared::home"` 確保未來可直接 import。若模組未來需要 `ProjectContext`，屆時加 `"shared::project"`。
+> 設計說明：各模組的 `allowedDependencies` 只宣告**實際 import 的模組**。透過 `@Bean` 注入 `Path` 的間接使用不需要宣告。上表經 `grep` 驗證每個模組的實際 import。
 
-### 3. 類別重命名：WorkspaceProvisioner → WorktreeProvisioner
+### 3. 消除 shared → skill::loader 反向依賴
 
-**位置：** `shared.sandbox` package（不動）
+**根因：** `WorkspaceProvisioner.provision()` 參數 `List<SkillDefinition> skills`，`SkillDefinition` 來自 `skill.loader` package。
 
-**改名理由：** Clean code — 類名應描述它管理的資源。它建立/清理 git worktree，不是 "workspace"。在 `sandbox` package 下語意已經清楚。
+**修正：** 改為 `List<String> skillNames`。`provisionSkills()` 內部只用 `skill.name()` 做 symlink，不需要完整 SkillDefinition。
+
+```java
+// Before
+public WorktreeInfo provision(Path projectDir, String taskId, List<SkillDefinition> skills)
+
+// After
+public WorktreeInfo provision(Path projectDir, String taskId, List<String> skillNames)
+```
+
+**呼叫端（DevModeRunner.java）調整：**
+
+```java
+// Before
+var worktree = worktreeProvisioner.provision(projectDir, taskId, skillRegistry.listAll());
+
+// After
+var skillNames = skillRegistry.listAll().stream().map(SkillDefinition::name).toList();
+var worktree = worktreeProvisioner.provision(projectDir, taskId, skillNames);
+```
+
+**連帶清理 `shared/package-info.java`：**
+- 移除 `allowedDependencies = { "skill::loader" }`
+- `shared` 模組不再依賴任何功能模組
+
+### 4. 類別重命名：WorkspaceProvisioner → WorktreeProvisioner
+
+**位置：** `shared.sandbox` package（SP4 再搬遷為獨立 `sandbox/` 模組）
+
+**改名理由：** Clean code — 類名描述它管理的資源（git worktree），不是廢棄的 "workspace" 概念。
 
 **影響檔案：**
 
 | 檔案 | 變更 |
 |------|------|
-| `shared/sandbox/WorkspaceProvisioner.java` | 重命名為 `WorktreeProvisioner.java`，更新類名、logger、JavaDoc |
-| `shared/sandbox/WorkspaceProvisionerTest.java` | 重命名為 `WorktreeProvisionerTest.java`，更新類名 |
-| `agent/DevModeRunner.java` | field `workspaceProvisioner` → `worktreeProvisioner`，constructor 同步 |
-| `GrimoTuiRunner.java` | field `workspaceProvisioner` → `worktreeProvisioner`，constructor 同步 |
-| `GrimoStartupRunner.java` | bean name `workspaceProvisioner()` → `worktreeProvisioner()`，更新註解 |
-| `docs/glossary.md` | `WorkspaceProvisioner` 條目更新為 `WorktreeProvisioner` |
+| `shared/sandbox/WorkspaceProvisioner.java` | 改名 `WorktreeProvisioner.java`，更新類名、logger、JavaDoc |
+| `shared/sandbox/WorkspaceProvisionerTest.java` | 改名 `WorktreeProvisionerTest.java`，更新類名、所有 `new WorkspaceProvisioner(...)` |
+| `agent/DevModeRunner.java` | field/param `workspaceProvisioner` → `worktreeProvisioner` |
+| `GrimoTuiRunner.java` | field/param `workspaceProvisioner` → `worktreeProvisioner` |
+| `GrimoStartupRunner.java` | bean method `workspaceProvisioner()` → `worktreeProvisioner()` |
+| `WorkspaceProvisioner.java:188` | log `"Cleaned up workspace:"` → `"Cleaned up worktree:"` |
 
-**內部 log 訊息更新：**
-- `WorkspaceProvisioner.java:188` — `"Cleaned up workspace: removed {} symlinks"` → `"Cleaned up worktree: removed {} symlinks"`
+### 5. 變數與參數正名
 
-### 4. 變數與參數正名
-
-遵循 clean code 精神，變數名反映其實際內容：
+遵循 clean code — 變數名反映實際內容：
 
 | 檔案 | Before | After |
 |------|--------|-------|
-| `GrimoTuiRunner.java:210` | `String workspacePath = projectContext.displayPath()` | `String projectPath = ...` |
-| `GrimoTuiRunner.java:220` | `..., workspacePath, ...` | `..., projectPath, ...` |
-| `GrimoTuiRunner.java:227` | `... + workspacePath` | `... + projectPath` |
-| `GrimoTuiRunner.java:855` | `String workspacePath = projectContext.displayPath()` | `String projectPath = ...` |
-| `GrimoTuiRunner.java:862` | `... + workspacePath` | `... + projectPath` |
+| `GrimoTuiRunner.java:210,855` | `String workspacePath` | `String projectPath` |
+| `GrimoTuiRunner.java:220,862` | `workspacePath` (方法呼叫參數) | `projectPath` |
+| `GrimoTuiRunner.java:227` | `+ workspacePath` (status text) | `+ projectPath` |
 | `BannerRenderer.java:43` | `@param workspacePath 工作目錄路徑` | `@param projectPath 當前專案路徑` |
-| `BannerRenderer.java:52` | `String workspacePath` | `String projectPath` |
-| `BannerRenderer.java:80` | `GRAY + workspacePath + RESET` | `GRAY + projectPath + RESET` |
+| `BannerRenderer.java:52,80` | `String workspacePath` | `String projectPath` |
 
-### 5. 註解與 JavaDoc 正名
+### 6. 註解與 JavaDoc 正名
 
-| 檔案:行 | Before | After |
-|---------|--------|-------|
-| `GrimoStatusView.java:14` | `agent/model/workspace/計數資訊` | `agent/model/project/計數資訊` |
-| `GrimoStartupRunner.java:89` | `此 bean 提供 workspace 下的 skills 目錄路徑` | `此 bean 提供 GrimoHome 的 skills 目錄路徑` |
+| 檔案 | Before | After |
+|------|--------|-------|
+| `GrimoStatusView.java:14` | `agent/model/workspace/計數` | `agent/model/project/計數` |
+| `GrimoStartupRunner.java:89` | `提供 workspace 下的 skills 目錄` | `提供 GrimoHome 的 skills 目錄` |
 | `GrimoTuiRunner.java:179` | `Phase 1: Workspace 初始化` | `Phase 1: Home & Project 初始化` |
 | `WorkspaceProvisioner.java:43` | `準備 agent 工作區` | `準備 agent worktree` |
 
-### 6. 測試更新
+### 7. 測試更新
 
 | 測試檔案 | 變更 |
 |----------|------|
-| `GrimoHomeTest.java` | 搬至 `shared/home/` package，更新 package 聲明 |
-| `ProjectContextTest.java` | 搬至 `shared/project/` package，更新 package 聲明 |
-| `WorkspaceProvisionerTest.java` | 重命名為 `WorktreeProvisionerTest.java`，更新所有 `new WorkspaceProvisioner(...)` → `new WorktreeProvisioner(...)` |
-| `BannerRendererTest.java:12` | 測試資料 `"~/workspace/grimo-cli"` 不改（這是合法的 CWD 路徑，不是 workspace 術語） |
-| `BannerRendererTest.java:16` | 同上（assertion 測的是 path 顯示，不是術語） |
-| `ModulithStructureTest` | 確認通過（package 結構變更後 Modulith 驗證） |
+| `GrimoHomeTest.java` | 搬至 `home/` package |
+| `ProjectContextTest.java` | 搬至 `project/` package，更新 GrimoHome import |
+| `WorkspaceProvisionerTest.java` | 改名 `WorktreeProvisionerTest.java`，改用 `List<String>` 參數 |
+| `BannerRendererTest.java` | 測試資料 `"~/workspace/grimo-cli"` 不改（合法 CWD 路徑） |
+| `ModulithStructureTest` | 驗證新模組結構通過 |
 
-### 7. Glossary 更新
-
-**移除/更新條目：**
+### 8. Glossary 更新
 
 | 動作 | 條目 | 說明 |
 |------|------|------|
-| 更新 | `WorkspaceProvisioner` → `WorktreeProvisioner` | 名稱、英文、說明同步更新 |
-| 更新 | 佈局圖 Status 區 | `│ ~/workspace/grimo │` → `│ ~/projects/grimo │`（範例路徑） |
-| 更新 | 佈局圖 Content 區 | `█●██●█  ~/workspace/grimo-cli` → `█●██●█  ~/projects/grimo-cli`（範例路徑） |
+| 更新 | `WorkspaceProvisioner` → `WorktreeProvisioner` | 名稱、英文、說明同步 |
+| 更新 | 佈局圖 Status 區 | `~/workspace/grimo` → `~/projects/grimo`（範例） |
+| 更新 | 佈局圖 Content 區 | `~/workspace/grimo-cli` → `~/projects/grimo-cli`（範例） |
 | 更新 | 技術元件對應表 | `WorkspaceProvisioner` → `WorktreeProvisioner` |
-| 保留 | `GrimoHome`、`ProjectContext`、`Session` 等 | 已在前輪更新，無需再改 |
+| 新增 | 模組架構段落 | 說明 home/project/config 為獨立 top-level 模組 |
 
-**新增條目（調度系統術語表）：**
+### 9. CLAUDE.md 同步
 
-| 名詞 | 英文 | 說明 |
-|------|------|------|
-| **WorktreeProvisioner** | Worktree Provisioner | 派遣 agent 前建立獨立 git worktree + 將 Grimo 管理的 Skill symlink 到 `.agents/skills/`。完成後清理 worktree、保留有變更的分支。位於 `shared.sandbox` package。 |
+Architecture 表格更新：
 
-### 8. CLAUDE.md 同步
-
-`CLAUDE.md` 的「Architecture」表格 `shared/` 行目前寫：
-
-```
+```markdown
+# Before
 | `shared/` | Domain events, config loading, workspace path management |
-```
 
-需更新為：
-
-```
-| `shared/` | Domain events, config loading, GrimoHome (app data), ProjectContext (CWD) |
+# After（反映 SP1 完成後的狀態）
+| `home/` | GrimoHome — 全域 app 資料目錄 (~/.grimo) 管理 |
+| `project/` | ProjectContext — CWD 專案身份、per-project 資料目錄 |
+| `config/` | GrimoConfig — YAML 設定讀寫 |
+| `shared/` | Domain events, session persistence, TUI framework, sandbox (SP2/SP4 搬遷) |
 ```
 
 ## 不在範圍內
 
 - TUI 組件命名重構（Sub-project 2）
 - 新 UI 組件設計（Sub-project 3）
-- 六角架構 + Event-driven 解耦（Sub-project 4）
-- `shared.workspace` package 下的 `GrimoHome`、`ProjectContext` 類別本身的邏輯不改，只搬 package
-- 文件 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 內的歷史文件不修改（描述的是遷移過程）
+- 六角架構 + Event-driven 解耦（Sub-project 4）：sandbox/ 提升、session/ 提升、event 歸屬出版者
+- `GrimoHome`、`ProjectContext`、`GrimoConfig` 類別本身的邏輯不改，只搬 package
+- 歷史文件（`docs/superpowers/specs/`、`docs/superpowers/plans/`）不修改
 
 ## 風險與緩解
 
 | 風險 | 緩解 |
 |------|------|
-| Package rename 導致 import 遺漏 | IDE/compiler 會報錯；ModulithStructureTest 驗證邊界 |
-| Bean name 改變導致注入失敗 | Spring by-type injection，bean name 不影響注入 |
-| 外部工具引用舊 package | 目前無外部消費者，codebase 封閉 |
+| Top-level 模組提升影響所有 import | Compiler 報錯 + ModulithStructureTest 驗證 |
+| `List<SkillDefinition>` → `List<String>` 改變 API | 只有 DevModeRunner 一個呼叫端，影響可控 |
+| 新模組未正確宣告 @ApplicationModule | ModulithStructureTest 在 build 時驗證 |
+| GrimoConfig 被多模組直接 import | 提升為 top-level 後各模組改宣告 `"config"` 依賴 |
 
 ## 驗收標準
 
-1. `./gradlew build` 通過（含所有既有測試）
-2. `ModulithStructureTest` 通過
-3. `grep -r "workspace" src/` 只剩以下合法殘留：
-   - 測試資料中的檔案路徑（如 `~/workspace/grimo-cli` — 合法 CWD）
-   - `shared.sandbox` package 中 `WorktreeProvisioner` 的 JavaDoc 可能引用 worktree 概念
-4. Glossary 中無 "workspace" 術語（路徑範例除外）
-5. `git diff --stat` 確認無遺漏檔案
+1. `./gradlew build` 全部通過
+2. `ModulithStructureTest` 通過（驗證新模組邊界）
+3. `grep -r "shared.workspace\|shared.config\|shared::workspace\|shared::config" src/` 回傳空
+4. `grep -r "WorkspaceProvisioner" src/` 回傳空
+5. `shared/package-info.java` 的 `allowedDependencies` 不含 `"skill::loader"`
+6. Glossary 中無 "workspace" 術語（路徑範例除外）
+7. CLAUDE.md Architecture 表格反映新結構
