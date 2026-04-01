@@ -89,8 +89,11 @@ public class DevModeRunner {
         if (agentModel == null) {
             log.error("Agent not found for dev mode: {}", tierSelection.agentId());
             eventPublisher.publishEvent(new DevModeCompletedEvent(
-                    "grimo/dev-" + taskId, 0, "", 0, false,
-                    "Agent not found: " + tierSelection.agentId()));
+                    taskId, tierSelection.agentId(), tierSelection.model(),
+                    tierSelection.tier().name().toLowerCase(), goal,
+                    "local", projectDir.toString(), null, null,
+                    0, "", 0, false,
+                    "Agent not found: " + tierSelection.agentId(), null));
             return;
         }
 
@@ -105,6 +108,11 @@ public class DevModeRunner {
 
         // 發布進入事件
         eventPublisher.publishEvent(new DevModeEnteredEvent(
+                taskId,
+                tierSelection.agentId(),
+                tierSelection.model(),
+                tierSelection.tier().name().toLowerCase(),
+                goal,
                 worktree.branchName() != null ? worktree.branchName() : "dev-" + taskId,
                 worktree.workDir().toString()));
 
@@ -146,8 +154,14 @@ public class DevModeRunner {
                 }
             }
 
+            String extPath = resolveExternalSessionPath(tierSelection.agentId(), worktree);
             eventPublisher.publishEvent(new DevModeCompletedEvent(
-                    worktree.branchName(), commitCount, diffStat, duration, hasChanges, result));
+                    taskId, tierSelection.agentId(), tierSelection.model(),
+                    tierSelection.tier().name().toLowerCase(), goal,
+                    worktree.isWorktree() ? "worktree" : "local",
+                    worktree.workDir().toString(), worktree.branchName(),
+                    worktree.baseSha(),
+                    commitCount, diffStat, duration, hasChanges, result, extPath));
 
         } catch (Exception e) {
             long duration = System.currentTimeMillis() - startTime;
@@ -160,8 +174,24 @@ public class DevModeRunner {
             }
 
             eventPublisher.publishEvent(new DevModeCompletedEvent(
-                    worktree.branchName(), 0, "", duration, false,
-                    "Dev Mode error: " + e.getMessage()));
+                    taskId, tierSelection.agentId(), tierSelection.model(),
+                    tierSelection.tier().name().toLowerCase(), goal,
+                    worktree.isWorktree() ? "worktree" : "local",
+                    worktree.workDir().toString(), worktree.branchName(),
+                    worktree.baseSha(),
+                    0, "", duration, false,
+                    "Dev Mode error: " + e.getMessage(), null));
         }
+    }
+
+    /**
+     * 解析外部 agent session 路徑。
+     * Claude Code 的 session 存放在 ~/.claude/projects/{encoded-cwd}/。
+     */
+    private String resolveExternalSessionPath(String agentId,
+            io.github.samzhu.grimo.shared.sandbox.WorktreeInfo worktree) {
+        if (!"claude".equals(agentId)) return null;
+        String encoded = worktree.workDir().toString().replaceAll("[^a-zA-Z0-9]", "-");
+        return "~/.claude/projects/" + encoded + "/";
     }
 }
