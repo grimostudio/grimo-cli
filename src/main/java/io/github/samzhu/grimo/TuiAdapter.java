@@ -6,6 +6,8 @@ import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.home.GrimoHome;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.project.ProjectContext;
+import io.github.samzhu.grimo.shared.event.IncomingMessageEvent;
+import io.github.samzhu.grimo.shared.event.OutgoingMessageEvent;
 import io.github.samzhu.grimo.shared.sandbox.GitHelper;
 import io.github.samzhu.grimo.shared.sandbox.WorktreeProvisioner;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
@@ -13,13 +15,15 @@ import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import io.github.samzhu.grimo.tui.TuiEventBridge;
 import org.jline.terminal.Terminal;
+import org.jline.utils.AttributedString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.shell.core.command.CommandContext;
 import org.springframework.shell.core.command.CommandExecutor;
 import org.springframework.shell.core.command.CommandParser;
 import org.springframework.shell.core.command.CommandRegistry;
@@ -40,8 +44,7 @@ import io.github.samzhu.grimo.tui.widget.Banner;
 import io.github.samzhu.grimo.tui.widget.GroupedSelect;
 import io.github.samzhu.grimo.tui.widget.ListSelect;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -80,6 +83,7 @@ public class TuiAdapter implements ApplicationRunner {
     private final GitHelper gitHelper;
     private final TuiEventBridge tuiEventBridge;
     private final ChatDispatcher chatDispatcher;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** Status bar 元件（run 時初始化，需在 agent thread 中更新） */
     private StatusView statusView;
@@ -122,7 +126,8 @@ public class TuiAdapter implements ApplicationRunner {
                            WorktreeProvisioner worktreeProvisioner,
                            GitHelper gitHelper,
                            TuiEventBridge tuiEventBridge,
-                           ChatDispatcher chatDispatcher) {
+                           ChatDispatcher chatDispatcher,
+                           ApplicationEventPublisher eventPublisher) {
         this.terminal = terminal;
         this.grimoHome = grimoHome;
         this.projectContext = projectContext;
@@ -140,6 +145,7 @@ public class TuiAdapter implements ApplicationRunner {
         this.gitHelper = gitHelper;
         this.tuiEventBridge = tuiEventBridge;
         this.chatDispatcher = chatDispatcher;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -300,7 +306,19 @@ public class TuiAdapter implements ApplicationRunner {
     }
 
     /**
-     * 處理使用者輸入：判斷是斜線指令還是對話。
+     * 處理使用者輸入：TUI 專屬攔截直接處理，其餘透過 IncomingMessageEvent 進入統一管線。
+     *
+     * 設計說明（事件管線架構）：
+     * <pre>
+     * TUI input
+     *   ├─ TUI 專屬攔截（/exit、/mcp 無參數、/agent-use 無參數）→ 直接處理（不進管線）
+     *   └─ 其他輸入 → sessionWriter.writeUserMessage() + publishEvent(IncomingMessageEvent)
+     *        → MessageRouter.on(IncomingMessageEvent)
+     *            ├─ /command → CommandExecutor → OutgoingMessageEvent(targetAdapter="tui")
+     *            └─ AI text  → ChatDispatcher（含 Virtual Thread，直接更新 TUI）
+     * </pre>
+     *
+     * 指令輸出回傳路徑：OutgoingMessageEvent → TuiAdapter.on(OutgoingMessageEvent) → contentView
      */
     private void processInput(String text) {
         if (text.equals("/exit")) {
@@ -308,40 +326,54 @@ public class TuiAdapter implements ApplicationRunner {
             return;
         }
 
-        // /mcp 無子指令時開啟互動 overlay（不走 CommandExecutor）
+        // /mcp 無子指令時開啟互動 overlay（TUI 專屬，不走 MessageRouter）
         if (text.equals("/mcp")) {
             tuiKeyHandler.openMcpManager();
             return;
         }
 
-        // /agent-use 無參數時開啟互動選擇器（不走 CommandExecutor，避免顯示 Usage 訊息）
+        // /agent-use 無參數時開啟互動選擇器（TUI 專屬，不走 MessageRouter）
         if (text.equals("/agent-use")) {
             showAgentPicker();
             return;
         }
 
-        if (text.startsWith("/")) {
-            try {
-                var parsed = commandParser.parse(text);
-                var stringWriter = new StringWriter();
-                var printWriter = new PrintWriter(stringWriter);
-                var ctx = new CommandContext(parsed, commandRegistry, printWriter, null);
-                commandExecutor.execute(ctx);
-                printWriter.flush();
-                String output = stringWriter.toString().trim();
-                if (!output.isEmpty()) {
-                    contentView.appendCommandOutput(output);
-                    sessionWriter.writeCommandMessage(text, output);
-                }
-            } catch (Exception e) {
-                String errorMsg = "Error: " + e.getMessage();
-                contentView.appendError(errorMsg);
-                sessionWriter.writeCommandMessage(text, errorMsg);
-            }
-        } else {
-            // AI 對話 — 委派給 ChatDispatcher（包含 Tier 路由、AgentClient 呼叫、Virtual Thread 管理）
-            chatDispatcher.dispatch(text);
+        // 記錄使用者輸入到 session（指令輸出由 MessageRouter 透過 SessionWriter 記錄）
+        contentView.appendUserInput(text);
+        sessionWriter.writeUserMessage(text);
+
+        // 發布入站事件，進入統一訊息管線（MessageRouter 負責路由）
+        eventPublisher.publishEvent(new IncomingMessageEvent(
+                "tui",           // channelType
+                null,            // channelUserId
+                null,            // conversationId
+                text,
+                List.of(),       // attachments
+                Instant.now(),   // timestamp
+                "tui",           // sourceAdapter
+                sessionWriter.getSessionId()  // sessionId
+        ));
+    }
+
+    /**
+     * 接收 OutgoingMessageEvent，顯示指令輸出到 TUI contentView。
+     *
+     * 設計說明：
+     * - targetAdapter == "tui" 或 null（broadcast）的訊息才顯示
+     * - AI 對話回應由 ChatDispatcher 直接更新 contentView，不走此路徑
+     * - appendCommandOutput 格式化指令輸出（有縮排/顏色區別）
+     */
+    @EventListener
+    public void on(OutgoingMessageEvent event) {
+        String target = event.targetAdapter();
+        if (!"tui".equals(target) && target != null) {
+            return; // 不是給 TUI 的訊息，忽略
         }
+        if (contentView == null || eventLoop == null) {
+            return; // TUI 尚未初始化（事件在 TUI run() 之前到達）
+        }
+        contentView.appendCommandOutput(event.text());
+        eventLoop.setDirty();
     }
 
     /**

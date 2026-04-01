@@ -21,7 +21,7 @@ class ChannelEventListenerTest {
         });
 
         var listener = new ChannelEventListener(registry);
-        listener.onOutgoingMessage(new OutgoingMessageEvent("telegram", "conv-1", "Hello!", List.of()));
+        listener.onOutgoingMessage(new OutgoingMessageEvent("telegram", "conv-1", "Hello!", List.of(), null));
 
         assertThat(sentMessages).hasSize(1);
         assertThat(sentMessages.getFirst().text()).isEqualTo("Hello!");
@@ -33,6 +33,6 @@ class ChannelEventListenerTest {
         var listener = new ChannelEventListener(registry);
 
         // Should not throw
-        listener.onOutgoingMessage(new OutgoingMessageEvent("unknown", "conv-1", "Hello!", List.of()));
+        listener.onOutgoingMessage(new OutgoingMessageEvent("unknown", "conv-1", "Hello!", List.of(), null));
     }
 }
