@@ -15,16 +15,13 @@ import io.github.samzhu.grimo.shared.sandbox.WorktreeProvisioner;
 import io.github.samzhu.grimo.shared.sandbox.WorktreeInfo;
 import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.config.GrimoConfig;
-import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
-import io.github.samzhu.grimo.shared.event.DevModeEnteredEvent;
-import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;
-import io.github.samzhu.grimo.shared.event.McpCatalogChangedEvent;
 import io.github.samzhu.grimo.home.GrimoHome;
 import io.github.samzhu.grimo.project.ProjectContext;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
+import io.github.samzhu.grimo.tui.TuiEventBridge;
 import org.springaicommunity.agents.client.AgentClient;
 import org.jline.terminal.Terminal;
 import org.slf4j.Logger;
@@ -32,7 +29,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
-import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
 import org.springframework.shell.core.command.CommandContext;
 import org.springframework.shell.core.command.CommandExecutor;
@@ -102,13 +98,13 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final TierKeywordDetector tierKeywordDetector;
     private final TierOptionsFactory tierOptionsFactory;
     private final AtomicReference<Tier> sessionTier;
+    private final TuiEventBridge tuiEventBridge;
 
     /** 本輪 tier（顯示用）：每次 processInput 重設 */
     private volatile TierSelection currentTierSelection;
 
     /** Status bar 元件（run 時初始化，需在 agent thread 中更新） */
     private StatusView statusView;
-    private String originalStatusText;
 
     /**
      * AI 對話併發控制：封裝在 AgentStateRef，供 TuiKeyHandler 在 Ctrl+C 時中斷 agent。
@@ -154,7 +150,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
                            TierRouter tierRouter,
                            TierKeywordDetector tierKeywordDetector,
                            TierOptionsFactory tierOptionsFactory,
-                           AtomicReference<Tier> sessionTier) {
+                           AtomicReference<Tier> sessionTier,
+                           TuiEventBridge tuiEventBridge) {
         this.terminal = terminal;
         this.grimoHome = grimoHome;
         this.projectContext = projectContext;
@@ -178,6 +175,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
         this.tierKeywordDetector = tierKeywordDetector;
         this.tierOptionsFactory = tierOptionsFactory;
         this.sessionTier = sessionTier;
+        this.tuiEventBridge = tuiEventBridge;
     }
 
     @Override
@@ -234,7 +232,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 + " │ " + (int) agentCount + " agent · " + skillCount + " skill · "
                 + mcpCount + " mcp · " + taskCount + " task";
         this.statusView = new StatusView(statusText);
-        this.originalStatusText = statusText;
 
         var menuItems = buildMenuItems();
         slashMenu = new SlashMenu(menuItems);
@@ -284,6 +281,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
         // StatusView 的暫時訊息消失後需要觸發重繪
         statusView.setDirtyCallback(() -> eventLoop.setDirty());
+
+        // 繫結 TUI 元件到 TuiEventBridge（domain events → TUI 更新）
+        tuiEventBridge.bind(statusView, contentView, () -> eventLoop.setDirty(), statusText);
 
         eventLoop.run();
 
@@ -473,7 +473,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                         agentState.agentRunning = false;
                         agentState.agentThread = null;
                         currentTierSelection = null;
-                        statusView.setStatusText(originalStatusText);
+                        statusView.setStatusText(tuiEventBridge.getOriginalStatusText());
                         screen.requestFullRedraw();
                         eventLoop.setDirty();
                     }
@@ -483,117 +483,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 contentView.appendError(e.getMessage());
             }
         }
-    }
-
-    /**
-     * 設計說明：Command → Event → TUI 解耦
-     * AgentCommands.use() publish event → 這裡自動刷新 status bar
-     * 不再需要 command 執行後手動呼叫 refreshStatusBar()
-     */
-    @EventListener
-    void on(AgentSwitchedEvent event) {
-        if (statusView == null) return; // TUI 尚未初始化
-        refreshStatusBar();
-        if (eventLoop != null) eventLoop.setDirty();
-    }
-
-    @EventListener
-    void on(McpCatalogChangedEvent event) {
-        if (statusView == null) return;
-        refreshStatusBar();
-        if (eventLoop != null) eventLoop.setDirty();
-    }
-
-    @EventListener
-    void on(DevModeEnteredEvent event) {
-        if (contentView == null) return;
-
-        var wtLine = new org.jline.utils.AttributedStringBuilder();
-        wtLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(2), "\u26a1 ");
-        wtLine.append("Dev Mode (" + event.branchName() + ")");
-        contentView.appendLine(wtLine.toAttributedString());
-
-        var statusLine = new org.jline.utils.AttributedStringBuilder();
-        statusLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
-                "  \u2514 Worktree created, agent working with full access...");
-        contentView.appendLine(statusLine.toAttributedString());
-
-        if (eventLoop != null) eventLoop.setDirty();
-    }
-
-    @EventListener
-    void on(DevModeCompletedEvent event) {
-        if (contentView == null) return;
-
-        float seconds = event.durationMs() / 1000f;
-
-        if (event.hasChanges()) {
-            var headerLine = new org.jline.utils.AttributedStringBuilder();
-            headerLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(2),
-                    "\u23fa Dev Mode completed (" + String.format("%.0fs", seconds) + ")");
-            contentView.appendLine(headerLine.toAttributedString());
-
-            var branchLine = new org.jline.utils.AttributedStringBuilder();
-            branchLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
-                    "  Branch: " + event.branchName());
-            contentView.appendLine(branchLine.toAttributedString());
-
-            if (!event.diffStat().isBlank()) {
-                for (String line : event.diffStat().split("\n")) {
-                    var diffLine = new org.jline.utils.AttributedStringBuilder();
-                    diffLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
-                            "  " + line.trim());
-                    contentView.appendLine(diffLine.toAttributedString());
-                }
-            }
-
-            var commitLine = new org.jline.utils.AttributedStringBuilder();
-            commitLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
-                    "  Commits: " + event.commitCount());
-            contentView.appendLine(commitLine.toAttributedString());
-
-            var mergeLine = new org.jline.utils.AttributedStringBuilder();
-            mergeLine.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(67),
-                    "  \u2192 git merge " + event.branchName());
-            contentView.appendLine(mergeLine.toAttributedString());
-        } else {
-            var line = new org.jline.utils.AttributedStringBuilder();
-            line.styled(org.jline.utils.AttributedStyle.DEFAULT.foreground(245),
-                    "\u23fa Dev Mode completed (" + String.format("%.0fs", seconds) + ") \u2014 no file changes");
-            contentView.appendLine(line.toAttributedString());
-        }
-
-        if (event.result() != null && !event.result().isBlank()) {
-            contentView.appendAiReply(event.result());
-        }
-
-        contentView.appendLine(org.jline.utils.AttributedString.EMPTY);
-        if (eventLoop != null) eventLoop.setDirty();
-    }
-
-    /**
-     * 從 config 重新讀取 agent/model，更新 status bar。
-     * /agent-use 等指令執行後呼叫，確保即時反映切換結果。
-     */
-    private void refreshStatusBar() {
-        String agentId = grimoConfig.getDefaultAgent();
-        if (agentId == null) agentId = resolveAgentId(List.of());
-        String model = grimoConfig.getAgentOption(agentId, "model");
-        if (model == null) model = grimoConfig.getDefaultModel();
-        if (model == null) model = AgentCommands.RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
-
-        String projectPath = projectContext.displayPath();
-        long agentCount = agentModelRegistry.listAll().values().stream()
-                .filter(m -> m.isAvailable()).count();
-        int skillCount = skillRegistry.listAll().size();
-        int mcpCount = grimoConfig.getMcpServers().size();
-        int taskCount = taskSchedulerService.getScheduledTaskIds().size();
-
-        String newStatus = agentId + " · " + model + " │ " + projectPath
-                + " │ " + (int) agentCount + " agent · " + skillCount + " skill · "
-                + mcpCount + " mcp · " + taskCount + " task";
-        this.originalStatusText = newStatus;
-        statusView.setStatusText(newStatus);
     }
 
     // === 載入步驟方法（靜默執行，無動畫）===
