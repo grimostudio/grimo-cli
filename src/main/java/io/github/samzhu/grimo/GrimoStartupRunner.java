@@ -1,23 +1,30 @@
 package io.github.samzhu.grimo;
 
+import io.github.samzhu.grimo.agent.detect.AgentModelFactory;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
 import io.github.samzhu.grimo.channel.ChannelEventListener;
 import io.github.samzhu.grimo.channel.ChannelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
+import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
+import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
 import io.github.samzhu.grimo.home.GrimoHome;
 import io.github.samzhu.grimo.project.ProjectContext;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.shared.sandbox.GitHelper;
 import io.github.samzhu.grimo.shared.sandbox.WorktreeProvisioner;
-import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import io.github.samzhu.grimo.task.store.MarkdownTaskStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.shell.core.command.CommandExecutor;
@@ -26,19 +33,25 @@ import org.springframework.shell.core.command.CommandRegistry;
 import java.nio.file.Path;
 
 /**
- * Bean 定義配置類別：定義所有運行時管理物件的 @Bean。
+ * Bean 定義配置類別：定義所有運行時管理物件的 @Bean，並執行啟動初始化邏輯。
  *
  * 設計說明：
  * - 所有 registry / manager 類別是普通 Java 物件，透過 @Bean 註冊為 Spring bean，
  *   使得 @Component 的 Commands 類別可以透過建構子注入取得依賴
- * - 啟動流程（動畫、偵測、banner、REPL loop）由 {@link GrimoTuiRunner} 負責
- * - ChannelEventListener 需要是 Spring bean 才能讓 @ApplicationModuleListener 生效
+ * - startupInitRunner bean：在 TUI 事件迴圈開始前（Order HIGHEST_PRECEDENCE + 1）執行靜默初始化：
+ *   Agent 偵測、Skill 載入、MCP catalog 建構、Task 恢復、Sandbox 偵測
+ * - GrimoTuiRunner（Order HIGHEST_PRECEDENCE）在初始化完成後再建構 TUI 元件和啟動 event loop
+ * - ChannelEventListener 需要是 Spring bean 才能讓 @EventListener 生效
  * - 舊版 AgentProviderRegistry / AgentDetector / McpClientManager / McpClientRegistry 已移除，
  *   改用 AgentModelRegistry（AgentModelFactory 偵測）和 McpCatalogBuilder（GrimoConfig 讀取）
+ *
+ * @see GrimoTuiRunner
  */
 @Configuration
 @EnableScheduling
 public class GrimoStartupRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(GrimoStartupRunner.class);
 
     // === Bean Definitions ===
     // 以下定義所有非 @Component 類別的 Spring bean，供各模組的 @Component Commands 類別注入使用
@@ -176,5 +189,75 @@ public class GrimoStartupRunner {
     org.springframework.shell.core.command.CommandParser commandParser(CommandRegistry commandRegistry) {
         return new SlashStrippingCommandParser(
                 new org.springframework.shell.core.command.DefaultCommandParser(commandRegistry));
+    }
+
+    /**
+     * 啟動靜默初始化 runner：在 GrimoTuiRunner（HIGHEST_PRECEDENCE）之前執行靜默初始化。
+     *
+     * 設計說明（為何用 ApplicationRunner 而非 @PostConstruct）：
+     * - @PostConstruct 在 bean 建立時執行，彼時 Spring context 未完全就緒（CommandRegistry 等可能尚未初始化）
+     * - ApplicationRunner 在 context 完全就緒後執行，確保所有 bean 都可用
+     * - Order(HIGHEST_PRECEDENCE + 1) 讓本 runner 在 GrimoTuiRunner(HIGHEST_PRECEDENCE) 之前執行，
+     *   確保 TUI 建構時已有 agent、skill、MCP 資料可用
+     *
+     * 初始化步驟：
+     * 1. GrimoHome 與 ProjectContext 初始化（確保目錄存在）
+     * 2. Agent 偵測並註冊到 AgentModelRegistry（Virtual Thread 並行偵測）
+     * 3. Skill 載入並註冊到 SkillRegistry
+     * 4. MCP catalog 建構（快取在 McpCatalogBuilder 內）
+     * 5. Task 從磁碟恢復排程
+     * 6. Sandbox 後端偵測（日誌記錄）
+     */
+    @Bean
+    @Order(Ordered.HIGHEST_PRECEDENCE + 1)
+    ApplicationRunner startupInitRunner(GrimoHome grimoHome,
+                                        ProjectContext projectContext,
+                                        AgentModelFactory agentModelFactory,
+                                        SkillLoader skillLoader,
+                                        SkillRegistry skillRegistry,
+                                        McpCatalogBuilder mcpCatalogBuilder,
+                                        TaskSchedulerService taskSchedulerService,
+                                        SandboxDetector sandboxDetector,
+                                        GrimoConfig grimoConfig) {
+        return args -> {
+            // Step 1: Home & Project 初始化
+            if (!grimoHome.isInitialized()) {
+                grimoHome.initialize();
+            }
+            projectContext.initialize();
+
+            // Step 2: Agent 偵測並註冊（Virtual Thread 並行偵測）
+            agentModelFactory.detectAndRegister(
+                    Path.of(System.getProperty("user.dir")));
+
+            // Step 3: Skill 載入
+            try {
+                var skills = skillLoader.loadAll();
+                skills.forEach(skill -> {
+                    skillRegistry.register(skill);
+                    log.info("Loaded skill: {}", skill.name());
+                });
+            } catch (Exception e) {
+                log.warn("Skill loading failed: {}", e.getMessage());
+            }
+
+            // Step 4: MCP catalog 初始建構（快取在 McpCatalogBuilder 內，/mcp-add 時自動 rebuild）
+            mcpCatalogBuilder.rebuild();
+            log.debug("MCP catalog built: {} servers [{}]",
+                    mcpCatalogBuilder.getServerNames().size(),
+                    String.join(", ", mcpCatalogBuilder.getServerNames()));
+
+            // Step 5: Task 從磁碟恢復排程
+            try {
+                taskSchedulerService.restoreAll();
+            } catch (Exception e) {
+                log.warn("Task restoration failed: {}", e.getMessage());
+            }
+
+            // Step 6: Sandbox 後端偵測
+            var sandboxResult = sandboxDetector.detect();
+            String sandboxMode = sandboxDetector.resolveMode(sandboxResult, grimoConfig.getSandboxMode());
+            log.info("Using sandbox mode: {}", sandboxMode);
+        };
     }
 }
