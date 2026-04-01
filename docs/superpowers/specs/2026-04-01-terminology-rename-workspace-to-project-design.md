@@ -42,7 +42,7 @@ SP4 完成後 `shared/` 模組完全消滅，所有子包已升為獨立 top-lev
 |--------|-------|------|------|
 | `shared.workspace.GrimoHome` | `home.GrimoHome` | 全域 app 資料 (~/.grimo) | 獨立關注點，所有模組間接使用 |
 | `shared.workspace.ProjectContext` | `project.ProjectContext` | CWD 專案身份 | 獨立關注點，session + tui 使用 |
-| `shared.config.GrimoConfig` | `config.GrimoConfig` | YAML 設定讀寫 | 獨立關注點，agent/mcp/task/channel 直接 import |
+| `shared.config.GrimoConfig` | `config.GrimoConfig` | YAML 設定讀寫 | 獨立關注點，agent/mcp 直接 import |
 
 > 設計說明：`ProjectContext` 的建構子依賴 `GrimoHome`（需要 `projectsDir()` 路徑）。提升後 `project/` 模組宣告 `allowedDependencies = { "home" }`。這是正常的基礎設施依賴，不是循環。
 
@@ -70,19 +70,23 @@ SP4 完成後 `shared/` 模組完全消滅，所有子包已升為獨立 top-lev
 
 ### 2. Modulith allowedDependencies 全面更新
 
-所有模組的 `"shared::workspace"` 和 `"shared::config"` 需改為 top-level 模組依賴：
+移除所有 `"shared::workspace"` 和 `"shared::config"`，替換為實際 import 的 top-level 模組。原則：**只宣告實際 import 的模組**（經 `grep` 驗證）。
 
-| 模組 | Before | After | 說明 |
-|------|--------|-------|------|
-| `agent` | `"shared::workspace", "shared::config"` | `"home", "config"` | AgentCommands/Configuration/TierRouter 直接 import GrimoConfig |
-| `skill` | `"shared::workspace", "shared::config"` | `"home"` | SkillLoader 透過 bean 取得 skillsDir；不直接 import GrimoConfig |
-| `task` | `"shared::workspace", "shared::config"` | `"home"` | MarkdownTaskStore 透過 bean 取得 tasksDir |
-| `mcp` | `"shared::workspace", "shared::config"` | `"config"` | McpCatalogBuilder/McpCommands 直接 import GrimoConfig |
-| `channel` | `"shared::workspace", "shared::config"` | `"config"` | 保留 config 依賴備用 |
-| `shared` | `"skill::loader"` | **(移除)** | 反向依賴消除後不再需要 |
-| `project` | (new) | `"home"` | ProjectContext 建構子需 GrimoHome |
+完整的 `allowedDependencies` 陣列（含未變更的部分）：
 
-> 設計說明：各模組的 `allowedDependencies` 只宣告**實際 import 的模組**。透過 `@Bean` 注入 `Path` 的間接使用不需要宣告。上表經 `grep` 驗證每個模組的實際 import。
+| 模組 | 移除 | 新增 | 完整 After |
+|------|------|------|-----------|
+| `agent` | `shared::workspace`, `shared::config` | `config` | `shared, shared::event, shared::session, shared::tui, shared::sandbox, config, mcp, skill::registry` |
+| `skill` | `shared::workspace`, `shared::config` | (無) | `shared, shared::event` |
+| `task` | `shared::workspace`, `shared::config` | (無) | `shared, shared::event` |
+| `mcp` | `shared::workspace`, `shared::config` | `config` | `shared, shared::event, config` |
+| `channel` | `shared::workspace`, `shared::config` | (無) | `shared, shared::event` |
+| `shared` | `skill::loader` | (無) | (無依賴) |
+| `project` (new) | — | `home` | `home` |
+| `home` (new) | — | — | (無依賴) |
+| `config` (new) | — | — | (無依賴) |
+
+> 設計說明：`skill`、`task`、`channel` 不直接 import `GrimoHome` 或 `GrimoConfig` — 它們透過 `@Bean` 注入 `Path` 物件取得路徑，不需要宣告這些依賴。`agent` 和 `mcp` 有直接 import `GrimoConfig` 的類別（經 grep 確認），所以加 `"config"`。
 
 ### 3. 消除 shared → skill::loader 反向依賴
 
