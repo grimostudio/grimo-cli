@@ -17,7 +17,7 @@ import java.util.List;
  * - 底部對齊渲染：內容少於 view 高度時，上方留空，內容靠底部顯示
  * - 內容超過 view 高度時，根據 scrollOffset 決定顯示範圍
  * - autoFollow 模式下新內容自動滾到底部
- * - 渲染統一由 GrimoScreen → Display.update() 處理（diff-based，不閃爍）
+ * - 渲染統一由 Screen → Display.update() 處理（diff-based，不閃爍）
  */
 public class ContentView implements Renderable {
 
@@ -191,7 +191,7 @@ public class ContentView implements Renderable {
     }
 
     /**
-     * 取得完整 wrapped line cache（供 GrimoScreen 組裝統一 buffer）。
+     * 取得完整 wrapped line cache（供 Screen 組裝統一 buffer）。
      */
     public synchronized List<BufferLine> getBufferLines(int cols) {
         if (cachedCols != cols) {

@@ -1,6 +1,5 @@
-package io.github.samzhu.grimo;
+package io.github.samzhu.grimo.tui.overlay;
 
-import io.github.samzhu.grimo.tui.overlay.McpPanel;
 import org.jline.utils.AttributedString;
 import org.junit.jupiter.api.Test;
 
@@ -10,7 +9,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class GrimoMcpManagerViewTest {
+class McpPanelTest {
 
     private Map<String, Map<String, Object>> twoServers() {
         var servers = new LinkedHashMap<String, Map<String, Object>>();

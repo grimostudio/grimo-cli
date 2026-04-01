@@ -12,14 +12,14 @@ import java.util.Map;
  * MCP Server 管理畫面的 overlay 資料模型 + render()。
  *
  * 設計說明：
- * - 跟隨 GrimoSlashMenuView 的 pattern（純資料 + render() 產出 List<AttributedString>）
+ * - 跟隨 SlashMenu 的 pattern（純資料 + render() 產出 List<AttributedString>）
  * - 不負責按鍵處理（由 GrimoTuiRunner.handleMcpManagerKey 負責）
  * - 不負責 config 寫入或 catalog 重建（由上層呼叫者負責）
  * - load() 重新載入 server 列表時自動 clamp selectedIndex
  */
 public class McpPanel {
 
-    /** 品牌標誌色 steel blue（ANSI 256 色碼 67），與 GrimoSlashMenuView 一致 */
+    /** 品牌標誌色 steel blue（ANSI 256 色碼 67），與 SlashMenu 一致 */
     private static final int BRAND_COLOR = 67;
     private static final AttributedStyle BRAND_STYLE = AttributedStyle.DEFAULT.foreground(BRAND_COLOR);
     private static final AttributedStyle DIM_STYLE = AttributedStyle.DEFAULT.foreground(245);

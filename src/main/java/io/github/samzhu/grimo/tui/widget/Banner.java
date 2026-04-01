@@ -22,7 +22,7 @@ public class Banner implements Renderable {
 
     @Override
     public List<AttributedString> render(int width) {
-        // Renderable 契約：BannerRenderer 需要額外參數，此方法供介面相容
+        // Renderable 契約：Banner 需要額外參數，此方法供介面相容
         // 實際渲染由 render(version, agentId, ..., cols) 處理
         return List.of();
     }

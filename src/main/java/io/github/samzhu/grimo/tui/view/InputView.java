@@ -15,7 +15,7 @@ import java.util.List;
  * - 支援 getText()/setText()/insertChar()/deleteChar()/游標移動
  * - 顯示 ❯ 前綴 + 使用者輸入文字
  * - 上下各有分隔線（共 3 行高）
- * - 渲染統一由 GrimoScreen → Display.update() 處理
+ * - 渲染統一由 Screen → Display.update() 處理
  */
 public class InputView implements Renderable {
 

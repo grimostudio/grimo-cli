@@ -1,11 +1,10 @@
-package io.github.samzhu.grimo;
+package io.github.samzhu.grimo.tui.view;
 
-import io.github.samzhu.grimo.tui.view.StatusView;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class GrimoStatusViewTest {
+class StatusViewTest {
 
     @Test
     void renderWithoutTierShouldShowPlainText() {

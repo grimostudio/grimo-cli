@@ -15,7 +15,7 @@ import java.util.List;
  * - 純資料模型 + render() 產出 List<AttributedString>
  * - 選中項以品牌標誌色（ANSI 256 色碼 67, #5F87AF steel blue）渲染
  * - 未選中項以預設色渲染
- * - 作為 overlay 渲染到 content 底部（由 GrimoScreen 負責覆蓋）
+ * - 作為 overlay 渲染到 content 底部（由 Screen 負責覆蓋）
  */
 public class SlashMenu implements Renderable {
 
