@@ -78,7 +78,10 @@
 | **DevModeCompletedEvent** | Dev Mode Completed Event | Dev Mode 完成時發布。TUI 顯示 diff summary + merge 提示。 |
 | **SessionEventListener** | Session Event Listener | `@EventListener` 監聽 `DevModeEnteredEvent` / `DevModeCompletedEvent`，透過 `SessionWriter` 寫入 dispatch 紀錄。遵循 event-driven 設計，`agent/` 模組不直接依賴 `shared/session/`。 |
 
-已有的 events：`IncomingMessageEvent`、`OutgoingMessageEvent`、`TaskExecutionEvent`
+| **AgentCallRecordedEvent** | Agent Call Recorded Event | GrimoSessionAdvisor 發布，SessionEventListener 監聽寫入 JSONL。解耦 advisor → SessionWriter 直接依賴。 |
+| **TuiEventBridge** | TUI Event Bridge | `@Component @EventListener`，橋接 domain events → TUI 更新（status bar、diff summary）。bind() 模式接收 runtime 建立的 TUI 元件。 |
+
+已有的 events：`IncomingMessageEvent`（統一輸入 port）、`OutgoingMessageEvent`（統一輸出 port）、`TaskExecutionEvent`
 
 ## 技術元件對應
 
@@ -126,10 +129,11 @@
 | Agent 路由 | `AgentRouter` | config default → 第一個可用 |
 | Agent 呼叫 | `AgentClient.builder(model).mcpServerCatalog().build().goal().run()` | CLI subprocess（claude / gemini / codex） |
 | Agent 配置 | `AgentConfiguration` | `@Configuration` + `AgentSpec` per CLI agent |
-| Advisor: Session | `GrimoSessionAdvisor` | `AgentCallAdvisor`（around-advice，記錄 goal/result） |
+| Advisor: Session | `GrimoSessionAdvisor` | `AgentCallAdvisor`（around-advice，發布 `AgentCallRecordedEvent`，SessionEventListener 監聽寫入 JSONL） |
 | Advisor: Validation | `GoalValidationAdvisor` | `AgentCallAdvisor`（阻擋危險操作） |
 | MCP 定義 | `McpCatalogBuilder` | `McpServerCatalog`（Portable MCP，config.yaml → AgentClient.Builder） |
-| 非阻塞對話 | `GrimoTuiRunner` | Virtual Thread + `eventLoop.setDirty()` 觸發重繪 |
+| 非阻塞對話 | `ChatDispatcher` | Virtual Thread + `eventLoop.setDirty()` 觸發重繪 |
+| 統一訊息路由 | `MessageRouter` | `@EventListener` IncomingMessageEvent → command/chat → OutgoingMessageEvent |
 | Tier 路由 | `TierRouter` | 6 級優先順序 → fallback list → `AgentModel.isAvailable()` |
 | Tier 選項 | `TierOptionsFactory` | `AgentClient.run(goal, agentOptions)` per-request model 覆寫 |
 | Tier 偵測 | `TierKeywordDetector` | config.yaml `tier-keywords` 字串比對 |
