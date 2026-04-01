@@ -1,6 +1,5 @@
 package io.github.samzhu.grimo.shared.sandbox;
 
-import io.github.samzhu.grimo.skill.loader.SkillDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,10 +45,10 @@ public class WorkspaceProvisioner {
      *
      * @param projectDir 使用者的專案目錄
      * @param taskId 任務 ID（用於分支名稱 grimo/<taskId>）
-     * @param skills 要配置的 skill 列表
+     * @param skillNames 要配置的 skill 名稱列表
      * @return WorktreeInfo 包含工作目錄、分支、baseSha、已配置 skill
      */
-    public WorktreeInfo provision(Path projectDir, String taskId, List<SkillDefinition> skills) {
+    public WorktreeInfo provision(Path projectDir, String taskId, List<String> skillNames) {
         // 嘗試建立 git worktree
         if (gitHelper.isGitRepo(projectDir)) {
             try {
@@ -67,7 +66,7 @@ public class WorkspaceProvisioner {
                 gitHelper.createWorktree(projectDir, worktreeDir, branchName);
 
                 // 在 worktree 裡配置 skills
-                List<String> provisioned = provisionSkills(worktreeDir, skills);
+                List<String> provisioned = provisionSkills(worktreeDir, skillNames);
 
                 return new WorktreeInfo(worktreeDir, branchName, baseSha, provisioned, true);
             } catch (Exception e) {
@@ -78,7 +77,7 @@ public class WorkspaceProvisioner {
         }
 
         // Fallback: CWD + symlink（現有行為）
-        List<String> provisioned = provisionSkills(projectDir, skills);
+        List<String> provisioned = provisionSkills(projectDir, skillNames);
         return new WorktreeInfo(projectDir, null, null, provisioned, false);
     }
 
@@ -124,8 +123,8 @@ public class WorkspaceProvisioner {
     /**
      * 將 skill symlink 到目標目錄的 .agents/skills/。
      */
-    private List<String> provisionSkills(Path targetDir, List<SkillDefinition> skills) {
-        if (skills.isEmpty()) return List.of();
+    private List<String> provisionSkills(Path targetDir, List<String> skillNames) {
+        if (skillNames.isEmpty()) return List.of();
 
         var provisioned = new ArrayList<String>();
         Path agentsSkillsDir = targetDir.resolve(AGENTS_SKILLS_DIR);
@@ -137,25 +136,25 @@ public class WorkspaceProvisioner {
             return List.of();
         }
 
-        for (var skill : skills) {
-            Path sourceSkillDir = skillsSourceDir.resolve(skill.name());
+        for (var name : skillNames) {
+            Path sourceSkillDir = skillsSourceDir.resolve(name);
             if (!Files.isDirectory(sourceSkillDir)) {
                 log.debug("Skill source directory not found, skipping: {}", sourceSkillDir);
                 continue;
             }
 
-            Path targetSkillDir = agentsSkillsDir.resolve(skill.name());
+            Path targetSkillDir = agentsSkillsDir.resolve(name);
             if (Files.exists(targetSkillDir)) {
-                log.warn("Skill '{}' already exists in .agents/skills/, skipping Grimo version", skill.name());
+                log.warn("Skill '{}' already exists in .agents/skills/, skipping Grimo version", name);
                 continue;
             }
 
             try {
                 Files.createSymbolicLink(targetSkillDir, sourceSkillDir);
-                provisioned.add(skill.name());
-                log.debug("Symlinked skill: {} -> {}", skill.name(), sourceSkillDir);
+                provisioned.add(name);
+                log.debug("Symlinked skill: {} -> {}", name, sourceSkillDir);
             } catch (IOException e) {
-                log.warn("Failed to symlink skill '{}': {}", skill.name(), e.getMessage());
+                log.warn("Failed to symlink skill '{}': {}", name, e.getMessage());
             }
         }
 

@@ -103,8 +103,9 @@ public class DevModeRunner {
                 TierOptionsFactory.ExecutionMode.DEV);
 
         // 建 worktree
-        var worktree = workspaceProvisioner.provision(
-                projectDir, taskId, skillRegistry.listAll());
+        var skillNames = skillRegistry.listAll().stream()
+                .map(io.github.samzhu.grimo.skill.loader.SkillDefinition::name).toList();
+        var worktree = workspaceProvisioner.provision(projectDir, taskId, skillNames);
 
         // 發布進入事件
         eventPublisher.publishEvent(new DevModeEnteredEvent(

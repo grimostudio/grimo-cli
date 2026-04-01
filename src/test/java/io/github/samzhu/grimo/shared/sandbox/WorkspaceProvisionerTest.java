@@ -1,6 +1,5 @@
 package io.github.samzhu.grimo.shared.sandbox;
 
-import io.github.samzhu.grimo.skill.loader.SkillDefinition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -9,7 +8,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -70,7 +68,7 @@ class WorkspaceProvisionerTest {
         setupSkillSource("code-review");
 
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
-        var info = provisioner.provision(repo, "task-001", List.of(testSkill("code-review")));
+        var info = provisioner.provision(repo, "task-001", List.of("code-review"));
         createdWorktrees.add(info);
 
         assertThat(info.isWorktree()).isTrue();
@@ -102,7 +100,7 @@ class WorkspaceProvisionerTest {
         setupSkillSource("code-review");
 
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
-        var info = provisioner.provision(repo, "task-003", List.of(testSkill("code-review")));
+        var info = provisioner.provision(repo, "task-003", List.of("code-review"));
         createdWorktrees.add(info);
         Path worktreeDir = info.workDir();
 
@@ -139,7 +137,7 @@ class WorkspaceProvisionerTest {
         setupSkillSource("code-review");
 
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
-        var info = provisioner.provision(nonGitDir, "task-005", List.of(testSkill("code-review")));
+        var info = provisioner.provision(nonGitDir, "task-005", List.of("code-review"));
 
         assertThat(info.isWorktree()).isFalse();
         assertThat(info.workDir()).isEqualTo(nonGitDir);
@@ -157,7 +155,7 @@ class WorkspaceProvisionerTest {
         setupSkillSource("code-review");
 
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
-        var info = provisioner.provision(nonGitDir, "task-006", List.of(testSkill("code-review")));
+        var info = provisioner.provision(nonGitDir, "task-006", List.of("code-review"));
         provisioner.cleanup(info, nonGitDir);
 
         assertThat(Files.exists(nonGitDir.resolve(".agents/skills/code-review"))).isFalse();
@@ -206,7 +204,7 @@ class WorkspaceProvisionerTest {
         setupSkillSource("code-review");
 
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
-        var info = provisioner.provision(repo, "task-008", List.of(testSkill("code-review")));
+        var info = provisioner.provision(repo, "task-008", List.of("code-review"));
         createdWorktrees.add(info);
 
         // 使用者的 skill 應該優先（不被 Grimo 覆蓋）
@@ -221,7 +219,7 @@ class WorkspaceProvisionerTest {
         setupSkillSource("code-review");
 
         var provisioner = new WorkspaceProvisioner(skillsSourceDir, new GitHelper());
-        var info = provisioner.provision(repo, "task-pure", List.of(testSkill("code-review")));
+        var info = provisioner.provision(repo, "task-pure", List.of("code-review"));
         createdWorktrees.add(info);
 
         // agent 沒改任何檔案，只有 Grimo 的 symlinks
@@ -259,8 +257,4 @@ class WorkspaceProvisionerTest {
         Files.writeString(skillDir.resolve("SKILL.md"), "---\nname: " + name + "\n---\n# " + name);
     }
 
-    private SkillDefinition testSkill(String name) {
-        return new SkillDefinition(name, "Test skill", null, null, List.of(), Map.of(),
-            null, null, null, null, null, null, null, List.of(), null, "# Test");
-    }
 }
