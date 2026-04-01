@@ -1,6 +1,7 @@
 @org.springframework.modulith.ApplicationModule(
     allowedDependencies = {
-        "shared", "shared::event", "shared::session", "shared::tui", "shared::sandbox",
+        "shared", "shared::event", "shared::session", "shared::sandbox",
+        "tui::widget",
         "config", "mcp", "skill::registry", "skill::loader"
     }
 )
