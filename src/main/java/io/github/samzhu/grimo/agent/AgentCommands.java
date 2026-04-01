@@ -3,7 +3,6 @@ package io.github.samzhu.grimo.agent;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
-import io.github.samzhu.grimo.tui.widget.Table;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
@@ -75,22 +74,16 @@ public class AgentCommands {
                     .findFirst().orElse("");
         }
 
-        var table = Table.builder()
-                .column("", 2)           // indicator
-                .column("ID", 10)        // agent name
-                .column("STATUS", 10)    // ready / not available
-                .column("MODEL", 0);     // fill remaining
-
+        var sb = new StringBuilder();
         for (var entry : models.entrySet()) {
             String id = entry.getKey();
             String indicator = id.equals(defaultAgent) ? "> " : "  ";
             String status = entry.getValue().isAvailable() ? "ready" : "not available";
             String model = config.getAgentOption(id, "model");
             if (model == null) model = RECOMMENDED_MODELS.getOrDefault(id, "");
-            table.row(indicator, id, status, model);
+            sb.append(String.format("%s%-10s %-14s %s%n", indicator, id, status, model));
         }
-
-        return table.build(60);
+        return sb.toString().stripTrailing();
     }
 
     /**

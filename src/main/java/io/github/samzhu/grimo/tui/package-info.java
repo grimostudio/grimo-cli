@@ -12,13 +12,12 @@
  */
 @org.springframework.modulith.ApplicationModule(
     allowedDependencies = {
-        "shared",
-        "agent::registry",
-        "config",
+        "shared", "shared::event", "shared::session",
+        "agent", "agent::registry",
+        "config", "mcp",
         "skill::registry",
         "task::scheduler",
-        "project",
-        "agent"
+        "project"
     }
 )
 package io.github.samzhu.grimo.tui;
