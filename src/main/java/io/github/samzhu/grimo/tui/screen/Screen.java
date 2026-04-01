@@ -8,6 +8,7 @@ import org.jline.utils.AttributedStyle;
 import org.jline.utils.Display;
 
 import io.github.samzhu.grimo.tui.core.Layout;
+import io.github.samzhu.grimo.tui.core.Renderable;
 import io.github.samzhu.grimo.tui.overlay.McpPanel;
 import io.github.samzhu.grimo.tui.overlay.SlashMenu;
 import io.github.samzhu.grimo.tui.selection.SelectionRange;
@@ -54,6 +55,7 @@ public class Screen {
     private List<BufferLine> screenBuffer;
     private volatile boolean slashMenuVisible = false;
     private volatile boolean mcpManagerVisible = false;
+    private volatile Renderable selectOverlay;
     private volatile boolean forceFullRedraw = false;
 
     public Screen(Terminal terminal, ContentView contentView,
@@ -90,6 +92,24 @@ public class Screen {
 
     public boolean isMcpManagerVisible() {
         return mcpManagerVisible;
+    }
+
+    /**
+     * 設定 select overlay（ListSelect 或 GroupedSelect）。
+     * 設定時自動關閉其他 overlay（互斥）。
+     */
+    public void setSelectOverlay(Renderable overlay) {
+        this.slashMenuVisible = false;
+        this.mcpManagerVisible = false;
+        this.selectOverlay = overlay;
+    }
+
+    public void clearSelectOverlay() {
+        this.selectOverlay = null;
+    }
+
+    public boolean hasSelectOverlay() {
+        return selectOverlay != null;
     }
 
     /**
@@ -236,6 +256,20 @@ public class Screen {
                 }
             }
         }
+
+        // 4. Select overlay (ListSelect / GroupedSelect)
+        if (selectOverlay != null) {
+            List<AttributedString> selectLines = selectOverlay.render(cols);
+            int selectHeight = selectLines.size();
+            int overlayStart = contentLines.size() - selectHeight;
+            for (int i = 0; i < selectHeight; i++) {
+                int targetRow = overlayStart + i;
+                if (targetRow >= 0 && targetRow < contentLines.size()) {
+                    contentLines.set(targetRow, selectLines.get(i));
+                }
+            }
+        }
+
         allLines.addAll(contentLines);
 
         // 4. Input 區（固定 3 行）
