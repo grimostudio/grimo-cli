@@ -40,7 +40,7 @@ public class BannerRenderer implements TuiComponent {
      * @param version       應用版本號（如 "0.1.0" 或 "dev"）
      * @param agentId       當前使用的 Agent ID（如 "claude-cli"）
      * @param model         當前使用的模型名稱（如 "sonnet"）
-     * @param workspacePath 工作目錄路徑
+     * @param projectPath 當前專案路徑
      * @param agentCount    偵測到的可用 Agent 數量
      * @param skillCount    已載入的 Skill 數量
      * @param mcpCount      已連線的 MCP Server 數量
@@ -49,7 +49,7 @@ public class BannerRenderer implements TuiComponent {
      * @return 含 ANSI 色碼的多行 banner 字串
      */
     public String render(String version, String agentId, String model,
-                         String workspacePath, int agentCount, int skillCount, int mcpCount, int taskCount,
+                         String projectPath, int agentCount, int skillCount, int mcpCount, int taskCount,
                          int cols) {
         // 設計說明：用 Layout.horizontal 將每行切成 mascot + gap + info 三欄
         // mascot 純文字寬度先測量，再套 ANSI 色碼
@@ -77,7 +77,7 @@ public class BannerRenderer implements TuiComponent {
         String[] info = {
                 WHITE + "Grimo" + RESET + " " + GRAY + "v" + version + RESET,
                 GRAY + agentId + " · " + model + RESET,
-                GRAY + workspacePath + RESET,
+                GRAY + projectPath + RESET,
                 GRAY + agentCount + " agent · " + skillCount + " skill · "
                         + mcpCount + " mcp · " + taskCount + " task" + RESET,
                 ""  // feet 行沒有 info

@@ -11,7 +11,7 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Status 區：顯示 agent/model/workspace/計數資訊（1 行）。
+ * Status 區：顯示 agent/model/project/計數資訊（1 行）。
  *
  * 設計說明：
  * - 一般對話：灰色文字

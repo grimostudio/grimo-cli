@@ -86,7 +86,7 @@ public class GrimoStartupRunner {
     }
 
     /**
-     * SkillCommands 需要注入 Path skillsDir，此 bean 提供 workspace 下的 skills 目錄路徑。
+     * SkillCommands 需要注入 Path skillsDir，此 bean 提供 GrimoHome 的 skills 目錄路徑。
      */
     @Bean
     Path skillsDir(GrimoHome grimoHome) {

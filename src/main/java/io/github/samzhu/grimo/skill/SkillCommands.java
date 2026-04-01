@@ -56,7 +56,7 @@ public class SkillCommands {
     }
 
     /**
-     * Installs a skill by cloning its Git repository into the workspace skills directory,
+     * Installs a skill by cloning its Git repository into the ~/.grimo/skills directory,
      * then loads and registers the SKILL.md definition found in the cloned repo.
      * Convention: repository name prefix 'grimo-skill-' is stripped for the skill directory name.
      */

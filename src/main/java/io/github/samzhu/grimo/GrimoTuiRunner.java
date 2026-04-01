@@ -176,7 +176,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
-        // === Phase 1: Workspace 初始化 ===
+        // === Phase 1: Home & Project 初始化 ===
         if (!grimoHome.isInitialized()) {
             grimoHome.initialize();
         }
@@ -207,7 +207,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
         String model = grimoConfig.getAgentOption(agentId, "model");
         if (model == null) model = grimoConfig.getDefaultModel();
         if (model == null) model = AgentCommands.RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
-        String workspacePath = projectContext.displayPath();
+        String projectPath = projectContext.displayPath();
         long agentCount = agentResults.stream()
                 .filter(AgentModelFactory.DetectionResult::available).count();
         int skillCount = skillRegistry.listAll().size();
@@ -217,14 +217,14 @@ public class GrimoTuiRunner implements ApplicationRunner {
         // === Phase 4: 建構 TUI 元件 ===
         contentView = new GrimoContentView();
         String bannerText = bannerRenderer.render(
-                version, agentId, model, workspacePath,
+                version, agentId, model, projectPath,
                 (int) agentCount, skillCount, mcpCount, taskCount,
                 terminal.getWidth());
         contentView.setBannerText(bannerText);
 
         inputView = new GrimoInputView();
 
-        String statusText = agentId + " · " + model + " │ " + workspacePath
+        String statusText = agentId + " · " + model + " │ " + projectPath
                 + " │ " + (int) agentCount + " agent · " + skillCount + " skill · "
                 + mcpCount + " mcp · " + taskCount + " task";
         this.statusView = new GrimoStatusView(statusText);
@@ -852,14 +852,14 @@ public class GrimoTuiRunner implements ApplicationRunner {
         if (model == null) model = grimoConfig.getDefaultModel();
         if (model == null) model = AgentCommands.RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
 
-        String workspacePath = projectContext.displayPath();
+        String projectPath = projectContext.displayPath();
         long agentCount = agentModelRegistry.listAll().values().stream()
                 .filter(m -> m.isAvailable()).count();
         int skillCount = skillRegistry.listAll().size();
         int mcpCount = grimoConfig.getMcpServers().size();
         int taskCount = taskSchedulerService.getScheduledTaskIds().size();
 
-        String newStatus = agentId + " · " + model + " │ " + workspacePath
+        String newStatus = agentId + " · " + model + " │ " + projectPath
                 + " │ " + (int) agentCount + " agent · " + skillCount + " skill · "
                 + mcpCount + " mcp · " + taskCount + " task";
         this.originalStatusText = newStatus;

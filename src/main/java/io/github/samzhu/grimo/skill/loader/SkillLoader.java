@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 /**
- * 從 workspace skills 目錄載入 SKILL.md，解析為 SkillDefinition。
+ * 從 ~/.grimo/skills 目錄載入 SKILL.md，解析為 SkillDefinition。
  *
  * 設計說明：
  * - 對齊 Agent Skills 開放標準（agentskills.io/specification）的 SKILL.md 格式
