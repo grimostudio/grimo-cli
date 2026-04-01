@@ -1,4 +1,4 @@
 @org.springframework.modulith.ApplicationModule(
-    allowedDependencies = { "shared", "shared::event", "shared::config", "shared::workspace" }
+    allowedDependencies = { "shared", "shared::event" }
 )
 package io.github.samzhu.grimo.channel;

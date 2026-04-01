@@ -1,4 +1,4 @@
 @org.springframework.modulith.ApplicationModule(
-    allowedDependencies = { "shared", "shared::event", "shared::config", "shared::workspace" }
+    allowedDependencies = { "shared", "shared::event", "config" }
 )
 package io.github.samzhu.grimo.mcp;

@@ -1,4 +1,2 @@
-@org.springframework.modulith.ApplicationModule(
-    allowedDependencies = { "skill::loader" }
-)
+@org.springframework.modulith.ApplicationModule
 package io.github.samzhu.grimo.shared;
