@@ -1,171 +1,128 @@
-# ListSelect Widget + /agent-use 互動化
+# ListSelect + GroupedSelect Widget 設計
 
-> Sub-project 3 of 4: TUI 重構系列。設計通用單選 widget，並應用於 `/agent-use` 互動指令。
+> Sub-project 3 of 4: TUI 重構系列。設計可復用的選擇 widget — 平面清單和分群清單共享統一操作體驗。
 
 ## 目標
 
-1. 設計 `ListSelect<T>` 通用單選 widget（`tui/widget/`）
-2. `/agent-use`（無參數）觸發互動選擇器
-3. 為 SP3 後續擴充（GroupedSelect、其他互動指令）建立基礎
+1. `ListSelect<T>` — 通用單選列表（平面）
+2. `GroupedSelect<T>` — 分群選擇（category → item，tmux tree → flat pattern）
+3. 統一操作體驗 — 相同的視覺語言、導航方式、scroll hints
+4. `/agent-use` 使用 GroupedSelect（agent → model 兩層選擇）
 
 ## 背景
+
+### 終端 UI 研究
+
+| 來源 | 關鍵設計模式 | 採用 |
+|------|-------------|------|
+| **tmux** `mode-tree` | callback-driven、tree → flat list → render visible、state preservation across rebuilds | ✅ `setItems()` + `RowRenderer` + GroupedSelect flatten |
+| **Claude Code** `CustomSelect` | viewport scrolling、scroll hints、`OptionWithDescription<T>`、linear nav | ✅ 全部採用 |
+| **Charm Bubbles** `list` | Model-Update-View、composable features | ✅ 純狀態+渲染、input routing 在 controller |
+
+> 參考來源：
+> - tmux: [mode-tree.c](https://github.com/tmux/tmux/blob/master/mode-tree.c)
+> - Charm Bubbles: [github.com/charmbracelet/bubbles](https://github.com/charmbracelet/bubbles)
+> - Claude Code: `CustomSelect/select.tsx`
 
 ### 現有 widget 缺口
 
 | 現有 widget | 限制 |
 |------------|------|
-| `Selector` | 純靜態渲染，無狀態管理、無 viewport scrolling |
-| `SlashMenu` | 有狀態但跟斜線指令綁死，不可復用 |
+| `Selector` | 純靜態渲染，無狀態管理、無 viewport |
+| `SlashMenu` | 有狀態但跟斜線指令綁死 |
 | `McpPanel` | 有狀態但跟 MCP 管理綁死 |
-
-需要一個**通用的、有狀態的、可復用的**選擇 widget。
-
-### 終端 UI 研究啟發
-
-| 來源 | 關鍵設計模式 | Grimo 採用 |
-|------|-------------|-----------|
-| **Claude Code** `CustomSelect` | Viewport scrolling、scroll hints、`OptionWithDescription<T>`、linear nav（不 wrap） | ✅ 全部採用 |
-| **tmux** `mode-tree` | callback-driven 架構、兩階段渲染（build flat list → render visible）、state preservation across rebuilds | ✅ `setItems()` 動態更新 + index 保留；GroupedSelect 未來用 flatten pattern |
-| **Charm Bubbles** `list` | Elm 架構（Model-Update-View）、composable features（filter/pagination 可 toggle） | ✅ 純狀態+渲染（不處理 input）= Model+View，input routing 在 controller |
-| **Ghostty** | 使用原生 platform UI（SwiftUI/GTK），不自建 TUI widget | 不適用（Grimo 是 CLI app） |
-
-> 參考來源：
-> - Claude Code: `CustomSelect/select.tsx`
-> - tmux: `mode-tree.c` — [source](https://github.com/tmux/tmux/blob/master/mode-tree.c)
-> - Charm Bubbles: [github.com/charmbracelet/bubbles](https://github.com/charmbracelet/bubbles)
 
 ## 設計
 
-### 1. ListSelect\<T\> Widget
+### 1. 統一操作體驗
+
+不論 ListSelect 或 GroupedSelect，使用者看到**一致的視覺和操作**：
+
+| 元素 | 規格 |
+|------|------|
+| 選中項 | `>` 前綴 + BRAND_COLOR (67) steel blue |
+| 一般項 | 空格前綴 + 預設色，description 灰色 (245) |
+| Scroll hint | `↑ N more` / `↓ N more` 灰色 (245)，佔 maxVisible 行 |
+| 導航 | ↑↓ 移動、Enter 確認/展開、Esc 取消 |
+| Navigation | Linear（不循環）、Home/End 跳頭尾 |
+| maxVisible | 預設 7 |
+| Viewport | 跟隨 selectedIndex 滾動 |
+
+### 2. ListSelect\<T\>
 
 **位置：** `tui/widget/ListSelect.java`
-
-**設計參考：**
-- tmux `mode-tree` — callback-driven + 兩階段渲染（build flat list → render visible range）+ state preservation across rebuilds
-- Charm Bubbles `list` — composable features、pagination、可 toggle 的 filter/description
-- Claude Code `CustomSelect` — viewport scrolling、scroll hints、OptionWithDescription
 
 ```java
 /**
  * 通用單選列表 widget。
  *
  * 設計說明：
- * - Generic <T> 讓 consumer 攜帶任意值（agentId, model, tier...）
- * - Viewport scrolling：列表超過 maxVisible 時，viewport 跟隨 selectedIndex
- * - Scroll hints：↑/↓ 指示隱藏的項目數量（佔 maxVisible 行數）
- * - Linear navigation：到頂/底不循環（對齊 Claude Code，不同於 SlashMenu 的 wrap）
- * - setItems() 支援動態更新（tmux rebuild pattern），保留 selectedIndex
- * - 純狀態 + 渲染，不處理鍵盤（EventLoop 層轉發 ↑↓/Enter/Esc）
+ * - Generic <T> 讓 consumer 攜帶任意值
+ * - RowRenderer 可自訂每行渲染（tmux drawcb pattern）
+ * - setItems() 動態更新（tmux rebuild pattern），保留 selectedIndex
+ * - 純狀態 + 渲染，不處理鍵盤（controller 層轉發）
  *
- * 未來 GroupedSelect 可包裝 ListSelect：
- *   tree → flatten to Item list → setItems() → 展開/收合只是 rebuild items
- *
- * @see <a href="https://github.com/tmux/tmux/blob/master/mode-tree.c">tmux mode-tree.c</a>
- * @see <a href="https://github.com/charmbracelet/bubbles">Charm Bubbles list component</a>
+ * @see <a href="https://github.com/tmux/tmux/blob/master/mode-tree.c">tmux mode-tree</a>
  */
 public class ListSelect<T> implements Renderable {
 
-    /** 選項：顯示用 label + 說明 + 邏輯值 */
     public record Item<T>(String label, String description, T value) {}
 
+    @FunctionalInterface
+    public interface RowRenderer<T> {
+        AttributedString render(Item<T> item, boolean selected, int width);
+    }
+
     private List<Item<T>> items;
-    private final int maxVisible;
+    private final int maxVisible;       // 預設 7
     private int selectedIndex = 0;
     private int viewportStart = 0;
+    private RowRenderer<T> rowRenderer;  // null = 預設渲染
 
     public ListSelect(List<Item<T>> items, int maxVisible);
 
-    // === 動態更新（tmux rebuild pattern）===
+    // === 自訂渲染（tmux drawcb）===
+    public void setRowRenderer(RowRenderer<T> renderer);
 
-    /**
-     * 更新 item 列表。保留 selectedIndex（若仍在範圍內），否則 clamp 到最後一項。
-     * 用於：agent 偵測完成後更新列表、filter 結果變更等。
-     */
-    public void setItems(List<Item<T>> items);
+    // === 動態更新（tmux rebuild）===
+    public void setItems(List<Item<T>> items);  // 保留 index，clamp if needed
 
     // === 導航 ===
-
-    /** 選中項上移。到頂不循環（linear）。viewport 跟隨。 */
-    public void moveUp();
-    /** 選中項下移。到底不循環（linear）。viewport 跟隨。 */
-    public void moveDown();
-    /** 跳到第一項（Home）。 */
-    public void moveToFirst();
-    /** 跳到最後一項（End）。 */
-    public void moveToLast();
+    public void moveUp();       // linear，到頂不循環
+    public void moveDown();     // linear，到底不循環
+    public void moveToFirst();  // Home
+    public void moveToLast();   // End
 
     // === 查詢 ===
-
-    /** 取得目前選中的 Item，列表空回傳 null */
     public Item<T> getSelected();
-    /** 取得 selectedIndex（consumer 可用於外部狀態同步） */
     public int getSelectedIndex();
     public boolean isEmpty();
-    /** 實際渲染高度 = min(items.size(), maxVisible)。overlay 高度計算用。 */
-    public int getVisibleCount();
+    public int getVisibleCount();  // min(items.size(), maxVisible)
 
     // === 渲染 ===
-
-    /** 渲染選擇列表。每行 columnLength == width。含 scroll hints。 */
     @Override
     public List<AttributedString> render(int width);
 }
 ```
 
-**可覆用場景一覽：**
-
-| 場景 | Item\<T\> 的 T | label | description |
-|------|----------------|-------|-------------|
-| `/agent-use` | `String` (agentId) | `"claude"` | `"Claude Sonnet 4.6"` |
-| `/tier`（未來） | `Tier` (enum) | `"pro"` | `"深度推理 — claude-opus-4-6"` |
-| `/skill-install`（未來） | `SkillDef` | `"code-review"` | `"Code review skill"` |
-| GroupedSelect 展開（未來） | `String` (modelId) | `"  claude-opus-4-6"` | `"Deep reasoning"` |
-
-> 設計說明：GroupedSelect 的 expand/collapse 實現方式 = 重建 items 列表再 `setItems()`（tmux pattern：tree → flat list → render）。不需新增 expand/collapse 到 ListSelect — 那是 GroupedSelect 的職責。
-
-### 2. 渲染規格
-
-**渲染範例（maxVisible=7，共 8 項，selectedIndex=3，viewportStart=1）：**
-
+**預設渲染格式：**
 ```
-  ↑ 1 more                          ← scroll hint（灰色，上方有 1 項隱藏）
-  gemini        Gemini 2.5 Pro      ← 一般項（預設色）
-> claude        Claude Sonnet 4.6   ← 選中項（BRAND_COLOR 67 + `>` 前綴）
-  codex         OpenAI Codex        ← 一般項
-  ollama        Local Ollama        ← 一般項
-  local-llm     Local LLM           ← 一般項
-  ↓ 1 more                          ← scroll hint（下方有 1 項隱藏）
+  label          description      ← 一般項（description 灰色）
+> label          description      ← 選中項（整行 BRAND_COLOR）
 ```
 
-**渲染規則：**
-- 每行格式：`前綴(2) + label(固定寬) + gap(2) + description(填滿，灰色 ANSI 245)`
-  - 選中項前綴 `> `，其他 `  `
-  - label 欄寬用 `Layout.horizontal(width, 2, Fixed(labelMaxWidth+2), Fill())` 計算
-- Scroll hint 格式：`  ↑ N more` / `  ↓ N more`，灰色（ANSI 245）
-- Scroll hint **佔用 maxVisible 行數**（不是額外的）— overlay 高度固定
-- `scrollHintCount` = 上下隱藏項的 hint 數量之和（0、1 或 2）：
-  - 上方有隱藏項 → 顯示 `↑ N more`，佔 1 行
-  - 下方有隱藏項 → 顯示 `↓ N more`，佔 1 行
-  - 都沒有隱藏 → 不顯示 hint，0 行
-- `visibleItemSlots = maxVisible - scrollHintCount`（item 實際可用行數）
-- 空列表渲染 0 行
-- `getVisibleCount()` 回傳 `min(items.size(), maxVisible)` — overlay 高度計算用
+Layout：`前綴(2) + label(固定寬) + gap(2) + description(填滿)`
 
-**Viewport scrolling 邏輯：**
+**Scroll hints（佔 maxVisible 行）：**
+- `scrollHintCount` = 0、1 或 2（上/下各看是否有隱藏項）
+- `visibleItemSlots = maxVisible - scrollHintCount`
+- hints 佔位是動態的：列表頂部只有 `↓`，中間兩個，底部只有 `↑`
 
+**Viewport scrolling：**
 ```
-每次 moveUp/moveDown 後重新計算 scrollHintCount 和 visibleItemSlots：
-
-scrollHintCount:
-  hasAbove = (viewportStart > 0)
-  hasBelow = (viewportStart + visibleItemSlots < items.size())
-  scrollHintCount = (hasAbove ? 1 : 0) + (hasBelow ? 1 : 0)
-
-visibleItemSlots = maxVisible - scrollHintCount
-
 moveDown():
   selectedIndex = min(selectedIndex + 1, items.size() - 1)
-  重新計算 scrollHintCount / visibleItemSlots
+  recalc scrollHintCount
   if selectedIndex >= viewportStart + visibleItemSlots:
       viewportStart = selectedIndex - visibleItemSlots + 1
 
@@ -173,137 +130,233 @@ moveUp():
   selectedIndex = max(selectedIndex - 1, 0)
   if selectedIndex < viewportStart:
       viewportStart = selectedIndex
-  重新計算 scrollHintCount / visibleItemSlots
+  recalc scrollHintCount
 ```
 
-### 3. Overlay 整合
+### 3. GroupedSelect\<T\>
 
-**遵循現有 overlay 模式**（SlashMenu / McpPanel 的做法）：
-
-**Screen.java 新增：**
-- field: `private ListSelect<?> listSelect`
-- setter: `setListSelect(ListSelect<?> listSelect)` — 設定要顯示的 ListSelect 實例
-- `setListSelectVisible(boolean visible)` — 設定為 true 時**同時關閉 slashMenu/mcpPanel**（overlay 互斥）
-- `isListSelectVisible()`
-- render() 中新增 overlay 分支（跟 slashMenu/mcpPanel 並行，互斥）
-
-**GrimoTuiRunner.java 新增：**
-- field: `private ListSelect<String> agentListSelect`（agent 選擇用）
-- `TuiKeyHandler` 新增 overlay 分支：
+**位置：** `tui/widget/GroupedSelect.java`
 
 ```java
-// 在現有的 slash menu / mcp panel 分支之後
-if (screen.isListSelectVisible()) {
-    handleListSelectInput(op);
-    return;
+/**
+ * 分群選擇 widget — category → item 兩層。
+ *
+ * 設計說明：
+ * - 組合 ListSelect（不繼承），注入自訂 RowRenderer
+ * - tmux tree → flat pattern：展開/收合 = rebuild flat list → setItems()
+ * - 同一時間只展開一個 group（accordion 模式）
+ * - Enter on group → toggle；Enter on leaf → select
+ *
+ * @see <a href="https://github.com/tmux/tmux/blob/master/mode-tree.c">tmux mode-tree</a>
+ */
+public class GroupedSelect<T> implements Renderable {
+
+    public record Group<T>(String label, List<ListSelect.Item<T>> children) {}
+
+    private final List<Group<T>> groups;
+    private final ListSelect<T> listSelect;  // 內部組合
+    private int expandedGroupIndex = -1;      // -1 = 全部收合
+
+    // 追蹤 flat list 中哪些行是 group header
+    private List<Boolean> isGroupRow;
+
+    public GroupedSelect(List<Group<T>> groups, int maxVisible);
+
+    // === 導航（委派）===
+    public void moveUp();
+    public void moveDown();
+    public void moveToFirst();
+    public void moveToLast();
+
+    // === Group 操作 ===
+    /** Enter 鍵：在 group → toggle expand/collapse；在 leaf → 不做事（consumer 取 getSelected） */
+    public void toggle();
+
+    // === 查詢 ===
+    public boolean isOnGroup();           // 游標在 group header 上？
+    public ListSelect.Item<T> getSelected();  // leaf item，null if on group
+    public boolean isEmpty();
+    public int getVisibleCount();
+
+    // === 渲染（委派 + 自訂 RowRenderer）===
+    @Override
+    public List<AttributedString> render(int width);
 }
 ```
 
+**Accordion 模式：** 同一時間只展開一個 group。展開 B 時自動收合 A。這讓 maxVisible=7 的空間足以顯示展開的 children。
+
+**Flatten 邏輯（rebuild）：**
+```
+for each group:
+  add group header item (▶ or ▼ prefix)
+  if expanded:
+    add all children items (indented)
+
+→ setItems() to ListSelect
+→ ListSelect handles navigation + viewport + scroll hints
+```
+
+**自訂 RowRenderer：**
+```
+if isGroupRow:
+  collapsed: "  ▶ groupLabel"        (預設色，粗體)
+  expanded:  "  ▼ groupLabel"        (預設色，粗體)
+  selected:  "> ▶ groupLabel"        (BRAND_COLOR)
+
+if leaf:
+  normal:    "      label    desc"   (indent + 灰色 desc)
+  selected:  "    > label    desc"   (indent + BRAND_COLOR)
+```
+
+### 4. 使用場景
+
+| 場景 | Widget | Item\<T\> |
+|------|--------|-----------|
+| `/agent-use` | `GroupedSelect<String>` | Group=agent，Item=model（label=model name, value=agentId:model） |
+| `/tier`（未來） | `ListSelect<Tier>` | label="pro"，desc="深度推理"，value=Tier.PRO |
+| `/skill-install`（未來） | `ListSelect<SkillDef>` | label="code-review"，desc="Code review" |
+| 任何設定選擇（未來） | `ListSelect<String>` | 通用 |
+
+### 5. Overlay 整合
+
+**Screen.java 新增：**
+- field: `private Renderable selectOverlay` — 用 Renderable 介面，ListSelect 和 GroupedSelect 都適用
+- `setSelectOverlay(Renderable overlay)` — 設定時**自動關閉 slashMenu/mcpPanel**（overlay 互斥）
+- `clearSelectOverlay()`
+- `hasSelectOverlay()`
+- render() 中新增 overlay 分支
+
+**GrimoTuiRunner.java 新增：**
+- `/agent-use`（無參數）→ 建立 GroupedSelect → 顯示 overlay
+- `/agent-use claude`（有參數）→ 原行為不變
+
 ```java
-// EventLoop.KeyHandler 傳入 String operation（不是 int）
-private void handleListSelectInput(String operation) {
-    switch (operation) {
-        case EventLoop.OP_UP -> agentListSelect.moveUp();
-        case EventLoop.OP_DOWN -> agentListSelect.moveDown();
-        case EventLoop.OP_ENTER -> {
-            var selected = agentListSelect.getSelected();
-            screen.setListSelectVisible(false);
-            if (selected != null) {
-                // 直接呼叫 AgentCommands.use()，等同 /agent-use <agentId>
-                String result = agentCommands.use(selected.value());
-                appendCommandOutput(result);
+private void showAgentPicker() {
+    var groups = agentModelRegistry.listAvailable().entrySet().stream()
+        .map(e -> new GroupedSelect.Group<>(
+            e.getKey(),                                    // "claude"
+            buildModelItems(e.getKey(), e.getValue())))    // model list
+        .toList();
+    var select = new GroupedSelect<String>(groups, 7);
+    screen.setSelectOverlay(select);
+    eventLoop.setDirty();
+}
+```
+
+**鍵盤處理（String operation）：**
+```java
+private void handleSelectOverlayInput(String operation) {
+    if (selectOverlay instanceof GroupedSelect<?> grouped) {
+        switch (operation) {
+            case EventLoop.OP_UP -> grouped.moveUp();
+            case EventLoop.OP_DOWN -> grouped.moveDown();
+            case EventLoop.OP_ENTER -> {
+                if (grouped.isOnGroup()) {
+                    grouped.toggle();  // 展開/收合
+                } else {
+                    var selected = grouped.getSelected();
+                    screen.clearSelectOverlay();
+                    if (selected != null) {
+                        // selected.value() = "claude:claude-opus-4-6" 或自訂格式
+                        String result = agentCommands.use(selected.value());
+                        appendCommandOutput(result);
+                    }
+                }
             }
+            case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> screen.clearSelectOverlay();
         }
-        case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> {
-            screen.setListSelectVisible(false);
+    } else if (selectOverlay instanceof ListSelect<?> list) {
+        // 同理，但沒有 toggle
+        switch (operation) {
+            case EventLoop.OP_UP -> list.moveUp();
+            case EventLoop.OP_DOWN -> list.moveDown();
+            case EventLoop.OP_ENTER -> {
+                var selected = list.getSelected();
+                screen.clearSelectOverlay();
+                // consumer 處理 selected
+            }
+            case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> screen.clearSelectOverlay();
         }
     }
     eventLoop.setDirty();
 }
 ```
 
-> 設計說明：`agentCommands` 是已注入的 `AgentCommands` bean（GrimoTuiRunner 建構子已有）。`appendCommandOutput()` 是現有的輸出方法。不需要新增 `processAgentUse()` helper。
+### 6. 測試
 
-### 4. /agent-use 互動化
-
-**修改 GrimoTuiRunner.processInput()：**
-
-```java
-// 偵測 /agent-use 無參數
-if (trimmed.equals("/agent-use") || trimmed.equals("agent-use")) {
-    showAgentPicker();
-    return;
-}
-// 有參數 → 走原有 CommandExecutor 流程（不變）
-```
-
-```java
-private void showAgentPicker() {
-    var agents = agentModelRegistry.listAvailable();
-    var items = agents.entrySet().stream()
-        .map(e -> new ListSelect.Item<>(
-            e.getKey(),                          // label: "claude"
-            getAgentDescription(e.getKey()),     // description: "Claude Sonnet 4.6"
-            e.getKey()))                         // value: "claude"
-        .toList();
-    agentListSelect = new ListSelect<>(items, 5);
-    screen.setListSelect(agentListSelect);
-    screen.setListSelectVisible(true);
-    eventLoop.setDirty();
-}
-```
-
-**`/agent-use` 有參數行為完全不變** — CommandExecutor 照常解析。
-
-### 5. 測試
-
-**ListSelectTest.java（`tui/widget/`）：**
+**ListSelectTest.java（`tui/widget/`）— 17 cases：**
 
 | 測試 | 驗證 |
 |------|------|
 | `renderEmptyList` | 空 items → 0 行 |
-| `renderSingleItem` | 1 項 → 1 行，有 `>` 前綴和 brand color |
+| `renderSingleItem` | 1 項 → 1 行，`>` 前綴 + brand color |
 | `renderWithinMaxVisible` | items ≤ maxVisible → 全部顯示，無 scroll hints |
-| `renderExceedMaxVisible` | items > maxVisible → 顯示 maxVisible 行含 scroll hints |
-| `moveDownUpdatesSelection` | selectedIndex 遞增，不超出範圍 |
-| `moveUpUpdatesSelection` | selectedIndex 遞減，不低於 0 |
-| `moveDownScrollsViewport` | 選到底部邊界 → viewport 下移 |
-| `moveUpScrollsViewport` | 選到頂部邊界 → viewport 上移 |
+| `renderExceedMaxVisible` | items > maxVisible → maxVisible 行含 scroll hints |
+| `moveDownUpdatesSelection` | selectedIndex 遞增 |
+| `moveUpUpdatesSelection` | selectedIndex 遞減 |
+| `moveDownScrollsViewport` | 底部邊界 → viewport 下移 |
+| `moveUpScrollsViewport` | 頂部邊界 → viewport 上移 |
 | `scrollHintShowsCount` | `↑ 2 more` 數字正確 |
-| `scrollHintOnlyBottomWhenAtTop` | 列表頂部只顯示 `↓ N more`，不顯示 `↑` |
-| `descriptionRenderedInGray` | description 使用 ANSI 245 灰色 |
-| `getSelectedReturnsCorrectItem` | getSelected() 回傳 selectedIndex 的 Item |
-| `linearNavigationNoWrap` | 到頂再 moveUp 不變，到底再 moveDown 不變 |
-| `moveToFirstJumpsToTop` | moveToFirst() → selectedIndex=0, viewportStart=0 |
-| `moveToLastJumpsToBottom` | moveToLast() → selectedIndex=last, viewport 跟隨 |
-| `setItemsPreservesIndex` | setItems() 保留 selectedIndex（若在範圍內） |
-| `setItemsClampsIndex` | setItems() 縮短列表 → selectedIndex clamp 到 last |
-| `setItemsEmptyList` | setItems(empty) → selectedIndex=0, getSelected()=null |
-| `cjkLabelRendersCorrectWidth` | CJK label 寬度正確（2 column per char） |
+| `scrollHintOnlyBottomWhenAtTop` | 頂部只顯示 `↓` |
+| `descriptionRenderedInGray` | description ANSI 245 |
+| `linearNavigationNoWrap` | 頂/底不循環 |
+| `moveToFirstJumpsToTop` | Home → index=0 |
+| `moveToLastJumpsToBottom` | End → index=last |
+| `setItemsPreservesIndex` | 更新列表保留 index |
+| `setItemsClampsIndex` | 列表縮短 → clamp |
+| `customRowRenderer` | 自訂 RowRenderer 被呼叫 |
 
-**不測 overlay 整合** — GrimoTuiRunner 的 integration test 太重，mock 太多。
+**GroupedSelectTest.java（`tui/widget/`）— 12 cases：**
+
+| 測試 | 驗證 |
+|------|------|
+| `renderCollapsedGroups` | 全部收合 → 只顯示 group headers with ▶ |
+| `toggleExpandsGroup` | Enter on group → 展開，顯示 children with ▼ |
+| `toggleCollapsesGroup` | 再次 Enter → 收合 |
+| `accordionMode` | 展開 B → A 自動收合 |
+| `isOnGroupReturnsTrueForGroupHeader` | 游標在 group 上 |
+| `isOnGroupReturnsFalseForLeaf` | 游標在 leaf 上 |
+| `getSelectedReturnsLeafItem` | leaf 上取得 Item |
+| `getSelectedReturnsNullOnGroup` | group 上回傳 null |
+| `navigationThroughExpandedGroup` | ↓ 穿過展開的 children |
+| `scrollHintsWithExpandedGroup` | 展開後超過 maxVisible → scroll hints |
+| `emptyGroupRendersCorrectly` | 空 group 展開後無 children |
+| `moveDownFromLastChildToNextGroup` | 從最後一個 child ↓ → 到下一個 group |
+
+### 7. Glossary 更新
+
+新增到 TUI 框架術語表：
+
+| 名詞 | 英文 | 說明 |
+|------|------|------|
+| **ListSelect** | List Select | 通用單選列表 widget。支援 viewport scrolling、scroll hints、linear navigation、自訂 RowRenderer。位於 `tui/widget/`。 |
+| **GroupedSelect** | Grouped Select | 分群選擇 widget。組合 ListSelect，用 tmux tree → flat pattern 實現展開/收合。Accordion 模式（同時只展開一個 group）。位於 `tui/widget/`。 |
 
 ## 不在範圍內
 
-- `GroupedSelect`（兩層選擇器）— 未來 SP
-- `SlashMenu` / `McpPanel` 重構為使用 ListSelect — 未來 SP
-- `/agent model`、`/tier` 等其他互動指令 — 未來按需加
+- SlashMenu / McpPanel 重構為使用 ListSelect — 未來 SP
+- `/tier`、`/skill-install` 等其他互動指令 — 未來按需加
 - GrimoTuiRunner 拆解（SP4）
-- 滑鼠點擊選擇（目前只支援鍵盤 ↑↓/Enter/Esc）
+- 滑鼠點擊選擇
+- 多選（multi-select）
 
 ## 風險與緩解
 
 | 風險 | 緩解 |
 |------|------|
-| ListSelect 的 Generic `<T>` 導致 Screen 簽名複雜 | Screen 用 `ListSelect<?>` wildcard |
-| overlay 互斥邏輯漏洞（同時顯示兩個 overlay） | `setListSelectVisible(true)` 時關閉 slashMenu/mcpPanel |
-| /agent-use 無參數行為改變 | 有參數行為完全不變，無參數從「顯示 usage」改為「互動選擇」 |
+| GroupedSelect 的 flatten + rebuild 複雜度 | 單元測試 12 cases 覆蓋 |
+| RowRenderer 增加 ListSelect 複雜度 | 預設 renderer 內建，consumer 不必自訂 |
+| overlay 互斥漏洞 | `setSelectOverlay()` 自動關閉其他 overlay |
+| /agent-use 行為改變 | 有參數行為不變，無參數從 usage text → 互動選擇 |
+| Accordion 模式 UX 不直覺 | 跟 tmux choose-tree 和 IDE 檔案樹一致 |
 
 ## 驗收標準
 
 1. `./gradlew build` 全部通過
-2. `ListSelectTest` 12+ 測試通過
-3. `/agent-use`（無參數）顯示 agent 列表 overlay
-4. ↑↓ 選擇、Enter 確認切換 agent、Esc 取消
-5. 超過 maxVisible 的列表有 scroll hints
-6. CJK agent 名稱寬度渲染正確
+2. `ListSelectTest` 17 cases 通過
+3. `GroupedSelectTest` 12 cases 通過
+4. `/agent-use`（無參數）顯示 GroupedSelect overlay
+5. ↑↓ 導航、Enter 展開 group / 選擇 model、Esc 取消
+6. 超過 maxVisible=7 的列表有 scroll hints
+7. Accordion 模式：展開 B 時 A 自動收合
