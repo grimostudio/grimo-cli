@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo;
+package io.github.samzhu.grimo.tui.screen;
 
 import org.jline.keymap.BindingReader;
 import org.jline.keymap.KeyMap;
@@ -24,28 +24,28 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * @see <a href="https://github.com/jline/jline3/blob/master/builtins/src/main/java/org/jline/builtins/Tmux.java">JLine Tmux — 雙執行緒模式參考</a>
  * @see <a href="https://jline.org/docs/advanced/mouse-support/">JLine Mouse Support</a>
  */
-public class GrimoEventLoop {
+public class EventLoop {
 
-    private static final Logger log = LoggerFactory.getLogger(GrimoEventLoop.class);
+    private static final Logger log = LoggerFactory.getLogger(EventLoop.class);
 
     // KeyMap operation constants
-    static final String OP_MOUSE = "MOUSE";
-    static final String OP_ENTER = "ENTER";
-    static final String OP_UP = "UP";
-    static final String OP_DOWN = "DOWN";
-    static final String OP_LEFT = "LEFT";
-    static final String OP_RIGHT = "RIGHT";
-    static final String OP_BACKSPACE = "BACKSPACE";
-    static final String OP_DELETE = "DELETE";
-    static final String OP_TAB = "TAB";
-    static final String OP_CTRL_C = "CTRL_C";
-    static final String OP_CTRL_U = "CTRL_U";
-    static final String OP_CTRL_D = "CTRL_D";
-    static final String OP_CHAR = "CHAR";
-    static final String OP_ESC = "ESC";
+    public static final String OP_MOUSE = "MOUSE";
+    public static final String OP_ENTER = "ENTER";
+    public static final String OP_UP = "UP";
+    public static final String OP_DOWN = "DOWN";
+    public static final String OP_LEFT = "LEFT";
+    public static final String OP_RIGHT = "RIGHT";
+    public static final String OP_BACKSPACE = "BACKSPACE";
+    public static final String OP_DELETE = "DELETE";
+    public static final String OP_TAB = "TAB";
+    public static final String OP_CTRL_C = "CTRL_C";
+    public static final String OP_CTRL_U = "CTRL_U";
+    public static final String OP_CTRL_D = "CTRL_D";
+    public static final String OP_CHAR = "CHAR";
+    public static final String OP_ESC = "ESC";
 
     private final Terminal terminal;
-    private final GrimoScreen screen;
+    private final Screen screen;
     private final KeyHandler keyHandler;
 
     private final AtomicBoolean dirty = new AtomicBoolean(false);
@@ -69,7 +69,7 @@ public class GrimoEventLoop {
         void handleMouse(MouseEvent event);
     }
 
-    public GrimoEventLoop(Terminal terminal, GrimoScreen screen, KeyHandler keyHandler) {
+    public EventLoop(Terminal terminal, Screen screen, KeyHandler keyHandler) {
         this.terminal = terminal;
         this.screen = screen;
         this.keyHandler = keyHandler;

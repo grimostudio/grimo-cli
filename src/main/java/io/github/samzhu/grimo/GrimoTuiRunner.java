@@ -41,9 +41,17 @@ import org.springframework.shell.core.command.CommandParser;
 import org.springframework.shell.core.command.CommandRegistry;
 import org.springframework.stereotype.Component;
 
+import io.github.samzhu.grimo.tui.overlay.McpPanel;
+import io.github.samzhu.grimo.tui.overlay.SlashMenu;
+import io.github.samzhu.grimo.tui.screen.EventLoop;
+import io.github.samzhu.grimo.tui.screen.Screen;
 import io.github.samzhu.grimo.tui.selection.AutoScroller;
 import io.github.samzhu.grimo.tui.selection.Clipboard;
 import io.github.samzhu.grimo.tui.selection.TextSelection;
+import io.github.samzhu.grimo.tui.view.ContentView;
+import io.github.samzhu.grimo.tui.view.InputView;
+import io.github.samzhu.grimo.tui.view.StatusView;
+import io.github.samzhu.grimo.tui.widget.Banner;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -86,7 +94,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final SkillLoader skillLoader;
     private final SkillRegistry skillRegistry;
     private final TaskSchedulerService taskSchedulerService;
-    private final BannerRenderer bannerRenderer;
+    private final Banner banner;
     private final CommandParser commandParser;
     private final CommandExecutor commandExecutor;
     private final CommandRegistry commandRegistry;
@@ -103,7 +111,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private volatile TierSelection currentTierSelection;
 
     /** Status bar 元件（run 時初始化，需在 agent thread 中更新） */
-    private GrimoStatusView statusView;
+    private StatusView statusView;
     private String originalStatusText;
 
     /** AI 對話併發控制：確保同時只有一個 agent 執行 */
@@ -115,16 +123,16 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private static final long CTRL_C_EXIT_WINDOW_MS = 2000;
 
     // TUI 元件（run 時初始化）
-    private GrimoContentView contentView;
-    private GrimoInputView inputView;
-    private GrimoSlashMenuView slashMenuView;
-    private GrimoMcpManagerView mcpManagerView;
-    private GrimoScreen screen;
-    private GrimoEventLoop eventLoop;
+    private ContentView contentView;
+    private InputView inputView;
+    private SlashMenu slashMenu;
+    private McpPanel mcpPanel;
+    private Screen screen;
+    private EventLoop eventLoop;
     private final SessionWriter sessionWriter;
     private TextSelection textSelection;
     private AutoScroller autoScroller;
-    private Clipboard clipboardWriter;
+    private Clipboard clipboard;
 
     public GrimoTuiRunner(Terminal terminal,
                            GrimoHome grimoHome,
@@ -137,7 +145,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                            SkillLoader skillLoader,
                            SkillRegistry skillRegistry,
                            TaskSchedulerService taskSchedulerService,
-                           BannerRenderer bannerRenderer,
+                           Banner banner,
                            CommandParser commandParser,
                            CommandExecutor commandExecutor,
                            CommandRegistry commandRegistry,
@@ -160,7 +168,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
         this.skillLoader = skillLoader;
         this.skillRegistry = skillRegistry;
         this.taskSchedulerService = taskSchedulerService;
-        this.bannerRenderer = bannerRenderer;
+        this.banner = banner;
         this.commandParser = commandParser;
         this.commandExecutor = commandExecutor;
         this.commandRegistry = commandRegistry;
@@ -215,29 +223,29 @@ public class GrimoTuiRunner implements ApplicationRunner {
         int taskCount = taskSchedulerService.getScheduledTaskIds().size();
 
         // === Phase 4: 建構 TUI 元件 ===
-        contentView = new GrimoContentView();
-        String bannerText = bannerRenderer.render(
+        contentView = new ContentView();
+        String bannerText = banner.render(
                 version, agentId, model, projectPath,
                 (int) agentCount, skillCount, mcpCount, taskCount,
                 terminal.getWidth());
         contentView.setBannerText(bannerText);
 
-        inputView = new GrimoInputView();
+        inputView = new InputView();
 
         String statusText = agentId + " · " + model + " │ " + projectPath
                 + " │ " + (int) agentCount + " agent · " + skillCount + " skill · "
                 + mcpCount + " mcp · " + taskCount + " task";
-        this.statusView = new GrimoStatusView(statusText);
+        this.statusView = new StatusView(statusText);
         this.originalStatusText = statusText;
 
         var menuItems = buildMenuItems();
-        slashMenuView = new GrimoSlashMenuView(menuItems);
+        slashMenu = new SlashMenu(menuItems);
 
-        mcpManagerView = new GrimoMcpManagerView();
+        mcpPanel = new McpPanel();
         textSelection = new TextSelection();
-        clipboardWriter = new Clipboard();
-        screen = new GrimoScreen(terminal, contentView, inputView, statusView,
-                slashMenuView, mcpManagerView, textSelection);
+        clipboard = new Clipboard();
+        screen = new Screen(terminal, contentView, inputView, statusView,
+                slashMenu, mcpPanel, textSelection);
 
         // === Session 對話存檔 ===
         sessionWriter.writeSystemMessage(
@@ -245,7 +253,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
         // === Phase 5: 啟動 TUI 事件迴圈（阻塞） ===
         log.debug("Grimo TUI setup complete, starting raw JLine event loop.");
-        eventLoop = new GrimoEventLoop(terminal, screen, new TuiKeyHandler());
+        eventLoop = new EventLoop(terminal, screen, new TuiKeyHandler());
 
         autoScroller = new AutoScroller(
             () -> contentView.scrollUp(1),
@@ -271,14 +279,14 @@ public class GrimoTuiRunner implements ApplicationRunner {
     }
 
     /**
-     * 鍵盤/滑鼠事件處理器：實作 GrimoEventLoop.KeyHandler。
+     * 鍵盤/滑鼠事件處理器：實作 EventLoop.KeyHandler。
      *
      * 設計說明：
      * - 分兩個模式：斜線選單模式（slashMenuVisible）和一般模式
      * - 滑鼠滾輪事件直接轉為 content 捲動
      * - 所有狀態更新後由 eventLoop.setDirty() 觸發重繪
      */
-    private class TuiKeyHandler implements GrimoEventLoop.KeyHandler {
+    private class TuiKeyHandler implements EventLoop.KeyHandler {
 
         @Override
         public void handleKey(String operation, String lastBinding) {
@@ -288,7 +296,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
             log.info("[KEY] op={} lastBinding={} selectionActive={}",
                     operation, lastBinding != null ? String.format("0x%02x", (int) lastBinding.charAt(0)) : "null",
                     textSelection.isActive());
-            boolean isCtrlC = GrimoEventLoop.OP_CTRL_C.equals(operation)
+            boolean isCtrlC = EventLoop.OP_CTRL_C.equals(operation)
                     || (lastBinding != null && lastBinding.length() == 1 && lastBinding.charAt(0) == '\003');
             if (textSelection.isActive()) {
                 if (isCtrlC) {
@@ -303,7 +311,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                                 text != null ? text.substring(0, Math.min(80, text.length())) : "null",
                                 text != null ? text.length() : 0);
                         if (text != null && !text.isEmpty()) {
-                            clipboardWriter.copy(terminal, text);
+                            clipboard.copy(terminal, text);
                             statusView.setTemporaryMessage(
                                     "✓ Copied!", Duration.ofSeconds(2));
                             log.info("[SELECT] Ctrl+C copied to clipboard: len={}", text.length());
@@ -388,7 +396,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                                     text != null ? text.substring(0, Math.min(80, text.length())) : "null",
                                     text != null ? text.length() : 0);
                             if (text != null && !text.isEmpty()) {
-                                clipboardWriter.copy(terminal, text);
+                                clipboard.copy(terminal, text);
                                 statusView.setTemporaryMessage(
                                         "✓ Copied!", Duration.ofSeconds(2));
                                 eventLoop.setDirty();
@@ -416,34 +424,34 @@ public class GrimoTuiRunner implements ApplicationRunner {
      */
     private void handleSlashMenuKey(String operation, String lastBinding) {
         switch (operation) {
-            case GrimoEventLoop.OP_UP -> slashMenuView.moveUp();
-            case GrimoEventLoop.OP_DOWN -> slashMenuView.moveDown();
-            case GrimoEventLoop.OP_TAB, GrimoEventLoop.OP_ENTER -> {
-                String selected = slashMenuView.getSelected();
+            case EventLoop.OP_UP -> slashMenu.moveUp();
+            case EventLoop.OP_DOWN -> slashMenu.moveDown();
+            case EventLoop.OP_TAB, EventLoop.OP_ENTER -> {
+                String selected = slashMenu.getSelected();
                 if (selected != null) {
                     inputView.insertSlashCommand(selected);
                 }
                 screen.setSlashMenuVisible(false);
             }
-            case GrimoEventLoop.OP_BACKSPACE -> {
+            case EventLoop.OP_BACKSPACE -> {
                 inputView.deleteChar();
                 String slashToken = inputView.getCurrentSlashToken();
-                if (slashToken == null || !slashMenuView.hasItems()) {
+                if (slashToken == null || !slashMenu.hasItems()) {
                     screen.setSlashMenuVisible(false);
                 } else {
-                    slashMenuView.filter(slashToken.substring(1));
-                    if (!slashMenuView.hasItems()) {
+                    slashMenu.filter(slashToken.substring(1));
+                    if (!slashMenu.hasItems()) {
                         screen.setSlashMenuVisible(false);
                     }
                 }
             }
-            case GrimoEventLoop.OP_CTRL_C -> screen.setSlashMenuVisible(false);
-            case GrimoEventLoop.OP_CHAR -> {
+            case EventLoop.OP_CTRL_C -> screen.setSlashMenuVisible(false);
+            case EventLoop.OP_CHAR -> {
                 insertCharFromBinding(lastBinding);
                 String slashToken = inputView.getCurrentSlashToken();
                 if (slashToken != null) {
-                    slashMenuView.filter(slashToken.substring(1));
-                    if (!slashMenuView.hasItems()) {
+                    slashMenu.filter(slashToken.substring(1));
+                    if (!slashMenu.hasItems()) {
                         screen.setSlashMenuVisible(false);
                     }
                 } else {
@@ -464,21 +472,21 @@ public class GrimoTuiRunner implements ApplicationRunner {
      */
     private void handleMcpManagerKey(String operation, String lastBinding) {
         switch (operation) {
-            case GrimoEventLoop.OP_UP -> mcpManagerView.moveUp();
-            case GrimoEventLoop.OP_DOWN -> mcpManagerView.moveDown();
-            case GrimoEventLoop.OP_ESC, GrimoEventLoop.OP_CTRL_C -> {
+            case EventLoop.OP_UP -> mcpPanel.moveUp();
+            case EventLoop.OP_DOWN -> mcpPanel.moveDown();
+            case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> {
                 screen.setMcpManagerVisible(false);
                 screen.requestFullRedraw();
             }
-            case GrimoEventLoop.OP_CHAR -> {
+            case EventLoop.OP_CHAR -> {
                 if (lastBinding != null && lastBinding.length() == 1) {
                     char c = lastBinding.charAt(0);
                     if (c == 'd' || c == 'D') {
-                        String name = mcpManagerView.getSelectedName();
+                        String name = mcpPanel.getSelectedName();
                         if (name != null) {
                             grimoConfig.removeMcpServer(name);
                             mcpCatalogBuilder.rebuild();
-                            mcpManagerView.load(grimoConfig.getMcpServers());
+                            mcpPanel.load(grimoConfig.getMcpServers());
                         }
                     } else if (c == 'a' || c == 'A') {
                         screen.setMcpManagerVisible(false);
@@ -496,7 +504,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
      */
     private void handleNormalKey(String operation, String lastBinding) {
         switch (operation) {
-            case GrimoEventLoop.OP_ENTER -> {
+            case EventLoop.OP_ENTER -> {
                 String text = inputView.getText().trim();
                 if (!text.isEmpty()) {
                     log.debug("ENTER pressed, text='{}', lastBinding bytes={}", text,
@@ -513,18 +521,18 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     processInput(text);
                 }
             }
-            case GrimoEventLoop.OP_UP, GrimoEventLoop.OP_DOWN -> {
+            case EventLoop.OP_UP, EventLoop.OP_DOWN -> {
                 // ↑/↓ 在一般模式暫不處理（未來可加歷史瀏覽）
             }
-            case GrimoEventLoop.OP_CTRL_U -> {
+            case EventLoop.OP_CTRL_U -> {
                 int halfPage = Math.max(1, (terminal.getHeight() - 4) / 2);
                 contentView.scrollUp(halfPage);
             }
-            case GrimoEventLoop.OP_CTRL_D -> {
+            case EventLoop.OP_CTRL_D -> {
                 int halfPage = Math.max(1, (terminal.getHeight() - 4) / 2);
                 contentView.scrollDown(halfPage);
             }
-            case GrimoEventLoop.OP_CTRL_C -> {
+            case EventLoop.OP_CTRL_C -> {
                 if (agentRunning && agentThread != null) {
                     // Agent 執行中 → 取消 agent
                     agentThread.interrupt();
@@ -549,22 +557,22 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     }
                 }
             }
-            case GrimoEventLoop.OP_BACKSPACE -> {
+            case EventLoop.OP_BACKSPACE -> {
                 inputView.deleteChar();
                 // backspace 後檢查是否該重開斜線選單
                 // 修正：選單因過濾為空而關閉後，backspace 回到有效 token 時應重開
                 tryReopenSlashMenu();
             }
-            case GrimoEventLoop.OP_DELETE -> inputView.deleteForward();
-            case GrimoEventLoop.OP_LEFT -> inputView.moveCursorLeft();
-            case GrimoEventLoop.OP_RIGHT -> inputView.moveCursorRight();
-            case GrimoEventLoop.OP_CHAR -> {
+            case EventLoop.OP_DELETE -> inputView.deleteForward();
+            case EventLoop.OP_LEFT -> inputView.moveCursorLeft();
+            case EventLoop.OP_RIGHT -> inputView.moveCursorRight();
+            case EventLoop.OP_CHAR -> {
                 log.debug("OP_CHAR, lastBinding bytes={}, text='{}'",
                         lastBinding != null ? java.util.HexFormat.of().formatHex(lastBinding.getBytes()) : "null",
                         lastBinding);
                 insertCharFromBinding(lastBinding);
                 if (inputView.shouldOpenSlashMenu()) {
-                    slashMenuView.filterAll();
+                    slashMenu.filterAll();
                     screen.setSlashMenuVisible(true);
                 }
             }
@@ -593,8 +601,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private void tryReopenSlashMenu() {
         String slashToken = inputView.getCurrentSlashToken();
         if (slashToken != null) {
-            slashMenuView.filter(slashToken.substring(1));
-            if (slashMenuView.hasItems()) {
+            slashMenu.filter(slashToken.substring(1));
+            if (slashMenu.hasItems()) {
                 screen.setSlashMenuVisible(true);
             }
         }
@@ -606,23 +614,23 @@ public class GrimoTuiRunner implements ApplicationRunner {
      */
     private void openMcpManager() {
         screen.setSlashMenuVisible(false);
-        mcpManagerView.load(grimoConfig.getMcpServers());
+        mcpPanel.load(grimoConfig.getMcpServers());
         screen.setMcpManagerVisible(true);
     }
 
     /**
      * 從 CommandRegistry + SkillRegistry 建構斜線指令選單項目。
      */
-    private List<GrimoSlashMenuView.MenuItem> buildMenuItems() {
-        var items = new java.util.ArrayList<GrimoSlashMenuView.MenuItem>();
+    private List<SlashMenu.MenuItem> buildMenuItems() {
+        var items = new java.util.ArrayList<SlashMenu.MenuItem>();
 
         commandRegistry.getCommandsByPrefix("").stream()
                 .filter(cmd -> !"chat".equals(cmd.getName()))
-                .forEach(cmd -> items.add(new GrimoSlashMenuView.MenuItem(
+                .forEach(cmd -> items.add(new SlashMenu.MenuItem(
                         cmd.getName(), cmd.getDescription())));
 
         skillRegistry.listAll().forEach(skill ->
-                items.add(new GrimoSlashMenuView.MenuItem(
+                items.add(new SlashMenu.MenuItem(
                         skill.name(), skill.description())));
 
         return items;

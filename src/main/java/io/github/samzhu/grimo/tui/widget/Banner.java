@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo;
+package io.github.samzhu.grimo.tui.widget;
 
 import io.github.samzhu.grimo.tui.core.DisplayWidth;
 import io.github.samzhu.grimo.tui.core.Layout;
@@ -18,7 +18,7 @@ import java.util.List;
  *
  * @see <a href="https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit">ANSI 256 Color Reference</a>
  */
-public class BannerRenderer implements Renderable {
+public class Banner implements Renderable {
 
     @Override
     public List<AttributedString> render(int width) {

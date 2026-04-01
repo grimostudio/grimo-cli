@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo;
+package io.github.samzhu.grimo.tui.screen;
 
 import org.jline.terminal.Size;
 import org.jline.terminal.Terminal;
@@ -7,10 +7,14 @@ import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 import org.jline.utils.Display;
 
-import io.github.samzhu.grimo.tui.screen.BufferLine;
 import io.github.samzhu.grimo.tui.core.Layout;
+import io.github.samzhu.grimo.tui.overlay.McpPanel;
+import io.github.samzhu.grimo.tui.overlay.SlashMenu;
 import io.github.samzhu.grimo.tui.selection.SelectionRange;
 import io.github.samzhu.grimo.tui.selection.TextSelection;
+import io.github.samzhu.grimo.tui.view.ContentView;
+import io.github.samzhu.grimo.tui.view.InputView;
+import io.github.samzhu.grimo.tui.view.StatusView;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,19 +32,19 @@ import java.util.Optional;
  *
  * @see <a href="https://github.com/jline/jline3/blob/master/terminal/src/main/java/org/jline/utils/Display.java">JLine Display</a>
  */
-public class GrimoScreen {
+public class Screen {
 
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GrimoScreen.class);
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(Screen.class);
 
     private static final int INPUT_HEIGHT = 3;   // separator + input + separator
     private static final int STATUS_HEIGHT = 1;
 
     private final Display display;
-    private final GrimoContentView contentView;
-    private final GrimoInputView inputView;
-    private final GrimoStatusView statusView;
-    private final GrimoSlashMenuView slashMenuView;
-    private final GrimoMcpManagerView mcpManagerView;
+    private final ContentView contentView;
+    private final InputView inputView;
+    private final StatusView statusView;
+    private final SlashMenu slashMenu;
+    private final McpPanel mcpPanel;
     private final TextSelection textSelection;
 
     private int rows;
@@ -52,17 +56,17 @@ public class GrimoScreen {
     private volatile boolean mcpManagerVisible = false;
     private volatile boolean forceFullRedraw = false;
 
-    public GrimoScreen(Terminal terminal, GrimoContentView contentView,
-                        GrimoInputView inputView, GrimoStatusView statusView,
-                        GrimoSlashMenuView slashMenuView,
-                        GrimoMcpManagerView mcpManagerView,
-                        TextSelection textSelection) {
+    public Screen(Terminal terminal, ContentView contentView,
+                   InputView inputView, StatusView statusView,
+                   SlashMenu slashMenu,
+                   McpPanel mcpPanel,
+                   TextSelection textSelection) {
         this.display = new Display(terminal, true);
         this.contentView = contentView;
         this.inputView = inputView;
         this.statusView = statusView;
-        this.slashMenuView = slashMenuView;
-        this.mcpManagerView = mcpManagerView;
+        this.slashMenu = slashMenu;
+        this.mcpPanel = mcpPanel;
         this.textSelection = textSelection;
     }
 
@@ -209,7 +213,7 @@ public class GrimoScreen {
 
         // 2. Slash menu overlay（覆蓋 content 底部）
         if (slashMenuVisible) {
-            List<AttributedString> menuLines = slashMenuView.render(cols);
+            List<AttributedString> menuLines = slashMenu.render(cols);
             int menuHeight = menuLines.size();
             int overlayStart = contentLines.size() - menuHeight;
             for (int i = 0; i < menuHeight; i++) {
@@ -222,7 +226,7 @@ public class GrimoScreen {
 
         // 3. MCP Manager overlay（覆蓋 content 底部，與 slash menu 互斥）
         if (mcpManagerVisible) {
-            List<AttributedString> managerLines = mcpManagerView.render(cols);
+            List<AttributedString> managerLines = mcpPanel.render(cols);
             int managerHeight = managerLines.size();
             int overlayStart = contentLines.size() - managerHeight;
             for (int i = 0; i < managerHeight; i++) {

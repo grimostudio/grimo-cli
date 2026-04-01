@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo;
+package io.github.samzhu.grimo.tui.overlay;
 
 import io.github.samzhu.grimo.tui.core.DisplayWidth;
 import org.jline.utils.AttributedString;
@@ -17,7 +17,7 @@ import java.util.Map;
  * - 不負責 config 寫入或 catalog 重建（由上層呼叫者負責）
  * - load() 重新載入 server 列表時自動 clamp selectedIndex
  */
-public class GrimoMcpManagerView {
+public class McpPanel {
 
     /** 品牌標誌色 steel blue（ANSI 256 色碼 67），與 GrimoSlashMenuView 一致 */
     private static final int BRAND_COLOR = 67;

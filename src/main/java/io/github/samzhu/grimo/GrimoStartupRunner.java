@@ -135,8 +135,8 @@ public class GrimoStartupRunner {
     }
 
     @Bean
-    BannerRenderer bannerRenderer() {
-        return new BannerRenderer();
+    io.github.samzhu.grimo.tui.widget.Banner banner() {
+        return new io.github.samzhu.grimo.tui.widget.Banner();
     }
 
     /**

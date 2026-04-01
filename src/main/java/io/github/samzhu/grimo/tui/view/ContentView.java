@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo;
+package io.github.samzhu.grimo.tui.view;
 
 import io.github.samzhu.grimo.tui.screen.BufferLine;
 import io.github.samzhu.grimo.tui.core.Renderable;
@@ -19,7 +19,7 @@ import java.util.List;
  * - autoFollow 模式下新內容自動滾到底部
  * - 渲染統一由 GrimoScreen → Display.update() 處理（diff-based，不閃爍）
  */
-public class GrimoContentView implements Renderable {
+public class ContentView implements Renderable {
 
     /** 品牌標誌色 steel blue（ANSI 256 色碼 67, #5F87AF） */
     private static final int BRAND_COLOR = 67;

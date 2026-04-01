@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo;
+package io.github.samzhu.grimo.tui.overlay;
 
 import io.github.samzhu.grimo.tui.core.DisplayWidth;
 import io.github.samzhu.grimo.tui.core.Renderable;
@@ -17,7 +17,7 @@ import java.util.List;
  * - 未選中項以預設色渲染
  * - 作為 overlay 渲染到 content 底部（由 GrimoScreen 負責覆蓋）
  */
-public class GrimoSlashMenuView implements Renderable {
+public class SlashMenu implements Renderable {
 
     /** 品牌標誌色 steel blue（ANSI 256 色碼 67） */
     private static final int BRAND_COLOR = 67;
@@ -35,7 +35,7 @@ public class GrimoSlashMenuView implements Renderable {
      */
     public record MenuItem(String name, String description) {}
 
-    public GrimoSlashMenuView(List<MenuItem> items) {
+    public SlashMenu(List<MenuItem> items) {
         this.allItems = new ArrayList<>(items);
         this.filteredItems = new ArrayList<>(items);
     }

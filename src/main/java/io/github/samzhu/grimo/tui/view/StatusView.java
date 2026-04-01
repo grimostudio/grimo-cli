@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo;
+package io.github.samzhu.grimo.tui.view;
 
 import io.github.samzhu.grimo.tui.core.DisplayWidth;
 import io.github.samzhu.grimo.tui.core.Renderable;
@@ -17,7 +17,7 @@ import java.util.List;
  * - 一般對話：灰色文字
  * - Skill 執行時：tier icon 用對應色彩（lite=green, std=gray, pro=yellow）
  */
-public class GrimoStatusView implements Renderable {
+public class StatusView implements Renderable {
 
     private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.foreground(245);
     private static final AttributedStyle LITE_STYLE = AttributedStyle.DEFAULT.foreground(2);   // green
@@ -29,7 +29,7 @@ public class GrimoStatusView implements Renderable {
     private volatile String temporaryMessage;
     private Runnable setDirty;
 
-    public GrimoStatusView(String statusText) {
+    public StatusView(String statusText) {
         this.statusText = statusText;
     }
 

@@ -1,5 +1,6 @@
 package io.github.samzhu.grimo;
 
+import io.github.samzhu.grimo.tui.overlay.McpPanel;
 import org.jline.utils.AttributedString;
 import org.junit.jupiter.api.Test;
 
@@ -20,7 +21,7 @@ class GrimoMcpManagerViewTest {
 
     @Test
     void renderShouldShowTitleAndServers() {
-        var view = new GrimoMcpManagerView();
+        var view = new McpPanel();
         view.load(twoServers());
 
         List<AttributedString> lines = view.render(80);
@@ -36,7 +37,7 @@ class GrimoMcpManagerViewTest {
 
     @Test
     void renderEmptyListShouldShowMessage() {
-        var view = new GrimoMcpManagerView();
+        var view = new McpPanel();
         view.load(Map.of());
 
         List<AttributedString> lines = view.render(80);
@@ -48,7 +49,7 @@ class GrimoMcpManagerViewTest {
 
     @Test
     void selectedNameShouldReturnFirstByDefault() {
-        var view = new GrimoMcpManagerView();
+        var view = new McpPanel();
         view.load(twoServers());
 
         assertThat(view.getSelectedName()).isEqualTo("deepwiki");
@@ -56,7 +57,7 @@ class GrimoMcpManagerViewTest {
 
     @Test
     void moveDownShouldChangeSelection() {
-        var view = new GrimoMcpManagerView();
+        var view = new McpPanel();
         view.load(twoServers());
 
         view.moveDown();
@@ -66,7 +67,7 @@ class GrimoMcpManagerViewTest {
 
     @Test
     void moveUpAtTopShouldStay() {
-        var view = new GrimoMcpManagerView();
+        var view = new McpPanel();
         view.load(twoServers());
 
         view.moveUp(); // already at 0
@@ -76,7 +77,7 @@ class GrimoMcpManagerViewTest {
 
     @Test
     void moveDownAtBottomShouldStay() {
-        var view = new GrimoMcpManagerView();
+        var view = new McpPanel();
         view.load(twoServers());
 
         view.moveDown(); // index 1
@@ -87,7 +88,7 @@ class GrimoMcpManagerViewTest {
 
     @Test
     void refreshShouldClampIndex() {
-        var view = new GrimoMcpManagerView();
+        var view = new McpPanel();
         view.load(twoServers());
         view.moveDown(); // index 1
 
@@ -99,7 +100,7 @@ class GrimoMcpManagerViewTest {
 
     @Test
     void getSelectedNameOnEmptyListShouldReturnNull() {
-        var view = new GrimoMcpManagerView();
+        var view = new McpPanel();
         view.load(Map.of());
 
         assertThat(view.getSelectedName()).isNull();

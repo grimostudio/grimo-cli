@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo;
+package io.github.samzhu.grimo.tui.view;
 
 import io.github.samzhu.grimo.tui.core.Renderable;
 import org.jline.utils.AttributedString;
@@ -17,7 +17,7 @@ import java.util.List;
  * - 上下各有分隔線（共 3 行高）
  * - 渲染統一由 GrimoScreen → Display.update() 處理
  */
-public class GrimoInputView implements Renderable {
+public class InputView implements Renderable {
 
     /** 品牌標誌色 steel blue */
     private static final AttributedStyle BRAND_STYLE = AttributedStyle.DEFAULT.foreground(67);
@@ -203,7 +203,7 @@ public class GrimoInputView implements Renderable {
      * @param cols 終端機寬度
      * @return 固定 3 行的列表
      */
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GrimoInputView.class);
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InputView.class);
 
     @Override
     public List<AttributedString> render(int cols) {
