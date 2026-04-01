@@ -153,3 +153,5 @@
 | **BufferLine** | Buffer Line | 螢幕 buffer 行 metadata record。`wrapped` 標記 wrap 延續行（複製時不加 \n），`selectable` 標記是否可選取（separator 行不可選）。 |
 | **Clipboard** | Clipboard | 系統剪貼簿寫入。主要用 pbcopy（macOS）/ xclip（Linux），SSH 遠端 fallback 到 OSC 52。參考 tmux/neovim 做法。 |
 | **AutoScroller** | Auto Scroller | 拖曳邊緣自動捲動。50ms timer（參考 tmux），拖到 content 區頂/底部時自動捲動並擴大選取範圍。 |
+| **ListSelect** | List Select | 通用單選列表 widget。支援 viewport scrolling、scroll hints、linear navigation、自訂 RowRenderer（tmux drawcb pattern）。位於 `tui/widget/`。 |
+| **GroupedSelect** | Grouped Select | 分群選擇 widget。組合 ListSelect，用 tmux tree → flat pattern 實現展開/收合。Accordion 模式（同時只展開一個 group）。位於 `tui/widget/`。 |
