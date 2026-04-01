@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.workspace;
+package io.github.samzhu.grimo.home;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

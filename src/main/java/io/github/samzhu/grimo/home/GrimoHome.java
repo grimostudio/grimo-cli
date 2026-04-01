@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.workspace;
+package io.github.samzhu.grimo.home;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

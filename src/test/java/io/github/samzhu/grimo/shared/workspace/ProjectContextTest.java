@@ -1,5 +1,6 @@
 package io.github.samzhu.grimo.shared.workspace;
 
+import io.github.samzhu.grimo.home.GrimoHome;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;

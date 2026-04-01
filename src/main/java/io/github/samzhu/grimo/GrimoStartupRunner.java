@@ -6,7 +6,7 @@ import io.github.samzhu.grimo.channel.ChannelEventListener;
 import io.github.samzhu.grimo.channel.ChannelRegistry;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
-import io.github.samzhu.grimo.shared.workspace.GrimoHome;
+import io.github.samzhu.grimo.home.GrimoHome;
 import io.github.samzhu.grimo.shared.workspace.ProjectContext;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.shared.sandbox.GitHelper;
