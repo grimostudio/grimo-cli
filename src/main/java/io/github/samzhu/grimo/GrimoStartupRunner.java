@@ -5,8 +5,9 @@ import io.github.samzhu.grimo.agent.router.AgentRouter;
 import io.github.samzhu.grimo.channel.ChannelEventListener;
 import io.github.samzhu.grimo.channel.ChannelRegistry;
 import io.github.samzhu.grimo.shared.config.GrimoConfig;
-import io.github.samzhu.grimo.shared.config.GrimoProperties;
-import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
+import io.github.samzhu.grimo.shared.session.SessionWriter;
+import io.github.samzhu.grimo.shared.workspace.GrimoHome;
+import io.github.samzhu.grimo.shared.workspace.ProjectContext;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.shared.sandbox.GitHelper;
 import io.github.samzhu.grimo.shared.sandbox.WorkspaceProvisioner;
@@ -14,7 +15,6 @@ import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import io.github.samzhu.grimo.task.store.MarkdownTaskStore;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -38,20 +38,29 @@ import java.nio.file.Path;
  */
 @Configuration
 @EnableScheduling
-@EnableConfigurationProperties(GrimoProperties.class)
 public class GrimoStartupRunner {
 
     // === Bean Definitions ===
     // 以下定義所有非 @Component 類別的 Spring bean，供各模組的 @Component Commands 類別注入使用
 
     @Bean
-    WorkspaceManager workspaceManager(GrimoProperties properties) {
-        return new WorkspaceManager(Path.of(properties.workspace()));
+    GrimoHome grimoHome() {
+        return new GrimoHome();
     }
 
     @Bean
-    GrimoConfig grimoConfig(WorkspaceManager workspaceManager) {
-        return new GrimoConfig(workspaceManager.configFile());
+    ProjectContext projectContext(GrimoHome grimoHome) {
+        return new ProjectContext(grimoHome);
+    }
+
+    @Bean
+    SessionWriter sessionWriter(ProjectContext projectContext) {
+        return new SessionWriter(projectContext.dataDir());
+    }
+
+    @Bean
+    GrimoConfig grimoConfig(GrimoHome grimoHome) {
+        return new GrimoConfig(grimoHome.configFile());
     }
 
     // GrimoPromptProvider 已移除 — TerminalUI 不使用 LineReader/PromptProvider
@@ -67,8 +76,8 @@ public class GrimoStartupRunner {
     }
 
     @Bean
-    SkillLoader skillLoader(WorkspaceManager workspaceManager) {
-        return new SkillLoader(workspaceManager.skillsDir());
+    SkillLoader skillLoader(GrimoHome grimoHome) {
+        return new SkillLoader(grimoHome.skillsDir());
     }
 
     @Bean
@@ -80,8 +89,8 @@ public class GrimoStartupRunner {
      * SkillCommands 需要注入 Path skillsDir，此 bean 提供 workspace 下的 skills 目錄路徑。
      */
     @Bean
-    Path skillsDir(WorkspaceManager workspaceManager) {
-        return workspaceManager.skillsDir();
+    Path skillsDir(GrimoHome grimoHome) {
+        return grimoHome.skillsDir();
     }
 
     @Bean
@@ -90,8 +99,8 @@ public class GrimoStartupRunner {
     }
 
     @Bean
-    WorkspaceProvisioner workspaceProvisioner(WorkspaceManager workspaceManager, GitHelper gitHelper) {
-        return new WorkspaceProvisioner(workspaceManager.skillsDir(), gitHelper);
+    WorkspaceProvisioner workspaceProvisioner(GrimoHome grimoHome, GitHelper gitHelper) {
+        return new WorkspaceProvisioner(grimoHome.skillsDir(), gitHelper);
     }
 
     @Bean
@@ -100,8 +109,8 @@ public class GrimoStartupRunner {
     }
 
     @Bean
-    MarkdownTaskStore markdownTaskStore(WorkspaceManager workspaceManager) {
-        return new MarkdownTaskStore(workspaceManager.tasksDir());
+    MarkdownTaskStore markdownTaskStore(GrimoHome grimoHome) {
+        return new MarkdownTaskStore(grimoHome.tasksDir());
     }
 
     @Bean

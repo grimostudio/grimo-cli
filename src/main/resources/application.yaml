@@ -23,5 +23,3 @@ management:
       exposure:
         include: health,info,modulith
 
-grimo:
-  workspace: ${user.home}/.grimo
