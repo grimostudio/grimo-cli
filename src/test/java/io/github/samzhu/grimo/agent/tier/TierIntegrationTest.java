@@ -94,7 +94,7 @@ class TierIntegrationTest {
         registry.register(id, model);
     }
 
-    // === 完整流程測試：模擬 GrimoTuiRunner.processInput 中的 tier 路由邏輯 ===
+    // === 完整流程測試：模擬 TuiAdapter.processInput 中的 tier 路由邏輯 ===
 
     private TierSelection resolveForInput(String userInput) {
         return resolveForInput(userInput, null);

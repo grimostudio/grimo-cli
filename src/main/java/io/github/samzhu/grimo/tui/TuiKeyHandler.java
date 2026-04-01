@@ -35,11 +35,11 @@ import java.util.List;
  * TUI 鍵盤與滑鼠事件處理器：實作 EventLoop.KeyHandler。
  *
  * 設計說明：
- * - 從 GrimoTuiRunner 的 inner class 提取為獨立頂層類別（SP4 Task 2）。
+ * - 從 TuiAdapter 的 inner class 提取為獨立頂層類別（SP4 Task 2）。
  * - 分三個模式：MCP Manager overlay、斜線選單（slashMenu）、一般輸入。
  * - 文字選取：active 時 Ctrl+C 複製到剪貼簿，其他鍵取消選取。
  * - 滑鼠滾輪直接轉為 ContentView 捲動；Pressed/Dragged/Released 處理文字選取。
- * - 透過 {@link InputCallback} 解耦業務邏輯（processInput），不直接耦合 GrimoTuiRunner。
+ * - 透過 {@link InputCallback} 解耦業務邏輯（processInput），不直接耦合 TuiAdapter。
  * - 所有狀態更新後由 eventLoop.setDirty() 觸發重繪。
  */
 public class TuiKeyHandler implements EventLoop.KeyHandler {
@@ -47,16 +47,16 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
     private static final Logger log = LoggerFactory.getLogger(TuiKeyHandler.class);
 
     /**
-     * 業務邏輯回呼：讓 TuiKeyHandler 解耦 GrimoTuiRunner 的核心業務。
+     * 業務邏輯回呼：讓 TuiKeyHandler 解耦 TuiAdapter 的核心業務。
      *
      * 設計說明：
      * - 僅暴露 TuiKeyHandler 需要觸發的業務操作。
-     * - GrimoTuiRunner 以 method reference / lambda 實作各方法。
+     * - TuiAdapter 以 method reference / lambda 實作各方法。
      */
     public interface InputCallback {
         /**
          * 使用者按 Enter 提交文字（命令或對話）。
-         * GrimoTuiRunner.processInput() 透過此回呼呼叫。
+         * TuiAdapter.processInput() 透過此回呼呼叫。
          *
          * @param text 使用者輸入的完整字串（已 trim）
          */
@@ -100,12 +100,12 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
 
     // --- 可變狀態 ---
 
-    /** 輸入歷史（與 GrimoTuiRunner 共用 list reference） */
+    /** 輸入歷史（與 TuiAdapter 共用 list reference） */
     private final List<String> history;
     private int historyIndex;
     private String savedInput;
 
-    /** Agent 執行中旗標與執行緒 reference（從 GrimoTuiRunner 傳入的 wrapper，以 volatile 欄位確保可見性） */
+    /** Agent 執行中旗標與執行緒 reference（從 TuiAdapter 傳入的 wrapper，以 volatile 欄位確保可見性） */
     private final AgentStateRef agentState;
 
     /** Double Ctrl+C 退出計時 */
@@ -116,10 +116,10 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
     private Renderable activeSelectOverlay;
 
     /**
-     * Mutable wrapper，讓 TuiKeyHandler 可讀寫 GrimoTuiRunner 的 agentRunning / agentThread。
+     * Mutable wrapper，讓 TuiKeyHandler 可讀寫 TuiAdapter 的 agentRunning / agentThread。
      *
      * 設計說明：
-     * - agentRunning 和 agentThread 是 GrimoTuiRunner 的業務狀態，不適合複製。
+     * - agentRunning 和 agentThread 是 TuiAdapter 的業務狀態，不適合複製。
      * - 透過此 wrapper，TuiKeyHandler 在 Ctrl+C 取消 agent 時可中斷 agentThread。
      */
     public static class AgentStateRef {
@@ -599,7 +599,7 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
     }
 
     /**
-     * 設定目前顯示的 select overlay 元件（由 GrimoTuiRunner 在 showAgentPicker 後呼叫）。
+     * 設定目前顯示的 select overlay 元件（由 TuiAdapter 在 showAgentPicker 後呼叫）。
      */
     public void setActiveSelectOverlay(Renderable overlay) {
         this.activeSelectOverlay = overlay;

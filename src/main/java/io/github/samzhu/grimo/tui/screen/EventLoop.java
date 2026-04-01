@@ -53,7 +53,7 @@ public class EventLoop {
     private Runnable onResize;
 
     /**
-     * 按鍵處理回呼介面：由 GrimoTuiRunner 實作具體的業務邏輯。
+     * 按鍵處理回呼介面：由 TuiAdapter 實作具體的業務邏輯。
      */
     public interface KeyHandler {
         /**

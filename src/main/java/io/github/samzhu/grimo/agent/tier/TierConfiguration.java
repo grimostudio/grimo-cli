@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 設計說明：
  * - TierRouter, TierKeywordDetector, TierOptionsFactory 都是 plain Java objects，
  *   透過 @Bean 工廠方法建立（Library over Starter 原則）
- * - sessionTier 用 AtomicReference 在 TierCommands 和 GrimoTuiRunner 間共享
+ * - sessionTier 用 AtomicReference 在 TierCommands 和 TuiAdapter 間共享
  */
 @Configuration
 public class TierConfiguration {
@@ -35,7 +35,7 @@ public class TierConfiguration {
 
     /**
      * Session 級 tier 狀態：/tier 指令設定，持續到下次切換。
-     * GrimoTuiRunner 和 TierCommands 共享此 reference。
+     * TuiAdapter 和 TierCommands 共享此 reference。
      */
     @Bean
     public AtomicReference<Tier> sessionTier() {

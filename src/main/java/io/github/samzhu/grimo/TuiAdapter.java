@@ -60,9 +60,9 @@ import java.util.List;
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
-public class GrimoTuiRunner implements ApplicationRunner {
+public class TuiAdapter implements ApplicationRunner {
 
-    private static final Logger log = LoggerFactory.getLogger(GrimoTuiRunner.class);
+    private static final Logger log = LoggerFactory.getLogger(TuiAdapter.class);
 
     private final Terminal terminal;
     private final GrimoHome grimoHome;
@@ -86,7 +86,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
     /**
      * AI 對話併發控制：封裝在 AgentStateRef，供 TuiKeyHandler 在 Ctrl+C 時中斷 agent。
-     * 設計說明：agentRunning / agentThread 同時被 processInput（GrimoTuiRunner）和
+     * 設計說明：agentRunning / agentThread 同時被 processInput（TuiAdapter）和
      * handleNormalKey（TuiKeyHandler）讀寫，透過共用 reference 保持一致。
      */
     private final TuiKeyHandler.AgentStateRef agentState = new TuiKeyHandler.AgentStateRef();
@@ -106,7 +106,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
     /** 鍵盤/滑鼠事件處理器（run 時初始化） */
     private TuiKeyHandler tuiKeyHandler;
 
-    public GrimoTuiRunner(Terminal terminal,
+    public TuiAdapter(Terminal terminal,
                            GrimoHome grimoHome,
                            ProjectContext projectContext,
                            SessionWriter sessionWriter,

@@ -40,12 +40,12 @@ import java.nio.file.Path;
  *   使得 @Component 的 Commands 類別可以透過建構子注入取得依賴
  * - startupInitRunner bean：在 TUI 事件迴圈開始前（Order HIGHEST_PRECEDENCE + 1）執行靜默初始化：
  *   Agent 偵測、Skill 載入、MCP catalog 建構、Task 恢復、Sandbox 偵測
- * - GrimoTuiRunner（Order HIGHEST_PRECEDENCE）在初始化完成後再建構 TUI 元件和啟動 event loop
+ * - TuiAdapter（Order HIGHEST_PRECEDENCE）在初始化完成後再建構 TUI 元件和啟動 event loop
  * - ChannelEventListener 需要是 Spring bean 才能讓 @EventListener 生效
  * - 舊版 AgentProviderRegistry / AgentDetector / McpClientManager / McpClientRegistry 已移除，
  *   改用 AgentModelRegistry（AgentModelFactory 偵測）和 McpCatalogBuilder（GrimoConfig 讀取）
  *
- * @see GrimoTuiRunner
+ * @see TuiAdapter
  */
 @Configuration
 @EnableScheduling
@@ -154,7 +154,7 @@ public class GrimoStartupRunner {
 
     /**
      * CommandExecutor：執行解析後的命令。
-     * TerminalUI 模式下由 GrimoTuiRunner 手動呼叫（取代 ShellRunner 的自動執行）。
+     * TerminalUI 模式下由 TuiAdapter 手動呼叫（取代 ShellRunner 的自動執行）。
      */
     @Bean
     CommandExecutor commandExecutor(CommandRegistry commandRegistry) {
@@ -192,12 +192,12 @@ public class GrimoStartupRunner {
     }
 
     /**
-     * 啟動靜默初始化 runner：在 GrimoTuiRunner（HIGHEST_PRECEDENCE）之前執行靜默初始化。
+     * 啟動靜默初始化 runner：在 TuiAdapter（HIGHEST_PRECEDENCE）之前執行靜默初始化。
      *
      * 設計說明（為何用 ApplicationRunner 而非 @PostConstruct）：
      * - @PostConstruct 在 bean 建立時執行，彼時 Spring context 未完全就緒（CommandRegistry 等可能尚未初始化）
      * - ApplicationRunner 在 context 完全就緒後執行，確保所有 bean 都可用
-     * - Order(HIGHEST_PRECEDENCE + 1) 讓本 runner 在 GrimoTuiRunner(HIGHEST_PRECEDENCE) 之前執行，
+     * - Order(HIGHEST_PRECEDENCE + 1) 讓本 runner 在 TuiAdapter(HIGHEST_PRECEDENCE) 之前執行，
      *   確保 TUI 建構時已有 agent、skill、MCP 資料可用
      *
      * 初始化步驟：

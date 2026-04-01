@@ -46,7 +46,7 @@ public class McpCatalogBuilder {
     /**
      * 重讀 config.yaml 並重建 catalog 快取。
      * 由 /mcp-add、/mcp-remove 呼叫以達到即時生效。
-     * 也由 GrimoTuiRunner Phase 2 啟動時呼叫。
+     * 也由 TuiAdapter Phase 2 啟動時呼叫。
      */
     public void rebuild() {
         McpServerCatalog newCatalog = build();

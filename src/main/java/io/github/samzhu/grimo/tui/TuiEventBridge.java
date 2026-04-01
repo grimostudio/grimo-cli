@@ -22,8 +22,8 @@ import org.springframework.stereotype.Component;
  * TUI event bridge：將 domain events 轉為 TUI 更新。
  *
  * 設計說明：
- * - 從 GrimoTuiRunner 提取 @EventListener 方法，職責單一化（SP4 Task 3）
- * - TUI 元件（StatusView、ContentView）不是 Spring bean，由 GrimoTuiRunner.run() 建構後
+ * - 從 TuiAdapter 提取 @EventListener 方法，職責單一化（SP4 Task 3）
+ * - TUI 元件（StatusView、ContentView）不是 Spring bean，由 TuiAdapter.run() 建構後
  *   透過 bind() 注入，避免循環依賴
  * - Spring beans（GrimoConfig、AgentModelRegistry 等）由 constructor injection 注入
  * - listener 收到 event 時若 TUI 尚未初始化（bind 尚未呼叫），直接 return 防衛
@@ -37,7 +37,7 @@ public class TuiEventBridge {
     private final TaskSchedulerService taskSchedulerService;
     private final ProjectContext projectContext;
 
-    /** TUI 元件（run 時由 GrimoTuiRunner.bind() 設定） */
+    /** TUI 元件（run 時由 TuiAdapter.bind() 設定） */
     private volatile StatusView statusView;
     private volatile ContentView contentView;
     private volatile Runnable setDirty;
@@ -58,13 +58,13 @@ public class TuiEventBridge {
     }
 
     /**
-     * GrimoTuiRunner 在 run() 建構 TUI 元件後呼叫此方法完成繫結。
+     * TuiAdapter 在 run() 建構 TUI 元件後呼叫此方法完成繫結。
      * TUI 元件不是 Spring bean，必須在 run() 後才能取得。
      *
      * @param statusView        status bar 元件
      * @param contentView       主內容區元件
      * @param setDirty          觸發重繪的回呼（通常是 eventLoop::setDirty）
-     * @param originalStatusText 初始 status text（由 GrimoTuiRunner 建構時產生）
+     * @param originalStatusText 初始 status text（由 TuiAdapter 建構時產生）
      */
     public void bind(StatusView statusView,
                      ContentView contentView,

@@ -27,12 +27,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * AI チャットのディスパッチャー：ユーザー入力を受け取り、Tier ルーティングを経て AgentClient を呼び出す。
  *
  * 設計說明：
- * - GrimoTuiRunner.processInput() の else ブランチ（AI 対話ロジック）を抽出（SP4 Task 4）
+ * - TuiAdapter.processInput() の else ブランチ（AI 対話ロジック）を抽出（SP4 Task 4）
  * - Tier 路由、Agent 可用性確認、MCP catalog セットアップ、AgentClient 呼び出し、エラーハンドリングを担当
- * - スレッド管理（Virtual Thread 起動）と ContentView/StatusView の描画更新は GrimoTuiRunner に残す
+ * - スレッド管理（Virtual Thread 起動）と ContentView/StatusView の描画更新は TuiAdapter に残す
  * - TUI 元件（ContentView、StatusView、EventLoop）は bind() で後から注入（Spring bean でないため）
  *
- * @see GrimoTuiRunner
+ * @see TuiAdapter
  */
 @Component
 public class ChatDispatcher {
@@ -49,7 +49,7 @@ public class ChatDispatcher {
     private final SessionWriter sessionWriter;
     private final TuiEventBridge tuiEventBridge;
 
-    /** TUI 元件（run 時由 GrimoTuiRunner.bindTui() 設定） */
+    /** TUI 元件（run 時由 TuiAdapter.bindTui() 設定） */
     private volatile ContentView contentView;
     private volatile StatusView statusView;
     private volatile EventLoop eventLoop;
@@ -79,7 +79,7 @@ public class ChatDispatcher {
     }
 
     /**
-     * GrimoTuiRunner が run() で TUI 元件を構築した後に呼び出してバインドする。
+     * TuiAdapter が run() で TUI 元件を構築した後に呼び出してバインドする。
      * TUI 元件は Spring bean ではないため、run() 後に取得可能になる。
      *
      * @param contentView  主内容区元件
@@ -98,11 +98,11 @@ public class ChatDispatcher {
     }
 
     /**
-     * AI チャットを Agent にディスパッチする。Virtual Thread の起動は GrimoTuiRunner が担当。
+     * AI チャットを Agent にディスパッチする。Virtual Thread の起動は TuiAdapter が担当。
      *
      * 設計說明：
      * - agentRunning チェック → Tier ルーティング → AgentClient ビルド → run() までを担当
-     * - "thinking..." 行の追加と Virtual Thread の起動は呼び出し元（GrimoTuiRunner）で行う
+     * - "thinking..." 行の追加と Virtual Thread の起動は呼び出し元（TuiAdapter）で行う
      *
      * @param userInput ユーザーが入力したテキスト
      */

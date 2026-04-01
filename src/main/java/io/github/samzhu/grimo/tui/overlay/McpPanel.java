@@ -13,7 +13,7 @@ import java.util.Map;
  *
  * 設計說明：
  * - 跟隨 SlashMenu 的 pattern（純資料 + render() 產出 List<AttributedString>）
- * - 不負責按鍵處理（由 GrimoTuiRunner.handleMcpManagerKey 負責）
+ * - 不負責按鍵處理（由 TuiAdapter.handleMcpManagerKey 負責）
  * - 不負責 config 寫入或 catalog 重建（由上層呼叫者負責）
  * - load() 重新載入 server 列表時自動 clamp selectedIndex
  */
