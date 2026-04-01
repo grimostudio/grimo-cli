@@ -20,19 +20,19 @@
 
 需要一個**通用的、有狀態的、可復用的**選擇 widget。
 
-### Claude Code 研究啟發
+### 終端 UI 研究啟發
 
-參考 Claude Code `CustomSelect` 組件的設計模式：
+| 來源 | 關鍵設計模式 | Grimo 採用 |
+|------|-------------|-----------|
+| **Claude Code** `CustomSelect` | Viewport scrolling、scroll hints、`OptionWithDescription<T>`、linear nav（不 wrap） | ✅ 全部採用 |
+| **tmux** `mode-tree` | callback-driven 架構、兩階段渲染（build flat list → render visible）、state preservation across rebuilds | ✅ `setItems()` 動態更新 + index 保留；GroupedSelect 未來用 flatten pattern |
+| **Charm Bubbles** `list` | Elm 架構（Model-Update-View）、composable features（filter/pagination 可 toggle） | ✅ 純狀態+渲染（不處理 input）= Model+View，input routing 在 controller |
+| **Ghostty** | 使用原生 platform UI（SwiftUI/GTK），不自建 TUI widget | 不適用（Grimo 是 CLI app） |
 
-| 特性 | Claude Code 做法 | Grimo 採用 |
-|------|-----------------|-----------|
-| Viewport scrolling | 列表超過 maxVisible 時 viewport 跟隨游標 | ✅ 採用 |
-| Scroll hints | `↑ N more` / `↓ N more` 指示上下方有更多選項 | ✅ 採用 |
-| Linear navigation | 到頂/底不循環（不 wrap） | ✅ 採用（跟 SlashMenu 的 wrap 行為不同） |
-| Label + Description | `OptionWithDescription<T>` | ✅ 採用（label 左、description 右灰色） |
-| Selection indicator | 選中項高亮 | ✅ 採用（`>` 前綴 + BRAND_COLOR） |
-
-> 參考來源：`/Users/samzhu/workspace/claudecode/claude-code-main/src/components/CustomSelect/select.tsx`
+> 參考來源：
+> - Claude Code: `CustomSelect/select.tsx`
+> - tmux: `mode-tree.c` — [source](https://github.com/tmux/tmux/blob/master/mode-tree.c)
+> - Charm Bubbles: [github.com/charmbracelet/bubbles](https://github.com/charmbracelet/bubbles)
 
 ## 設計
 
@@ -40,38 +40,88 @@
 
 **位置：** `tui/widget/ListSelect.java`
 
+**設計參考：**
+- tmux `mode-tree` — callback-driven + 兩階段渲染（build flat list → render visible range）+ state preservation across rebuilds
+- Charm Bubbles `list` — composable features、pagination、可 toggle 的 filter/description
+- Claude Code `CustomSelect` — viewport scrolling、scroll hints、OptionWithDescription
+
 ```java
+/**
+ * 通用單選列表 widget。
+ *
+ * 設計說明：
+ * - Generic <T> 讓 consumer 攜帶任意值（agentId, model, tier...）
+ * - Viewport scrolling：列表超過 maxVisible 時，viewport 跟隨 selectedIndex
+ * - Scroll hints：↑/↓ 指示隱藏的項目數量（佔 maxVisible 行數）
+ * - Linear navigation：到頂/底不循環（對齊 Claude Code，不同於 SlashMenu 的 wrap）
+ * - setItems() 支援動態更新（tmux rebuild pattern），保留 selectedIndex
+ * - 純狀態 + 渲染，不處理鍵盤（EventLoop 層轉發 ↑↓/Enter/Esc）
+ *
+ * 未來 GroupedSelect 可包裝 ListSelect：
+ *   tree → flatten to Item list → setItems() → 展開/收合只是 rebuild items
+ *
+ * @see <a href="https://github.com/tmux/tmux/blob/master/mode-tree.c">tmux mode-tree.c</a>
+ * @see <a href="https://github.com/charmbracelet/bubbles">Charm Bubbles list component</a>
+ */
 public class ListSelect<T> implements Renderable {
 
     /** 選項：顯示用 label + 說明 + 邏輯值 */
     public record Item<T>(String label, String description, T value) {}
 
-    private final List<Item<T>> items;
+    private List<Item<T>> items;
     private final int maxVisible;
     private int selectedIndex = 0;
     private int viewportStart = 0;
 
     public ListSelect(List<Item<T>> items, int maxVisible);
 
+    // === 動態更新（tmux rebuild pattern）===
+
+    /**
+     * 更新 item 列表。保留 selectedIndex（若仍在範圍內），否則 clamp 到最後一項。
+     * 用於：agent 偵測完成後更新列表、filter 結果變更等。
+     */
+    public void setItems(List<Item<T>> items);
+
     // === 導航 ===
+
     /** 選中項上移。到頂不循環（linear）。viewport 跟隨。 */
     public void moveUp();
     /** 選中項下移。到底不循環（linear）。viewport 跟隨。 */
     public void moveDown();
+    /** 跳到第一項（Home）。 */
+    public void moveToFirst();
+    /** 跳到最後一項（End）。 */
+    public void moveToLast();
 
     // === 查詢 ===
+
     /** 取得目前選中的 Item，列表空回傳 null */
     public Item<T> getSelected();
+    /** 取得 selectedIndex（consumer 可用於外部狀態同步） */
+    public int getSelectedIndex();
     public boolean isEmpty();
-    /** 實際可見行數（含 scroll hints），用於 overlay 高度計算 */
+    /** 實際渲染高度 = min(items.size(), maxVisible)。overlay 高度計算用。 */
     public int getVisibleCount();
 
     // === 渲染 ===
+
     /** 渲染選擇列表。每行 columnLength == width。含 scroll hints。 */
     @Override
     public List<AttributedString> render(int width);
 }
 ```
+
+**可覆用場景一覽：**
+
+| 場景 | Item\<T\> 的 T | label | description |
+|------|----------------|-------|-------------|
+| `/agent-use` | `String` (agentId) | `"claude"` | `"Claude Sonnet 4.6"` |
+| `/tier`（未來） | `Tier` (enum) | `"pro"` | `"深度推理 — claude-opus-4-6"` |
+| `/skill-install`（未來） | `SkillDef` | `"code-review"` | `"Code review skill"` |
+| GroupedSelect 展開（未來） | `String` (modelId) | `"  claude-opus-4-6"` | `"Deep reasoning"` |
+
+> 設計說明：GroupedSelect 的 expand/collapse 實現方式 = 重建 items 列表再 `setItems()`（tmux pattern：tree → flat list → render）。不需新增 expand/collapse 到 ListSelect — 那是 GroupedSelect 的職責。
 
 ### 2. 渲染規格
 
@@ -224,6 +274,11 @@ private void showAgentPicker() {
 | `descriptionRenderedInGray` | description 使用 ANSI 245 灰色 |
 | `getSelectedReturnsCorrectItem` | getSelected() 回傳 selectedIndex 的 Item |
 | `linearNavigationNoWrap` | 到頂再 moveUp 不變，到底再 moveDown 不變 |
+| `moveToFirstJumpsToTop` | moveToFirst() → selectedIndex=0, viewportStart=0 |
+| `moveToLastJumpsToBottom` | moveToLast() → selectedIndex=last, viewport 跟隨 |
+| `setItemsPreservesIndex` | setItems() 保留 selectedIndex（若在範圍內） |
+| `setItemsClampsIndex` | setItems() 縮短列表 → selectedIndex clamp 到 last |
+| `setItemsEmptyList` | setItems(empty) → selectedIndex=0, getSelected()=null |
 | `cjkLabelRendersCorrectWidth` | CJK label 寬度正確（2 column per char） |
 
 **不測 overlay 整合** — GrimoTuiRunner 的 integration test 太重，mock 太多。
