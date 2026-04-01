@@ -1,5 +1,6 @@
 package io.github.samzhu.grimo.shared.session;
 
+import io.github.samzhu.grimo.shared.event.AgentCallRecordedEvent;
 import io.github.samzhu.grimo.shared.event.DevModeEnteredEvent;
 import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;
 import org.springframework.context.event.EventListener;
@@ -20,6 +21,12 @@ public class SessionEventListener {
 
     public SessionEventListener(SessionWriter sessionWriter) {
         this.sessionWriter = sessionWriter;
+    }
+
+    @EventListener
+    public void on(AgentCallRecordedEvent event) {
+        sessionWriter.writeUserMessage(event.userGoal());
+        sessionWriter.writeAssistantMessage(event.agentResult());
     }
 
     @EventListener
