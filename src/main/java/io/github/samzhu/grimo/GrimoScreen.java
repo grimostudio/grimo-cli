@@ -7,10 +7,10 @@ import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 import org.jline.utils.Display;
 
-import io.github.samzhu.grimo.shared.tui.BufferLine;
-import io.github.samzhu.grimo.shared.tui.Layout;
-import io.github.samzhu.grimo.shared.tui.SelectionRange;
-import io.github.samzhu.grimo.shared.tui.TextSelection;
+import io.github.samzhu.grimo.tui.screen.BufferLine;
+import io.github.samzhu.grimo.tui.core.Layout;
+import io.github.samzhu.grimo.tui.selection.SelectionRange;
+import io.github.samzhu.grimo.tui.selection.TextSelection;
 
 import java.util.ArrayList;
 import java.util.List;

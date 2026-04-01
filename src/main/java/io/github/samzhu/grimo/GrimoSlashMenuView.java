@@ -1,7 +1,7 @@
 package io.github.samzhu.grimo;
 
-import io.github.samzhu.grimo.shared.tui.DisplayWidth;
-import io.github.samzhu.grimo.shared.tui.TuiComponent;
+import io.github.samzhu.grimo.tui.core.DisplayWidth;
+import io.github.samzhu.grimo.tui.core.Renderable;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
 
@@ -17,7 +17,7 @@ import java.util.List;
  * - 未選中項以預設色渲染
  * - 作為 overlay 渲染到 content 底部（由 GrimoScreen 負責覆蓋）
  */
-public class GrimoSlashMenuView implements TuiComponent {
+public class GrimoSlashMenuView implements Renderable {
 
     /** 品牌標誌色 steel blue（ANSI 256 色碼 67） */
     private static final int BRAND_COLOR = 67;

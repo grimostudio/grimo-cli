@@ -1,5 +1,6 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.widget;
 
+import io.github.samzhu.grimo.tui.core.DisplayWidth;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
@@ -18,11 +19,11 @@ import java.util.List;
  *
  * @see DisplayWidth — 寬度感知字串操作
  */
-public final class TuiSelector {
+public final class Selector {
 
     private static final int BRAND_COLOR = 67;
 
-    private TuiSelector() {}
+    private Selector() {}
 
     public static List<AttributedString> render(
             List<String> items, int selectedIndex, int maxVisible, int width) {

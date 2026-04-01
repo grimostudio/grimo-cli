@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.core;
 
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;

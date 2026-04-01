@@ -3,7 +3,7 @@ package io.github.samzhu.grimo.agent;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
-import io.github.samzhu.grimo.shared.tui.TuiTable;
+import io.github.samzhu.grimo.tui.widget.Table;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
@@ -75,7 +75,7 @@ public class AgentCommands {
                     .findFirst().orElse("");
         }
 
-        var table = TuiTable.builder()
+        var table = Table.builder()
                 .column("", 2)           // indicator
                 .column("ID", 10)        // agent name
                 .column("STATUS", 10)    // ready / not available

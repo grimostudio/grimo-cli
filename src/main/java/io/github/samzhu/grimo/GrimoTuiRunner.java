@@ -41,9 +41,9 @@ import org.springframework.shell.core.command.CommandParser;
 import org.springframework.shell.core.command.CommandRegistry;
 import org.springframework.stereotype.Component;
 
-import io.github.samzhu.grimo.shared.tui.AutoScroller;
-import io.github.samzhu.grimo.shared.tui.ClipboardWriter;
-import io.github.samzhu.grimo.shared.tui.TextSelection;
+import io.github.samzhu.grimo.tui.selection.AutoScroller;
+import io.github.samzhu.grimo.tui.selection.Clipboard;
+import io.github.samzhu.grimo.tui.selection.TextSelection;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -124,7 +124,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private final SessionWriter sessionWriter;
     private TextSelection textSelection;
     private AutoScroller autoScroller;
-    private ClipboardWriter clipboardWriter;
+    private Clipboard clipboardWriter;
 
     public GrimoTuiRunner(Terminal terminal,
                            GrimoHome grimoHome,
@@ -235,7 +235,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
         mcpManagerView = new GrimoMcpManagerView();
         textSelection = new TextSelection();
-        clipboardWriter = new ClipboardWriter();
+        clipboardWriter = new Clipboard();
         screen = new GrimoScreen(terminal, contentView, inputView, statusView,
                 slashMenuView, mcpManagerView, textSelection);
 

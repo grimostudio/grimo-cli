@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.selection;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;

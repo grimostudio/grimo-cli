@@ -1,5 +1,6 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.widget;
 
+import io.github.samzhu.grimo.tui.core.DisplayWidth;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
@@ -21,9 +22,9 @@ import java.util.List;
  * @see DisplayWidth — 寬度感知字串操作
  * @see <a href="https://github.com/anomalyco/opencode">OpenCode — InlineTool/BlockTool</a>
  */
-public final class TuiMessage {
+public final class Message {
 
-    private TuiMessage() {}
+    private Message() {}
 
     public enum Role {
         USER("› ", 7),

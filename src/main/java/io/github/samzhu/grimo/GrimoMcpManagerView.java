@@ -1,6 +1,6 @@
 package io.github.samzhu.grimo;
 
-import io.github.samzhu.grimo.shared.tui.DisplayWidth;
+import io.github.samzhu.grimo.tui.core.DisplayWidth;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
 

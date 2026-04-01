@@ -1,8 +1,8 @@
 package io.github.samzhu.grimo;
 
-import io.github.samzhu.grimo.shared.tui.DisplayWidth;
-import io.github.samzhu.grimo.shared.tui.Layout;
-import io.github.samzhu.grimo.shared.tui.TuiComponent;
+import io.github.samzhu.grimo.tui.core.DisplayWidth;
+import io.github.samzhu.grimo.tui.core.Layout;
+import io.github.samzhu.grimo.tui.core.Renderable;
 import org.jline.utils.AttributedString;
 
 import java.util.List;
@@ -18,11 +18,11 @@ import java.util.List;
  *
  * @see <a href="https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit">ANSI 256 Color Reference</a>
  */
-public class BannerRenderer implements TuiComponent {
+public class BannerRenderer implements Renderable {
 
     @Override
     public List<AttributedString> render(int width) {
-        // TuiComponent 契約：BannerRenderer 需要額外參數，此方法供介面相容
+        // Renderable 契約：BannerRenderer 需要額外參數，此方法供介面相容
         // 實際渲染由 render(version, agentId, ..., cols) 處理
         return List.of();
     }

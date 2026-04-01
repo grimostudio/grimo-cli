@@ -1,5 +1,6 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.widget;
 
+import io.github.samzhu.grimo.tui.core.DisplayWidth;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
 
@@ -9,9 +10,9 @@ import org.jline.utils.AttributedStyle;
  *
  * @see DisplayWidth — 寬度計算
  */
-public final class TuiStatusBar {
+public final class StatusBar {
 
-    private TuiStatusBar() {}
+    private StatusBar() {}
 
     /**
      * 產生一行 AttributedString，display width 精確 == width。

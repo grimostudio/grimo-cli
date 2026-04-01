@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.screen;
 
 import org.jline.utils.AttributedString;
 

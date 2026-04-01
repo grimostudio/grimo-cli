@@ -1,5 +1,6 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.selection;
 
+import io.github.samzhu.grimo.tui.screen.BufferLine;
 import org.jline.utils.AttributedString;
 import java.util.List;
 

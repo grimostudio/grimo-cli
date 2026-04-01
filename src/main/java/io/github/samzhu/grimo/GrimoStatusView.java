@@ -1,8 +1,8 @@
 package io.github.samzhu.grimo;
 
-import io.github.samzhu.grimo.shared.tui.DisplayWidth;
-import io.github.samzhu.grimo.shared.tui.TuiComponent;
-import io.github.samzhu.grimo.shared.tui.TuiStatusBar;
+import io.github.samzhu.grimo.tui.core.DisplayWidth;
+import io.github.samzhu.grimo.tui.core.Renderable;
+import io.github.samzhu.grimo.tui.widget.StatusBar;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
@@ -17,7 +17,7 @@ import java.util.List;
  * - 一般對話：灰色文字
  * - Skill 執行時：tier icon 用對應色彩（lite=green, std=gray, pro=yellow）
  */
-public class GrimoStatusView implements TuiComponent {
+public class GrimoStatusView implements Renderable {
 
     private static final AttributedStyle STATUS_STYLE = AttributedStyle.DEFAULT.foreground(245);
     private static final AttributedStyle LITE_STYLE = AttributedStyle.DEFAULT.foreground(2);   // green
@@ -70,7 +70,7 @@ public class GrimoStatusView implements TuiComponent {
     public List<AttributedString> render(int cols) {
         String tempMsg = this.temporaryMessage;
         if (tempMsg != null) {
-            return List.of(TuiStatusBar.of(tempMsg,
+            return List.of(StatusBar.of(tempMsg,
                     AttributedStyle.DEFAULT.foreground(2), cols));  // green
         }
 
@@ -97,6 +97,6 @@ public class GrimoStatusView implements TuiComponent {
         }
 
         // 使用 DisplayWidth 做 column-aware 截斷 + 補齊，修正 CJK 字元被錯誤截斷的問題
-        return List.of(TuiStatusBar.of(statusText, STATUS_STYLE, cols));
+        return List.of(StatusBar.of(statusText, STATUS_STYLE, cols));
     }
 }

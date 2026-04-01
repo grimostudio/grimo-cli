@@ -1,4 +1,7 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.widget;
+
+import io.github.samzhu.grimo.tui.core.DisplayWidth;
+import io.github.samzhu.grimo.tui.core.Layout;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,9 +18,9 @@ import java.util.List;
  * @see Layout — 欄寬計算
  * @see DisplayWidth — 寬度感知字串操作
  */
-public final class TuiTable {
+public final class Table {
 
-    private TuiTable() {}
+    private Table() {}
 
     public static Builder builder() {
         return new Builder();

@@ -1,13 +1,14 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.widget;
 
+import io.github.samzhu.grimo.tui.core.DisplayWidth;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class TuiTableTest {
+class TableTest {
 
     @Test
     void shouldAlignColumnsWithFixedWidth() {
-        String result = TuiTable.builder()
+        String result = Table.builder()
                 .column("ID", 10)
                 .column("STATUS", 10)
                 .row("claude", "ready")
@@ -23,7 +24,7 @@ class TuiTableTest {
 
     @Test
     void shouldFillRemainingWidth() {
-        String result = TuiTable.builder()
+        String result = Table.builder()
                 .column("", 2)
                 .column("ID", 10)
                 .column("MODEL", 0)
@@ -40,7 +41,7 @@ class TuiTableTest {
 
     @Test
     void shouldTruncateLongValues() {
-        String result = TuiTable.builder()
+        String result = Table.builder()
                 .column("NAME", 8)
                 .row("very-long-name-here")
                 .build(10);
@@ -51,7 +52,7 @@ class TuiTableTest {
 
     @Test
     void shouldHandleCjkContent() {
-        String result = TuiTable.builder()
+        String result = Table.builder()
                 .column("名前", 8)
                 .column("狀態", 8)
                 .row("你好", "正常")
@@ -65,7 +66,7 @@ class TuiTableTest {
 
     @Test
     void shouldHandleMultipleFixedAndOneFill() {
-        String result = TuiTable.builder()
+        String result = Table.builder()
                 .column("", 2)
                 .column("ID", 12)
                 .column("STATUS", 12)

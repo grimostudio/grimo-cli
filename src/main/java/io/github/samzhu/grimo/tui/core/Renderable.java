@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.core;
 
 import org.jline.utils.AttributedString;
 import java.util.List;
@@ -16,6 +16,6 @@ import java.util.List;
  * @see <a href="https://github.com/anomalyco/opencode">OpenCode — scrollbox 容器模式</a>
  * @see <a href="https://github.com/ratatui/ratatui">Ratatui — Widget trait</a>
  */
-public interface TuiComponent {
+public interface Renderable {
     List<AttributedString> render(int width);
 }

@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.selection;
 
 import org.jline.terminal.Terminal;
 import org.slf4j.Logger;
@@ -23,9 +23,9 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * @see <a href="https://github.com/tmux/tmux/wiki/Clipboard">tmux Clipboard Wiki</a>
  * @see <a href="https://neovim.io/doc/user/provider/">Neovim clipboard provider</a>
  */
-public class ClipboardWriter {
+public class Clipboard {
 
-    private static final Logger log = LoggerFactory.getLogger(ClipboardWriter.class);
+    private static final Logger log = LoggerFactory.getLogger(Clipboard.class);
     private static final int OSC52_MAX_BYTES = 100_000;
 
     /**

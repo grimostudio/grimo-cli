@@ -1,7 +1,7 @@
 package io.github.samzhu.grimo;
 
-import io.github.samzhu.grimo.shared.tui.BufferLine;
-import io.github.samzhu.grimo.shared.tui.TuiComponent;
+import io.github.samzhu.grimo.tui.screen.BufferLine;
+import io.github.samzhu.grimo.tui.core.Renderable;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
@@ -19,7 +19,7 @@ import java.util.List;
  * - autoFollow 模式下新內容自動滾到底部
  * - 渲染統一由 GrimoScreen → Display.update() 處理（diff-based，不閃爍）
  */
-public class GrimoContentView implements TuiComponent {
+public class GrimoContentView implements Renderable {
 
     /** 品牌標誌色 steel blue（ANSI 256 色碼 67, #5F87AF） */
     private static final int BRAND_COLOR = 67;
@@ -249,7 +249,7 @@ public class GrimoContentView implements TuiComponent {
 
     @Override
     public synchronized List<AttributedString> render(int width) {
-        // TuiComponent 契約：回傳所有內容（自然高度），容器負責捲動
+        // Renderable 契約：回傳所有內容（自然高度），容器負責捲動
         return render(width, Integer.MAX_VALUE);
     }
 

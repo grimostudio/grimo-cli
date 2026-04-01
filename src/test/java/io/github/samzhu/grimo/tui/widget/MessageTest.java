@@ -1,13 +1,13 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.widget;
 
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class TuiMessageTest {
+class MessageTest {
 
     @Test
     void inlineShouldReturnTwoLinesWithCorrectWidth() {
-        var lines = TuiMessage.inline("● ", "Skill(code-review)",
+        var lines = Message.inline("● ", "Skill(code-review)",
                 "Successfully loaded skill", 50);
         assertThat(lines).hasSize(2);
         for (var line : lines) {
@@ -17,7 +17,7 @@ class TuiMessageTest {
 
     @Test
     void inlineShouldTruncateLongTitle() {
-        var lines = TuiMessage.inline("● ", "Skill(very-long-skill-name-here)",
+        var lines = Message.inline("● ", "Skill(very-long-skill-name-here)",
                 "loaded", 30);
         for (var line : lines) {
             assertThat(line.columnLength()).isEqualTo(30);
@@ -26,7 +26,7 @@ class TuiMessageTest {
 
     @Test
     void blockUserShouldHaveCorrectWidth() {
-        var lines = TuiMessage.block(TuiMessage.Role.USER, "hello world", 40);
+        var lines = Message.block(Message.Role.USER, "hello world", 40);
         assertThat(lines).isNotEmpty();
         for (var line : lines) {
             assertThat(line.columnLength()).isEqualTo(40);
@@ -35,7 +35,7 @@ class TuiMessageTest {
 
     @Test
     void blockAgentShouldHaveCorrectWidth() {
-        var lines = TuiMessage.block(TuiMessage.Role.AGENT, "I can help.", 40);
+        var lines = Message.block(Message.Role.AGENT, "I can help.", 40);
         assertThat(lines).isNotEmpty();
         for (var line : lines) {
             assertThat(line.columnLength()).isEqualTo(40);
@@ -44,7 +44,7 @@ class TuiMessageTest {
 
     @Test
     void blockErrorShouldHaveCorrectWidth() {
-        var lines = TuiMessage.block(TuiMessage.Role.ERROR, "timeout", 40);
+        var lines = Message.block(Message.Role.ERROR, "timeout", 40);
         assertThat(lines).isNotEmpty();
         for (var line : lines) {
             assertThat(line.columnLength()).isEqualTo(40);
@@ -54,7 +54,7 @@ class TuiMessageTest {
     @Test
     void blockShouldWrapLongContent() {
         String longText = "a".repeat(100);
-        var lines = TuiMessage.block(TuiMessage.Role.AGENT, longText, 40);
+        var lines = Message.block(Message.Role.AGENT, longText, 40);
         assertThat(lines.size()).isGreaterThan(1);
         for (var line : lines) {
             assertThat(line.columnLength()).isEqualTo(40);
@@ -63,7 +63,7 @@ class TuiMessageTest {
 
     @Test
     void blockShouldHandleCjkContent() {
-        var lines = TuiMessage.block(TuiMessage.Role.USER, "你好世界", 20);
+        var lines = Message.block(Message.Role.USER, "你好世界", 20);
         assertThat(lines).isNotEmpty();
         for (var line : lines) {
             assertThat(line.columnLength()).isEqualTo(20);
@@ -72,7 +72,7 @@ class TuiMessageTest {
 
     @Test
     void blockShouldHandleEmptyContent() {
-        var lines = TuiMessage.block(TuiMessage.Role.AGENT, "", 40);
+        var lines = Message.block(Message.Role.AGENT, "", 40);
         assertThat(lines).hasSize(1);
         assertThat(lines.getFirst().columnLength()).isEqualTo(40);
     }

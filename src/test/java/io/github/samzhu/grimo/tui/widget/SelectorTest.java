@@ -1,14 +1,14 @@
-package io.github.samzhu.grimo.shared.tui;
+package io.github.samzhu.grimo.tui.widget;
 
 import org.junit.jupiter.api.Test;
 import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
-class TuiSelectorTest {
+class SelectorTest {
 
     @Test
     void shouldRenderItemsWithCorrectWidth() {
-        var lines = TuiSelector.render(
+        var lines = Selector.render(
                 List.of("code-review", "explain-code"),
                 0, 5, 40);
         assertThat(lines).hasSize(2);
@@ -19,7 +19,7 @@ class TuiSelectorTest {
 
     @Test
     void shouldHighlightSelectedItem() {
-        var lines = TuiSelector.render(
+        var lines = Selector.render(
                 List.of("item-a", "item-b", "item-c"),
                 1, 3, 30);
         assertThat(lines).hasSize(3);
@@ -30,7 +30,7 @@ class TuiSelectorTest {
 
     @Test
     void shouldLimitVisibleItems() {
-        var lines = TuiSelector.render(
+        var lines = Selector.render(
                 List.of("a", "b", "c", "d", "e", "f"),
                 0, 3, 20);
         assertThat(lines).hasSize(3);
@@ -38,13 +38,13 @@ class TuiSelectorTest {
 
     @Test
     void shouldHandleEmptyList() {
-        var lines = TuiSelector.render(List.of(), 0, 5, 20);
+        var lines = Selector.render(List.of(), 0, 5, 20);
         assertThat(lines).isEmpty();
     }
 
     @Test
     void shouldHandleCjkItems() {
-        var lines = TuiSelector.render(
+        var lines = Selector.render(
                 List.of("你好", "hello"),
                 0, 5, 30);
         for (var line : lines) {
