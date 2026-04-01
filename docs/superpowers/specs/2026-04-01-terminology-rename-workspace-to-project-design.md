@@ -146,7 +146,17 @@ src/test/java/io/github/samzhu/grimo/shared/workspace/
 
 ### 8. CLAUDE.md 同步
 
-`CLAUDE.md` 的「Architecture」表格中若有 `WorkspaceManager` 或 `workspace` 字眼，需同步更新。經查，前輪已移除 `WorkspaceManager` 引用，但 `shared/` 的 Purpose 描述需確認是否提及 workspace path management。
+`CLAUDE.md` 的「Architecture」表格 `shared/` 行目前寫：
+
+```
+| `shared/` | Domain events, config loading, workspace path management |
+```
+
+需更新為：
+
+```
+| `shared/` | Domain events, config loading, GrimoHome (app data), ProjectContext (CWD) |
+```
 
 ## 不在範圍內
 
