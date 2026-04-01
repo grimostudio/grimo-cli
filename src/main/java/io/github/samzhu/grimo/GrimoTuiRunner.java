@@ -19,7 +19,8 @@ import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
 import io.github.samzhu.grimo.shared.event.DevModeEnteredEvent;
 import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;
 import io.github.samzhu.grimo.shared.event.McpCatalogChangedEvent;
-import io.github.samzhu.grimo.shared.workspace.WorkspaceManager;
+import io.github.samzhu.grimo.shared.workspace.GrimoHome;
+import io.github.samzhu.grimo.shared.workspace.ProjectContext;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
@@ -76,7 +77,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private String savedInput = "";
 
     private final Terminal terminal;
-    private final WorkspaceManager workspaceManager;
+    private final GrimoHome grimoHome;
+    private final ProjectContext projectContext;
     private final GrimoConfig grimoConfig;
     private final AgentModelFactory agentModelFactory;
     private final AgentModelRegistry agentModelRegistry;
@@ -119,13 +121,15 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private GrimoMcpManagerView mcpManagerView;
     private GrimoScreen screen;
     private GrimoEventLoop eventLoop;
-    private SessionWriter sessionWriter;
+    private final SessionWriter sessionWriter;
     private TextSelection textSelection;
     private AutoScroller autoScroller;
     private ClipboardWriter clipboardWriter;
 
     public GrimoTuiRunner(Terminal terminal,
-                           WorkspaceManager workspaceManager,
+                           GrimoHome grimoHome,
+                           ProjectContext projectContext,
+                           SessionWriter sessionWriter,
                            GrimoConfig grimoConfig,
                            AgentModelFactory agentModelFactory,
                            AgentModelRegistry agentModelRegistry,
@@ -146,7 +150,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
                            TierOptionsFactory tierOptionsFactory,
                            AtomicReference<Tier> sessionTier) {
         this.terminal = terminal;
-        this.workspaceManager = workspaceManager;
+        this.grimoHome = grimoHome;
+        this.projectContext = projectContext;
+        this.sessionWriter = sessionWriter;
         this.grimoConfig = grimoConfig;
         this.agentModelFactory = agentModelFactory;
         this.agentModelRegistry = agentModelRegistry;
@@ -171,9 +177,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws Exception {
         // === Phase 1: Workspace 初始化 ===
-        if (!workspaceManager.isInitialized()) {
-            workspaceManager.initialize();
+        if (!grimoHome.isInitialized()) {
+            grimoHome.initialize();
         }
+        projectContext.initialize();
 
         // === Phase 2: 同步載入（靜默，無動畫）===
         var agentResults = agentModelFactory.detectAndRegister(
@@ -200,8 +207,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
         String model = grimoConfig.getAgentOption(agentId, "model");
         if (model == null) model = grimoConfig.getDefaultModel();
         if (model == null) model = AgentCommands.RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
-        String workspacePath = workspaceManager.root().toString()
-                .replace(System.getProperty("user.home"), "~");
+        String workspacePath = projectContext.displayPath();
         long agentCount = agentResults.stream()
                 .filter(AgentModelFactory.DetectionResult::available).count();
         int skillCount = skillRegistry.listAll().size();
@@ -234,11 +240,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 slashMenuView, mcpManagerView, textSelection);
 
         // === Session 對話存檔 ===
-        String cwd = System.getProperty("user.dir");
-        String encodedCwd = cwd.replaceAll("[^a-zA-Z0-9]", "-");
-        var sessionsDir = workspaceManager.root().resolve("projects").resolve(encodedCwd).resolve("sessions");
-        sessionWriter = new SessionWriter(sessionsDir);
-        sessionWriter.writeSystemMessage(cwd, version, "Grimo TUI session");
+        sessionWriter.writeSystemMessage(
+            projectContext.path().toString(), version, "Grimo TUI session");
 
         // === Phase 5: 啟動 TUI 事件迴圈（阻塞） ===
         log.debug("Grimo TUI setup complete, starting raw JLine event loop.");
@@ -849,8 +852,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
         if (model == null) model = grimoConfig.getDefaultModel();
         if (model == null) model = AgentCommands.RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
 
-        String workspacePath = workspaceManager.root().toString()
-                .replace(System.getProperty("user.home"), "~");
+        String workspacePath = projectContext.displayPath();
         long agentCount = agentModelRegistry.listAll().values().stream()
                 .filter(m -> m.isAvailable()).count();
         int skillCount = skillRegistry.listAll().size();
