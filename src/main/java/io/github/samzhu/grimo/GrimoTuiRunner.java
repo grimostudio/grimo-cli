@@ -41,6 +41,7 @@ import org.springframework.shell.core.command.CommandParser;
 import org.springframework.shell.core.command.CommandRegistry;
 import org.springframework.stereotype.Component;
 
+import io.github.samzhu.grimo.tui.core.Renderable;
 import io.github.samzhu.grimo.tui.overlay.McpPanel;
 import io.github.samzhu.grimo.tui.overlay.SlashMenu;
 import io.github.samzhu.grimo.tui.screen.EventLoop;
@@ -52,6 +53,8 @@ import io.github.samzhu.grimo.tui.view.ContentView;
 import io.github.samzhu.grimo.tui.view.InputView;
 import io.github.samzhu.grimo.tui.view.StatusView;
 import io.github.samzhu.grimo.tui.widget.Banner;
+import io.github.samzhu.grimo.tui.widget.GroupedSelect;
+import io.github.samzhu.grimo.tui.widget.ListSelect;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -133,6 +136,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private TextSelection textSelection;
     private AutoScroller autoScroller;
     private Clipboard clipboard;
+    private Renderable activeSelectOverlay;
 
     public GrimoTuiRunner(Terminal terminal,
                            GrimoHome grimoHome,
@@ -334,6 +338,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 handleMcpManagerKey(operation, lastBinding);
             } else if (screen.isSlashMenuVisible()) {
                 handleSlashMenuKey(operation, lastBinding);
+            } else if (screen.hasSelectOverlay()) {
+                handleSelectOverlayInput(operation);
+                return;
             } else {
                 handleNormalKey(operation, lastBinding);
             }
@@ -619,6 +626,114 @@ public class GrimoTuiRunner implements ApplicationRunner {
     }
 
     /**
+     * 顯示 agent → model 互動選擇器（GroupedSelect overlay）。
+     * /agent-use 無參數時觸發。
+     */
+    private void showAgentPicker() {
+        var availableAgents = agentModelRegistry.listAvailable();
+        if (availableAgents.isEmpty()) {
+            contentView.appendLine(new org.jline.utils.AttributedString("No agents available."));
+            eventLoop.setDirty();
+            return;
+        }
+        var groups = availableAgents.entrySet().stream()
+            .map(e -> {
+                String agentId = e.getKey();
+                var modelItems = buildModelItems(agentId);
+                return new GroupedSelect.Group<>(agentId, modelItems);
+            })
+            .toList();
+        var select = new GroupedSelect<String>(groups, 7);
+        activeSelectOverlay = select;
+        screen.setSelectOverlay(select);
+        eventLoop.setDirty();
+    }
+
+    private List<ListSelect.Item<String>> buildModelItems(String agentId) {
+        var items = new java.util.ArrayList<ListSelect.Item<String>>();
+        String recommended = AgentCommands.RECOMMENDED_MODELS.get(agentId);
+        if (recommended != null) {
+            items.add(new ListSelect.Item<>(recommended, "推薦", agentId + " " + recommended));
+        }
+        String remembered = grimoConfig.getAgentOption(agentId, "model");
+        if (remembered != null && !remembered.equals(recommended)) {
+            items.add(new ListSelect.Item<>(remembered, "上次使用", agentId + " " + remembered));
+        }
+        // If no items found, add a default entry
+        if (items.isEmpty()) {
+            items.add(new ListSelect.Item<>(agentId, "default", agentId));
+        }
+        return items;
+    }
+
+    /**
+     * 處理 select overlay（GroupedSelect / ListSelect）的鍵盤輸入。
+     * 設計說明：
+     * - GroupedSelect：Enter on group header → toggle；Enter on leaf → 執行 agent-use 指令
+     * - ListSelect：Enter / Esc 關閉 overlay
+     * - Esc / Ctrl+C：關閉 overlay
+     */
+    private void handleSelectOverlayInput(String operation) {
+        if (activeSelectOverlay instanceof GroupedSelect<?> grouped) {
+            @SuppressWarnings("unchecked")
+            var typedGrouped = (GroupedSelect<String>) grouped;
+            switch (operation) {
+                case EventLoop.OP_UP -> typedGrouped.moveUp();
+                case EventLoop.OP_DOWN -> typedGrouped.moveDown();
+                case EventLoop.OP_ENTER -> {
+                    if (typedGrouped.isOnGroup()) {
+                        typedGrouped.toggle();
+                    } else {
+                        var selected = typedGrouped.getSelected();
+                        screen.clearSelectOverlay();
+                        activeSelectOverlay = null;
+                        if (selected != null) {
+                            // value format: "agentId modelHint" — parse and execute via CommandExecutor
+                            String command = "/agent-use " + selected.value();
+                            try {
+                                var parsed = commandParser.parse(command);
+                                var stringWriter = new StringWriter();
+                                var printWriter = new PrintWriter(stringWriter);
+                                var ctx = new CommandContext(parsed, commandRegistry, printWriter, null);
+                                commandExecutor.execute(ctx);
+                                printWriter.flush();
+                                String result = stringWriter.toString().trim();
+                                if (!result.isEmpty()) {
+                                    contentView.appendCommandOutput(result);
+                                    sessionWriter.writeCommandMessage(command, result);
+                                }
+                            } catch (Exception e) {
+                                String errorMsg = "Error: " + e.getMessage();
+                                contentView.appendError(errorMsg);
+                            }
+                        }
+                    }
+                }
+                case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> {
+                    screen.clearSelectOverlay();
+                    activeSelectOverlay = null;
+                }
+            }
+        } else if (activeSelectOverlay instanceof ListSelect<?> list) {
+            @SuppressWarnings("unchecked")
+            var typedList = (ListSelect<Object>) list;
+            switch (operation) {
+                case EventLoop.OP_UP -> typedList.moveUp();
+                case EventLoop.OP_DOWN -> typedList.moveDown();
+                case EventLoop.OP_ENTER -> {
+                    screen.clearSelectOverlay();
+                    activeSelectOverlay = null;
+                }
+                case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> {
+                    screen.clearSelectOverlay();
+                    activeSelectOverlay = null;
+                }
+            }
+        }
+        eventLoop.setDirty();
+    }
+
+    /**
      * 從 CommandRegistry + SkillRegistry 建構斜線指令選單項目。
      */
     private List<SlashMenu.MenuItem> buildMenuItems() {
@@ -648,6 +763,12 @@ public class GrimoTuiRunner implements ApplicationRunner {
         // /mcp 無子指令時開啟互動 overlay（不走 CommandExecutor）
         if (text.equals("/mcp")) {
             openMcpManager();
+            return;
+        }
+
+        // /agent-use 無參數時開啟互動選擇器（不走 CommandExecutor，避免顯示 Usage 訊息）
+        if (text.equals("/agent-use")) {
+            showAgentPicker();
             return;
         }
 
