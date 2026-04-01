@@ -14,8 +14,8 @@ import java.util.UUID;
  * Session 對話存檔：JSONL（JSON Lines）格式，append-only。
  *
  * 設計說明：
- * - 每次 TUI session 的對話紀錄持久化到 ~/.grimo/projects/<encoded-cwd>/sessions/<uuid>.jsonl
- * - 對齊 Claude Code 的 session 檔案設計
+ * - 每次 TUI session 的對話紀錄持久化到 ~/.grimo/projects/<encoded-cwd>/<uuid>.jsonl
+ * - 對齊 Claude Code 的 projects/{encoded-cwd}/{sessionId}.jsonl 結構
  * - 每行一個 JSON 物件，包含 type/sessionId/timestamp/uuid/parentUuid/message 欄位
  * - 寫入時機：session 啟動（system）、使用者按 Enter（user）、AI 回覆完成（assistant）、命令執行完成（command）
  *
@@ -25,17 +25,28 @@ public class SessionWriter {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final String sessionId;
+    private final Path dataDir;
     private final Path sessionFile;
     private String lastUuid;
 
     /**
-     * 建構子：建立 session 檔案路徑。
+     * 建構子：session 檔案直接放在 project data 根目錄。
+     * 對齊 Claude Code 的 projects/{encoded-cwd}/{sessionId}.jsonl 結構。
      *
-     * @param sessionsBaseDir 基礎目錄（如 ~/.grimo/projects/<encoded-cwd>/sessions/）
+     * @param dataDir 專案資料目錄（如 ~/.grimo/projects/{encoded-cwd}/）
      */
-    public SessionWriter(Path sessionsBaseDir) {
+    public SessionWriter(Path dataDir) {
         this.sessionId = UUID.randomUUID().toString().substring(0, 8);
-        this.sessionFile = sessionsBaseDir.resolve(sessionId + ".jsonl");
+        this.dataDir = dataDir;
+        this.sessionFile = dataDir.resolve(sessionId + ".jsonl");
+    }
+
+    /**
+     * dispatch 紀錄存放目錄：{dataDir}/{sessionId}/dispatches/
+     * 對齊 Claude Code 的 {sessionId}/subagents/ 結構。
+     */
+    public Path dispatchesDir() {
+        return dataDir.resolve(sessionId).resolve("dispatches");
     }
 
     /**
