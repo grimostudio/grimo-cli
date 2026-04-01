@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.config;
+package io.github.samzhu.grimo.config;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

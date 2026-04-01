@@ -14,7 +14,7 @@ import io.github.samzhu.grimo.shared.sandbox.GitHelper;
 import io.github.samzhu.grimo.shared.sandbox.WorkspaceProvisioner;
 import io.github.samzhu.grimo.shared.sandbox.WorktreeInfo;
 import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
-import io.github.samzhu.grimo.shared.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
 import io.github.samzhu.grimo.shared.event.DevModeEnteredEvent;
 import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;

@@ -1,6 +1,6 @@
 package io.github.samzhu.grimo.agent.tier;
 
-import io.github.samzhu.grimo.shared.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoConfig;
 import org.springframework.lang.Nullable;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;

@@ -1,7 +1,7 @@
 package io.github.samzhu.grimo.agent.tier;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
-import io.github.samzhu.grimo.shared.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springaicommunity.agents.model.AgentModel;

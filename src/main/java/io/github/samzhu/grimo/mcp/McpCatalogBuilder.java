@@ -1,6 +1,6 @@
 package io.github.samzhu.grimo.mcp;
 
-import io.github.samzhu.grimo.shared.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoConfig;
 import org.springaicommunity.agents.model.mcp.McpServerCatalog;
 import org.springaicommunity.agents.model.mcp.McpServerDefinition;
 import org.springframework.stereotype.Component;

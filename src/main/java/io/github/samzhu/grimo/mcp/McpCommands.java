@@ -1,6 +1,6 @@
 package io.github.samzhu.grimo.mcp;
 
-import io.github.samzhu.grimo.shared.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.event.McpCatalogChangedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.shell.core.command.annotation.Argument;

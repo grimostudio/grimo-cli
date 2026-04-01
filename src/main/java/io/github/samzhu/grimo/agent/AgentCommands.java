@@ -1,7 +1,7 @@
 package io.github.samzhu.grimo.agent;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
-import io.github.samzhu.grimo.shared.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
 import io.github.samzhu.grimo.shared.tui.TuiTable;
 import org.springframework.context.ApplicationEventPublisher;

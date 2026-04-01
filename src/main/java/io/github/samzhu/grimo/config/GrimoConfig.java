@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.config;
+package io.github.samzhu.grimo.config;
 
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
