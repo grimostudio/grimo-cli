@@ -84,14 +84,14 @@
 
 | 佈局區域 | 實作元件 | 底層技術 |
 |----------|----------|----------|
-| Content 區 | `GrimoContentView` | 純 Java + `AttributedString`，render() 回傳行列表 |
-| Input 區 | `GrimoInputView` | 純 Java + `AttributedString`，斜線指令以品牌色渲染 |
-| Status 區 | `GrimoStatusView` | 純 Java + `AttributedString` |
-| 斜線指令選單 | `GrimoSlashMenuView` | 純 Java + `AttributedString`，overlay 到 content 底部 |
-| 分隔線 | `GrimoInputView.render()` | `─` 字元 + gray 色（ANSI 245） |
-| 畫面組合 | `GrimoScreen` | JLine `Display`（diff-based 渲染，不閃爍） |
-| 事件迴圈 | `GrimoEventLoop` | JLine `BindingReader` + `KeyMap`（雙執行緒 Tmux 模式） |
-| 滑鼠滾輪 | `GrimoEventLoop` | JLine `MouseEvent.Button.WheelUp/WheelDown` |
+| Content 區 | `ContentView` | 純 Java + `AttributedString`，render() 回傳行列表 |
+| Input 區 | `InputView` | 純 Java + `AttributedString`，斜線指令以品牌色渲染 |
+| Status 區 | `StatusView` | 純 Java + `AttributedString` |
+| 斜線指令選單 | `SlashMenu` | 純 Java + `AttributedString`，overlay 到 content 底部 |
+| 分隔線 | `InputView.render()` | `─` 字元 + gray 色（ANSI 245） |
+| 畫面組合 | `Screen` | JLine `Display`（diff-based 渲染，不閃爍） |
+| 事件迴圈 | `EventLoop` | JLine `BindingReader` + `KeyMap`（雙執行緒 Tmux 模式） |
+| 滑鼠滾輪 | `EventLoop` | JLine `MouseEvent.Button.WheelUp/WheelDown` |
 
 ## 調度系統術語
 
@@ -142,14 +142,14 @@
 | 名詞 | 英文 | 說明 |
 |------|------|------|
 | **DisplayWidth** | Display Width | 封裝 JLine WCWidth 的字串寬度計算工具。CJK=2, ASCII=1。提供 padRight/padLeft/center/truncate/wrap 操作。 |
-| **TuiComponent** | TUI Component | TUI 元件介面。`render(int width)` 回傳 `List<AttributedString>`，每行保證 columnLength == width。元件不管高度，容器負責捲動。 |
+| **Renderable** | Renderable | TUI 元件介面。`render(int width)` 回傳 `List<AttributedString>`，每行保證 columnLength == width。元件不管高度，容器負責捲動。 |
 | **Layout** | Layout | 佈局切分計算。Slot.Fixed(n) 固定值，Slot.Fill() 填滿剩餘。支援 gap 間距。 |
-| **TuiTable** | TUI Table | 寬度感知的表格 Builder。用 Layout.horizontal 計算欄寬，DisplayWidth.padRight 對齊。 |
-| **TuiStatusBar** | TUI Status Bar | 單行狀態列元件。truncate 感知 CJK，保證精確 width。 |
-| **TuiSelector** | TUI Selector | 可捲動選擇器。渲染 selected/unselected 項目列表，每行保證精確寬度。用於 slash menu、agent 選擇。 |
-| **TuiMessage** | TUI Message | 對話訊息格式化。inline 模式（2 行 icon+detail）和 block 模式（多行 wrap + role icon）。借鑑 OpenCode InlineTool/BlockTool。 |
+| **Table** | Table | 寬度感知的表格 Builder。用 Layout.horizontal 計算欄寬，DisplayWidth.padRight 對齊。 |
+| **StatusBar** | Status Bar | 單行狀態列元件。truncate 感知 CJK，保證精確 width。 |
+| **Selector** | Selector | 可捲動選擇器。渲染 selected/unselected 項目列表，每行保證精確寬度。用於 slash menu、agent 選擇。 |
+| **Message** | Message | 對話訊息格式化。inline 模式（2 行 icon+detail）和 block 模式（多行 wrap + role icon）。借鑑 OpenCode InlineTool/BlockTool。 |
 | **TextSelection** | Text Selection | App 層文字選取模型。使用 buffer-absolute 座標（不受 viewport 滾動影響）。滑鼠拖曳選取，放開自動複製到系統剪貼簿（auto-copy on release）。參考 tmux/WezTerm/Claude Code fullscreen mode。 |
 | **SelectionRange** | Selection Range | 正規化的選取範圍 record（start ≤ end）。`colsForRow()` 回傳某行在選取範圍內的列範圍，用於逐行渲染反白 highlight。 |
 | **BufferLine** | Buffer Line | 螢幕 buffer 行 metadata record。`wrapped` 標記 wrap 延續行（複製時不加 \n），`selectable` 標記是否可選取（separator 行不可選）。 |
-| **ClipboardWriter** | Clipboard Writer | 系統剪貼簿寫入。主要用 pbcopy（macOS）/ xclip（Linux），SSH 遠端 fallback 到 OSC 52。參考 tmux/neovim 做法。 |
+| **Clipboard** | Clipboard | 系統剪貼簿寫入。主要用 pbcopy（macOS）/ xclip（Linux），SSH 遠端 fallback 到 OSC 52。參考 tmux/neovim 做法。 |
 | **AutoScroller** | Auto Scroller | 拖曳邊緣自動捲動。50ms timer（參考 tmux），拖到 content 區頂/底部時自動捲動並擴大選取範圍。 |

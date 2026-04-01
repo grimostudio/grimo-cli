@@ -62,7 +62,8 @@ Single Gradle module. Module boundaries enforced by **Spring Modulith** package 
 | `home/` | GrimoHome — 全域 app 資料目錄 (~/.grimo) 管理 |
 | `project/` | ProjectContext — CWD 專案身份、per-project 資料目錄 |
 | `config/` | GrimoConfig — YAML 設定讀寫 |
-| `shared/` | Domain events, session persistence, TUI framework, sandbox |
+| `shared/` | Domain events, session persistence, sandbox |
+| `tui/` | Terminal UI — core (Renderable, Layout, DisplayWidth), views, overlays, widgets, selection, screen |
 
 ### Key Design Decisions
 
@@ -102,11 +103,11 @@ void on(AgentSwitchedEvent event) { ... }
   → AgentCommands.use() → 直接呼叫 refreshStatusBar()
 ```
 
-#### TUI 框架：`shared.tui` 包
+#### TUI 框架：`tui/` 包
 
 所有 TUI 寬度計算用 `DisplayWidth`（封裝 JLine WCWidth）。禁止直接用 `String.format("%-Ns")` 或 `text.substring(0, cols)` 做對齊/截斷。
 
-- `TuiComponent.render(int width)` — 元件契約，每行保證 columnLength == width
+- `Renderable.render(int width)` — 元件契約，每行保證 columnLength == width
 - `Layout.horizontal/vertical(total, gap, Fixed/Fill...)` — 區域切分
 - `DisplayWidth.padRight/truncate/center/wrap` — 寬度感知操作
 
@@ -118,10 +119,10 @@ void on(AgentSwitchedEvent event) { ... }
 
 TUI 在 alternate screen + SGR mouse tracking 下，終端原生選取被攔截。App 層實作文字選取：
 
-- **座標系統**：buffer-absolute（不受 viewport 滾動影響），`GrimoScreen.screenToBuffer()` 轉換時需扣除底部對齊的 padding
+- **座標系統**：buffer-absolute（不受 viewport 滾動影響），`Screen.screenToBuffer()` 轉換時需扣除底部對齊的 padding
 - **複製觸發**：滑鼠放開自動複製（auto-copy on release），不用按鍵。macOS 上 Cmd+C 被終端攔截、Ctrl+C 是中斷信號，都不可靠
 - **剪貼簿**：`pbcopy`（macOS）/ `xclip`（Linux）為主，OSC 52 為 SSH 備援。參考 tmux/Claude Code fullscreen mode
-- **反白渲染**：`GrimoScreen.applySelectionHighlight()` 在 `Display.update()` 前疊加 `AttributedStyle.INVERSE`
+- **反白渲染**：`Screen.applySelectionHighlight()` 在 `Display.update()` 前疊加 `AttributedStyle.INVERSE`
 - **主對話不顯示 tier**：tier 是給 skill dispatch 用的，主對話 status bar 保持使用者選的 agent+model
 
 #### GrimoTuiRunner 重構方向
