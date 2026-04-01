@@ -26,7 +26,6 @@ import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import org.springaicommunity.agents.client.AgentClient;
-import org.jline.terminal.MouseEvent;
 import org.jline.terminal.Terminal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,7 +40,7 @@ import org.springframework.shell.core.command.CommandParser;
 import org.springframework.shell.core.command.CommandRegistry;
 import org.springframework.stereotype.Component;
 
-import io.github.samzhu.grimo.tui.core.Renderable;
+import io.github.samzhu.grimo.tui.TuiKeyHandler;
 import io.github.samzhu.grimo.tui.overlay.McpPanel;
 import io.github.samzhu.grimo.tui.overlay.SlashMenu;
 import io.github.samzhu.grimo.tui.screen.EventLoop;
@@ -58,7 +57,6 @@ import io.github.samzhu.grimo.tui.widget.ListSelect;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -81,11 +79,6 @@ import java.util.concurrent.atomic.AtomicReference;
 public class GrimoTuiRunner implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(GrimoTuiRunner.class);
-
-    /** 輸入歷史紀錄 */
-    private final List<String> history = new ArrayList<>();
-    private int historyIndex = 0;
-    private String savedInput = "";
 
     private final Terminal terminal;
     private final GrimoHome grimoHome;
@@ -117,13 +110,12 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private StatusView statusView;
     private String originalStatusText;
 
-    /** AI 對話併發控制：確保同時只有一個 agent 執行 */
-    private volatile boolean agentRunning = false;
-    private volatile Thread agentThread = null;
-
-    /** Double Ctrl+C 退出：第一次顯示提示，2 秒內第二次才真的退出（對齊 Claude Code UX） */
-    private long lastCtrlCTime = 0;
-    private static final long CTRL_C_EXIT_WINDOW_MS = 2000;
+    /**
+     * AI 對話併發控制：封裝在 AgentStateRef，供 TuiKeyHandler 在 Ctrl+C 時中斷 agent。
+     * 設計說明：agentRunning / agentThread 同時被 processInput（GrimoTuiRunner）和
+     * handleNormalKey（TuiKeyHandler）讀寫，透過共用 reference 保持一致。
+     */
+    private final TuiKeyHandler.AgentStateRef agentState = new TuiKeyHandler.AgentStateRef();
 
     // TUI 元件（run 時初始化）
     private ContentView contentView;
@@ -136,7 +128,9 @@ public class GrimoTuiRunner implements ApplicationRunner {
     private TextSelection textSelection;
     private AutoScroller autoScroller;
     private Clipboard clipboard;
-    private Renderable activeSelectOverlay;
+
+    /** 鍵盤/滑鼠事件處理器（run 時初始化） */
+    private TuiKeyHandler tuiKeyHandler;
 
     public GrimoTuiRunner(Terminal terminal,
                            GrimoHome grimoHome,
@@ -257,7 +251,21 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
         // === Phase 5: 啟動 TUI 事件迴圈（阻塞） ===
         log.debug("Grimo TUI setup complete, starting raw JLine event loop.");
-        eventLoop = new EventLoop(terminal, screen, new TuiKeyHandler());
+        // 建構順序說明：
+        //   1. TuiKeyHandler 先建立（autoScroller/eventLoop 稍後透過 setter 注入）
+        //   2. EventLoop 以 TuiKeyHandler 建立（打破循環依賴）
+        //   3. AutoScroller 以 EventLoop 建立，再注入 TuiKeyHandler
+        List<String> history = new ArrayList<>();
+        tuiKeyHandler = new TuiKeyHandler(
+                terminal, screen, contentView, inputView, statusView,
+                slashMenu, mcpPanel, textSelection, clipboard,
+                grimoConfig, mcpCatalogBuilder, sessionWriter,
+                commandParser, commandExecutor, commandRegistry,
+                this::processInput,
+                history, 0, "",
+                agentState);
+        eventLoop = new EventLoop(terminal, screen, tuiKeyHandler);
+        tuiKeyHandler.setEventLoop(eventLoop);
 
         autoScroller = new AutoScroller(
             () -> contentView.scrollUp(1),
@@ -267,6 +275,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                     textSelection.getCursorCol()),
             () -> eventLoop.setDirty()
         );
+        tuiKeyHandler.setAutoScroller(autoScroller);
 
         eventLoop.setOnResize(() -> {
             textSelection.cancel();
@@ -283,351 +292,10 @@ public class GrimoTuiRunner implements ApplicationRunner {
     }
 
     /**
-     * 鍵盤/滑鼠事件處理器：實作 EventLoop.KeyHandler。
-     *
-     * 設計說明：
-     * - 分兩個模式：斜線選單模式（slashMenuVisible）和一般模式
-     * - 滑鼠滾輪事件直接轉為 content 捲動
-     * - 所有狀態更新後由 eventLoop.setDirty() 觸發重繪
-     */
-    private class TuiKeyHandler implements EventLoop.KeyHandler {
-
-        @Override
-        public void handleKey(String operation, String lastBinding) {
-            // Ctrl+C 有選取時 → 複製到剪貼簿（參考 Claude Code 行為）
-            // 設計說明：macOS raw mode 下，Ctrl+C 可能被 BindingReader 當成 CHAR（\003），
-            // 而非匹配到 OP_CTRL_C binding。同時檢查 operation 和 lastBinding 確保捕捉到。
-            log.info("[KEY] op={} lastBinding={} selectionActive={}",
-                    operation, lastBinding != null ? String.format("0x%02x", (int) lastBinding.charAt(0)) : "null",
-                    textSelection.isActive());
-            boolean isCtrlC = EventLoop.OP_CTRL_C.equals(operation)
-                    || (lastBinding != null && lastBinding.length() == 1 && lastBinding.charAt(0) == '\003');
-            if (textSelection.isActive()) {
-                if (isCtrlC) {
-                    var buffer = screen.getScreenBuffer();
-                    log.info("[SELECT] Ctrl+C: buffer={} size={} range={}",
-                            buffer != null ? "present" : "NULL",
-                            buffer != null ? buffer.size() : 0,
-                            textSelection.getRange());
-                    if (buffer != null) {
-                        String text = textSelection.finish(buffer);
-                        log.info("[SELECT] Ctrl+C: extracted text='{}' len={}",
-                                text != null ? text.substring(0, Math.min(80, text.length())) : "null",
-                                text != null ? text.length() : 0);
-                        if (text != null && !text.isEmpty()) {
-                            clipboard.copy(terminal, text);
-                            statusView.setTemporaryMessage(
-                                    "✓ Copied!", Duration.ofSeconds(2));
-                            log.info("[SELECT] Ctrl+C copied to clipboard: len={}", text.length());
-                        } else {
-                            log.info("[SELECT] Ctrl+C: text was empty, nothing copied");
-                        }
-                    } else {
-                        log.info("[SELECT] Ctrl+C: buffer was null, canceling");
-                        textSelection.cancel();
-                    }
-                    autoScroller.stop();
-                    return; // 不傳遞 Ctrl+C 到下層（不觸發退出流程）
-                }
-                // 其他鍵 → 取消選取
-                log.info("[SELECT] Key '{}' cancels selection", operation);
-                textSelection.cancel();
-                autoScroller.stop();
-            }
-            if (screen.isMcpManagerVisible()) {
-                handleMcpManagerKey(operation, lastBinding);
-            } else if (screen.isSlashMenuVisible()) {
-                handleSlashMenuKey(operation, lastBinding);
-            } else if (screen.hasSelectOverlay()) {
-                handleSelectOverlayInput(operation);
-                return;
-            } else {
-                handleNormalKey(operation, lastBinding);
-            }
-        }
-
-        @Override
-        public void handleMouse(MouseEvent event) {
-            // Overlay 可見時只保留滾輪
-            if (screen.isSlashMenuVisible() || screen.isMcpManagerVisible()) {
-                if (event.getType() == MouseEvent.Type.Wheel) {
-                    handleWheel(event);
-                }
-                return;
-            }
-
-            // DEBUG: 追蹤所有滑鼠事件類型
-            log.info("[MOUSE] type={} button={} x={} y={} modifiers={}",
-                    event.getType(), event.getButton(), event.getX(), event.getY(), event.getModifiers());
-
-            switch (event.getType()) {
-                case Wheel -> handleWheel(event);
-                case Pressed -> {
-                    if (event.getButton() == MouseEvent.Button.Button1) {
-                        int contentHeight = screen.getRows() - 4; // 3 input + 1 status
-                        int bufferRow = screen.screenToBuffer(event.getY(), contentHeight);
-                        log.info("[SELECT] Pressed: screenY={} bufferRow={} x={} contentHeight={}",
-                                event.getY(), bufferRow, event.getX(), contentHeight);
-                        if (bufferRow >= 0) {
-                            textSelection.startAt(bufferRow, event.getX());
-                        }
-                        autoScroller.stop();
-                    }
-                }
-                case Dragged -> {
-                    if (textSelection.isActive()) {
-                        int contentHeight = screen.getRows() - 4;
-                        int bufferRow = screen.screenToBuffer(event.getY(), contentHeight);
-                        if (bufferRow >= 0) {
-                            textSelection.dragTo(bufferRow, event.getX());
-                        }
-                        autoScroller.update(event.getY(), contentHeight);
-                    }
-                }
-                case Released -> {
-                    // 放開滑鼠 → 自動複製到剪貼簿 + 清除選取
-                    // 設計說明：macOS 上 Cmd+C 被終端攔截、Ctrl+C 是中斷信號，
-                    // 都無法可靠地作為「複製選取文字」的觸發。
-                    // 改為 auto-copy on release，跟原始設計一致。
-                    if (event.getButton() == MouseEvent.Button.Button1 && textSelection.isActive()) {
-                        autoScroller.stop();
-                        int contentHeight = screen.getRows() - 4;
-                        int bufferRow = screen.screenToBuffer(event.getY(), contentHeight);
-                        if (bufferRow >= 0) {
-                            textSelection.dragTo(bufferRow, event.getX());
-                        }
-                        var buffer = screen.getScreenBuffer();
-                        if (buffer != null) {
-                            String text = textSelection.finish(buffer);
-                            log.info("[SELECT] Released: extracted text='{}' len={}",
-                                    text != null ? text.substring(0, Math.min(80, text.length())) : "null",
-                                    text != null ? text.length() : 0);
-                            if (text != null && !text.isEmpty()) {
-                                clipboard.copy(terminal, text);
-                                statusView.setTemporaryMessage(
-                                        "✓ Copied!", Duration.ofSeconds(2));
-                                eventLoop.setDirty();
-                            }
-                        } else {
-                            textSelection.cancel();
-                        }
-                    }
-                }
-                default -> {}
-            }
-        }
-
-        private void handleWheel(MouseEvent event) {
-            if (event.getButton() == MouseEvent.Button.WheelUp) {
-                contentView.scrollUp(3);
-            } else if (event.getButton() == MouseEvent.Button.WheelDown) {
-                contentView.scrollDown(3);
-            }
-        }
-    }
-
-    /**
-     * 斜線指令選單模式的鍵盤處理。
-     */
-    private void handleSlashMenuKey(String operation, String lastBinding) {
-        switch (operation) {
-            case EventLoop.OP_UP -> slashMenu.moveUp();
-            case EventLoop.OP_DOWN -> slashMenu.moveDown();
-            case EventLoop.OP_TAB, EventLoop.OP_ENTER -> {
-                String selected = slashMenu.getSelected();
-                if (selected != null) {
-                    inputView.insertSlashCommand(selected);
-                }
-                screen.setSlashMenuVisible(false);
-            }
-            case EventLoop.OP_BACKSPACE -> {
-                inputView.deleteChar();
-                String slashToken = inputView.getCurrentSlashToken();
-                if (slashToken == null || !slashMenu.hasItems()) {
-                    screen.setSlashMenuVisible(false);
-                } else {
-                    slashMenu.filter(slashToken.substring(1));
-                    if (!slashMenu.hasItems()) {
-                        screen.setSlashMenuVisible(false);
-                    }
-                }
-            }
-            case EventLoop.OP_CTRL_C -> screen.setSlashMenuVisible(false);
-            case EventLoop.OP_CHAR -> {
-                insertCharFromBinding(lastBinding);
-                String slashToken = inputView.getCurrentSlashToken();
-                if (slashToken != null) {
-                    slashMenu.filter(slashToken.substring(1));
-                    if (!slashMenu.hasItems()) {
-                        screen.setSlashMenuVisible(false);
-                    }
-                } else {
-                    screen.setSlashMenuVisible(false);
-                }
-            }
-        }
-    }
-
-    /**
-     * MCP Manager overlay 模式的鍵盤處理。
-     *
-     * 設計說明：
-     * - ↑↓ 導航 server 列表（不 wrap）
-     * - d 直接刪除選中 server，即時重建 catalog
-     * - a 關閉 overlay，Input 區自動填入 "/mcp-add "
-     * - Esc/Ctrl+C 關閉 overlay
-     */
-    private void handleMcpManagerKey(String operation, String lastBinding) {
-        switch (operation) {
-            case EventLoop.OP_UP -> mcpPanel.moveUp();
-            case EventLoop.OP_DOWN -> mcpPanel.moveDown();
-            case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> {
-                screen.setMcpManagerVisible(false);
-                screen.requestFullRedraw();
-            }
-            case EventLoop.OP_CHAR -> {
-                if (lastBinding != null && lastBinding.length() == 1) {
-                    char c = lastBinding.charAt(0);
-                    if (c == 'd' || c == 'D') {
-                        String name = mcpPanel.getSelectedName();
-                        if (name != null) {
-                            grimoConfig.removeMcpServer(name);
-                            mcpCatalogBuilder.rebuild();
-                            mcpPanel.load(grimoConfig.getMcpServers());
-                        }
-                    } else if (c == 'a' || c == 'A') {
-                        screen.setMcpManagerVisible(false);
-                        screen.requestFullRedraw();
-                        inputView.setText("/mcp-add ");
-                    }
-                }
-            }
-        }
-        eventLoop.setDirty();
-    }
-
-    /**
-     * 一般模式的鍵盤處理。
-     */
-    private void handleNormalKey(String operation, String lastBinding) {
-        switch (operation) {
-            case EventLoop.OP_ENTER -> {
-                String text = inputView.getText().trim();
-                if (!text.isEmpty()) {
-                    log.debug("ENTER pressed, text='{}', lastBinding bytes={}", text,
-                            lastBinding != null ? java.util.HexFormat.of().formatHex(lastBinding.getBytes()) : "null");
-                    history.add(text);
-                    historyIndex = history.size();
-                    savedInput = "";
-                    contentView.appendUserInput(text);
-                    inputView.clear();
-                    // content 和 input 同時變動時，強制全螢幕重繪
-                    // 避免 JLine Display diff 遺漏 input 行更新
-                    screen.requestFullRedraw();
-                    sessionWriter.writeUserMessage(text);
-                    processInput(text);
-                }
-            }
-            case EventLoop.OP_UP, EventLoop.OP_DOWN -> {
-                // ↑/↓ 在一般模式暫不處理（未來可加歷史瀏覽）
-            }
-            case EventLoop.OP_CTRL_U -> {
-                int halfPage = Math.max(1, (terminal.getHeight() - 4) / 2);
-                contentView.scrollUp(halfPage);
-            }
-            case EventLoop.OP_CTRL_D -> {
-                int halfPage = Math.max(1, (terminal.getHeight() - 4) / 2);
-                contentView.scrollDown(halfPage);
-            }
-            case EventLoop.OP_CTRL_C -> {
-                if (agentRunning && agentThread != null) {
-                    // Agent 執行中 → 取消 agent
-                    agentThread.interrupt();
-                    contentView.appendError("Agent cancelled.");
-                    eventLoop.setDirty();
-                } else if (!inputView.getText().isEmpty()) {
-                    // Input 有文字 → 清空（第一層）
-                    inputView.clear();
-                    historyIndex = history.size();
-                    savedInput = "";
-                } else {
-                    // Input 空 → double Ctrl+C 退出（對齊 Claude Code UX）
-                    long now = System.currentTimeMillis();
-                    if (now - lastCtrlCTime < CTRL_C_EXIT_WINDOW_MS) {
-                        eventLoop.stop();
-                    } else {
-                        lastCtrlCTime = now;
-                        contentView.appendLine(new org.jline.utils.AttributedString(
-                                "  Press Ctrl+C again to exit",
-                                org.jline.utils.AttributedStyle.DEFAULT.foreground(245)));
-                        eventLoop.setDirty();
-                    }
-                }
-            }
-            case EventLoop.OP_BACKSPACE -> {
-                inputView.deleteChar();
-                // backspace 後檢查是否該重開斜線選單
-                // 修正：選單因過濾為空而關閉後，backspace 回到有效 token 時應重開
-                tryReopenSlashMenu();
-            }
-            case EventLoop.OP_DELETE -> inputView.deleteForward();
-            case EventLoop.OP_LEFT -> inputView.moveCursorLeft();
-            case EventLoop.OP_RIGHT -> inputView.moveCursorRight();
-            case EventLoop.OP_CHAR -> {
-                log.debug("OP_CHAR, lastBinding bytes={}, text='{}'",
-                        lastBinding != null ? java.util.HexFormat.of().formatHex(lastBinding.getBytes()) : "null",
-                        lastBinding);
-                insertCharFromBinding(lastBinding);
-                if (inputView.shouldOpenSlashMenu()) {
-                    slashMenu.filterAll();
-                    screen.setSlashMenuVisible(true);
-                }
-            }
-        }
-    }
-
-    /**
-     * 從 BindingReader 的 lastBinding 插入字元到 inputView。
-     */
-    private void insertCharFromBinding(String lastBinding) {
-        if (lastBinding != null && !lastBinding.isEmpty()) {
-            for (int i = 0; i < lastBinding.length(); i++) {
-                char c = lastBinding.charAt(i);
-                // 允許所有可印刷字元（含 Unicode：中文、日文等），排除控制字元
-                if (!Character.isISOControl(c)) {
-                    inputView.insertChar(c);
-                }
-            }
-        }
-    }
-
-    /**
-     * 檢查 backspace 後是否該重開斜線選單。
-     * 修正：選單因過濾結果為空而關閉後，backspace 回到有效 slash token 時應重開選單。
-     */
-    private void tryReopenSlashMenu() {
-        String slashToken = inputView.getCurrentSlashToken();
-        if (slashToken != null) {
-            slashMenu.filter(slashToken.substring(1));
-            if (slashMenu.hasItems()) {
-                screen.setSlashMenuVisible(true);
-            }
-        }
-    }
-
-    /**
-     * 開啟 MCP Manager overlay。
-     * 互斥保證：先關閉 slash menu 再開啟 MCP Manager。
-     */
-    private void openMcpManager() {
-        screen.setSlashMenuVisible(false);
-        mcpPanel.load(grimoConfig.getMcpServers());
-        screen.setMcpManagerVisible(true);
-    }
-
-    /**
      * 顯示 agent → model 互動選擇器（GroupedSelect overlay）。
      * /agent-use 無參數時觸發。
+     * 設計說明：showAgentPicker 是業務邏輯（需要 agentModelRegistry），保留在此。
+     * overlay 的 activeSelectOverlay 狀態已移至 TuiKeyHandler，透過 setActiveSelectOverlay 注入。
      */
     private void showAgentPicker() {
         var availableAgents = agentModelRegistry.listAvailable();
@@ -644,7 +312,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
             })
             .toList();
         var select = new GroupedSelect<String>(groups, 7);
-        activeSelectOverlay = select;
+        tuiKeyHandler.setActiveSelectOverlay(select);
         screen.setSelectOverlay(select);
         eventLoop.setDirty();
     }
@@ -664,73 +332,6 @@ public class GrimoTuiRunner implements ApplicationRunner {
             items.add(new ListSelect.Item<>(agentId, "default", agentId));
         }
         return items;
-    }
-
-    /**
-     * 處理 select overlay（GroupedSelect / ListSelect）的鍵盤輸入。
-     * 設計說明：
-     * - GroupedSelect：Enter on group header → toggle；Enter on leaf → 執行 agent-use 指令
-     * - ListSelect：Enter / Esc 關閉 overlay
-     * - Esc / Ctrl+C：關閉 overlay
-     */
-    private void handleSelectOverlayInput(String operation) {
-        if (activeSelectOverlay instanceof GroupedSelect<?> grouped) {
-            @SuppressWarnings("unchecked")
-            var typedGrouped = (GroupedSelect<String>) grouped;
-            switch (operation) {
-                case EventLoop.OP_UP -> typedGrouped.moveUp();
-                case EventLoop.OP_DOWN -> typedGrouped.moveDown();
-                case EventLoop.OP_ENTER -> {
-                    if (typedGrouped.isOnGroup()) {
-                        typedGrouped.toggle();
-                    } else {
-                        var selected = typedGrouped.getSelected();
-                        screen.clearSelectOverlay();
-                        activeSelectOverlay = null;
-                        if (selected != null) {
-                            // value format: "agentId modelHint" — parse and execute via CommandExecutor
-                            String command = "/agent-use " + selected.value();
-                            try {
-                                var parsed = commandParser.parse(command);
-                                var stringWriter = new StringWriter();
-                                var printWriter = new PrintWriter(stringWriter);
-                                var ctx = new CommandContext(parsed, commandRegistry, printWriter, null);
-                                commandExecutor.execute(ctx);
-                                printWriter.flush();
-                                String result = stringWriter.toString().trim();
-                                if (!result.isEmpty()) {
-                                    contentView.appendCommandOutput(result);
-                                    sessionWriter.writeCommandMessage(command, result);
-                                }
-                            } catch (Exception e) {
-                                String errorMsg = "Error: " + e.getMessage();
-                                contentView.appendError(errorMsg);
-                            }
-                        }
-                    }
-                }
-                case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> {
-                    screen.clearSelectOverlay();
-                    activeSelectOverlay = null;
-                }
-            }
-        } else if (activeSelectOverlay instanceof ListSelect<?> list) {
-            @SuppressWarnings("unchecked")
-            var typedList = (ListSelect<Object>) list;
-            switch (operation) {
-                case EventLoop.OP_UP -> typedList.moveUp();
-                case EventLoop.OP_DOWN -> typedList.moveDown();
-                case EventLoop.OP_ENTER -> {
-                    screen.clearSelectOverlay();
-                    activeSelectOverlay = null;
-                }
-                case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> {
-                    screen.clearSelectOverlay();
-                    activeSelectOverlay = null;
-                }
-            }
-        }
-        eventLoop.setDirty();
     }
 
     /**
@@ -762,7 +363,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
 
         // /mcp 無子指令時開啟互動 overlay（不走 CommandExecutor）
         if (text.equals("/mcp")) {
-            openMcpManager();
+            tuiKeyHandler.openMcpManager();
             return;
         }
 
@@ -792,7 +393,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
             }
         } else {
             // AI 對話 — 透過 AgentClient 呼叫 CLI agent
-            if (agentRunning) {
+            if (agentState.agentRunning) {
                 contentView.appendError("Agent is still running. Wait or press Ctrl+C to cancel.");
                 return;
             }
@@ -823,7 +424,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                         tierSelection.source(),
                         text.length() > 100 ? text.substring(0, 100) + "..." : text,
                         mcpServers.isEmpty() ? "none" : String.join(", ", mcpServers));
-                agentRunning = true;
+                agentState.agentRunning = true;
                 contentView.appendLine(new org.jline.utils.AttributedString("\u23f3 thinking...",
                         org.jline.utils.AttributedStyle.DEFAULT.foreground(245)));
                 eventLoop.setDirty();
@@ -831,7 +432,7 @@ public class GrimoTuiRunner implements ApplicationRunner {
                 // 設計說明：主對話不顯示 tier（tier 是給 skill dispatch 用的）。
                 // 使用者選的 agent+model 已經顯示在正常 status bar，不需要額外的 tier 標示。
 
-                agentThread = Thread.startVirtualThread(() -> {
+                agentState.agentThread = Thread.startVirtualThread(() -> {
                     long startTime = System.currentTimeMillis();
                     // 設計說明：主對話 Plan Mode — 直接在 CWD 工作，不建 worktree
                     // Worktree 隔離由 Dev Mode（Phase B）處理：skill metadata.grimo.execution=isolated 或 /dev 指令
@@ -869,8 +470,8 @@ public class GrimoTuiRunner implements ApplicationRunner {
                         String errorMsg = formatAgentError(e);
                         contentView.appendError(errorMsg);
                     } finally {
-                        agentRunning = false;
-                        agentThread = null;
+                        agentState.agentRunning = false;
+                        agentState.agentThread = null;
                         currentTierSelection = null;
                         statusView.setStatusText(originalStatusText);
                         screen.requestFullRedraw();
