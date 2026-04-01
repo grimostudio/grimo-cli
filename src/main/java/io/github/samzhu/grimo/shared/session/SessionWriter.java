@@ -121,6 +121,57 @@ public class SessionWriter {
         return sessionFile;
     }
 
+    /**
+     * 寫入 dispatch-entered 摘要到主 session JSONL。
+     * 記錄 skill dispatch 開始時的上下文資訊（agent、model、tier、branch、目標）。
+     */
+    public void writeDispatchEntered(String taskId, String agent, String model,
+                                      String tier, String branchName, String goal) {
+        var uuid = newUuid();
+        var node = createBase("dispatch-entered", uuid, lastUuid);
+        node.put("taskId", taskId);
+        node.put("agent", agent);
+        node.put("model", model);
+        node.put("tier", tier);
+        node.put("branchName", branchName);
+        node.put("goal", goal);
+        appendLine(node);
+        lastUuid = uuid;
+    }
+
+    /**
+     * 寫入 dispatch-completed 摘要到主 session JSONL，
+     * 並建立 {sessionId}/dispatches/{taskId}.meta.json。
+     * 完成時記錄執行結果摘要（changes、commits、duration），
+     * 詳細 metadata 寫入獨立 meta.json 供後續查閱。
+     */
+    public void writeDispatchCompleted(String taskId, String agent, String model,
+                                        String tier, String goal,
+                                        String executionMode, String workDir,
+                                        String branchName, String baseSha,
+                                        String containerId,
+                                        boolean hasChanges, int commitCount,
+                                        String diffStat, long durationMs,
+                                        String summary, String externalSessionPath) {
+        // 1. 主 session JSONL 摘要
+        var uuid = newUuid();
+        var node = createBase("dispatch-completed", uuid, lastUuid);
+        node.put("taskId", taskId);
+        node.put("hasChanges", hasChanges);
+        node.put("commitCount", commitCount);
+        node.put("diffStat", diffStat);
+        node.put("durationMs", durationMs);
+        node.put("summary", summary);
+        appendLine(node);
+        lastUuid = uuid;
+
+        // 2. meta.json
+        writeDispatchMeta(taskId, agent, model, tier, goal,
+                executionMode, workDir, branchName, baseSha, containerId,
+                hasChanges, commitCount, diffStat, durationMs, summary,
+                externalSessionPath);
+    }
+
     // === 內部方法 ===
 
     private ObjectNode createBase(String type, String uuid, String parentUuid) {
@@ -137,6 +188,59 @@ public class SessionWriter {
 
     private String newUuid() {
         return "msg-" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    /**
+     * Dispatch 完成後寫入詳細 metadata 到 {sessionId}/dispatches/{taskId}.meta.json。
+     * 包含執行環境（mode/workDir/branch/sha）、結果摘要、外部 session 路徑。
+     * 寫入失敗不中斷 TUI 運作（靜默處理 IOException）。
+     */
+    private void writeDispatchMeta(String taskId, String agent, String model,
+                                    String tier, String goal,
+                                    String executionMode, String workDir,
+                                    String branchName, String baseSha,
+                                    String containerId,
+                                    boolean hasChanges, int commitCount,
+                                    String diffStat, long durationMs,
+                                    String summary, String externalSessionPath) {
+        try {
+            Path dir = dispatchesDir();
+            Files.createDirectories(dir);
+            var meta = mapper.createObjectNode();
+            meta.put("taskId", taskId);
+            meta.put("agent", agent);
+            meta.put("model", model);
+            meta.put("tier", tier);
+            meta.put("goal", goal);
+
+            var exec = mapper.createObjectNode();
+            exec.put("mode", executionMode);
+            exec.put("workDir", workDir);
+            exec.put("branchName", branchName);
+            exec.put("baseSha", baseSha);
+            if (containerId != null) exec.put("containerId", containerId);
+            meta.set("execution", exec);
+
+            var result = mapper.createObjectNode();
+            result.put("hasChanges", hasChanges);
+            result.put("commitCount", commitCount);
+            result.put("diffStat", diffStat);
+            result.put("durationMs", durationMs);
+            result.put("summary", summary);
+            meta.set("result", result);
+
+            if (externalSessionPath != null) {
+                var ext = mapper.createObjectNode();
+                ext.put(agent, externalSessionPath);
+                meta.set("externalSessions", ext);
+            }
+
+            var writer = mapper.writerWithDefaultPrettyPrinter();
+            Files.writeString(dir.resolve(taskId + ".meta.json"),
+                    writer.writeValueAsString(meta));
+        } catch (IOException e) {
+            // Dispatch meta 寫入失敗不中斷 TUI 運作
+        }
     }
 
     private void appendLine(ObjectNode node) {
