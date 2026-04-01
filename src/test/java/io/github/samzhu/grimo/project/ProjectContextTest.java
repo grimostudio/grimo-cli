@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.workspace;
+package io.github.samzhu.grimo.project;
 
 import io.github.samzhu.grimo.home.GrimoHome;
 import org.junit.jupiter.api.Test;

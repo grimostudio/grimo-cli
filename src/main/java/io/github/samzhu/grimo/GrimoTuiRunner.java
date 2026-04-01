@@ -20,7 +20,7 @@ import io.github.samzhu.grimo.shared.event.DevModeEnteredEvent;
 import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;
 import io.github.samzhu.grimo.shared.event.McpCatalogChangedEvent;
 import io.github.samzhu.grimo.home.GrimoHome;
-import io.github.samzhu.grimo.shared.workspace.ProjectContext;
+import io.github.samzhu.grimo.project.ProjectContext;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.shared.session.SessionWriter;

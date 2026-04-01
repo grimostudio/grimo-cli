@@ -1,4 +1,4 @@
-package io.github.samzhu.grimo.shared.workspace;
+package io.github.samzhu.grimo.project;
 
 import io.github.samzhu.grimo.home.GrimoHome;
 
@@ -16,7 +16,7 @@ import java.nio.file.Path;
  * - 對齊 Claude Code 的 projects/ 結構
  * - encoded-cwd 用 replaceAll("[^a-zA-Z0-9]", "-")
  *
- * @see GrimoHome 全域 app 資料管理
+ * @see io.github.samzhu.grimo.home.GrimoHome 全域 app 資料管理
  */
 public class ProjectContext {
     private final Path projectPath;
