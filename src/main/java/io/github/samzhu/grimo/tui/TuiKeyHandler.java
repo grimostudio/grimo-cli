@@ -501,24 +501,8 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
                         screen.clearSelectOverlay();
                         activeSelectOverlay = null;
                         if (selected != null) {
-                            // value format: "agentId modelHint" — parse and execute via CommandExecutor
-                            String command = "/agent-use " + selected.value();
-                            try {
-                                var parsed = commandParser.parse(command);
-                                var stringWriter = new StringWriter();
-                                var printWriter = new PrintWriter(stringWriter);
-                                var ctx = new CommandContext(parsed, commandRegistry, printWriter, null);
-                                commandExecutor.execute(ctx);
-                                printWriter.flush();
-                                String result = stringWriter.toString().trim();
-                                if (!result.isEmpty()) {
-                                    contentView.appendCommandOutput(result);
-                                    sessionWriter.writeCommandMessage(command, result);
-                                }
-                            } catch (Exception e) {
-                                String errorMsg = "Error: " + e.getMessage();
-                                contentView.appendError(errorMsg);
-                            }
+                            // 透過統一管線執行：callback → processInput → IncomingMessageEvent → MessageRouter
+                            inputCallback.onTextSubmit("/agent-use " + selected.value());
                         }
                     }
                 }
