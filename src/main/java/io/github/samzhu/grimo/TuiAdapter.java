@@ -62,7 +62,7 @@ import java.util.List;
  * @see <a href="https://github.com/jline/jline3/blob/master/terminal/src/main/java/org/jline/utils/Display.java">JLine Display</a>
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 2)
 public class TuiAdapter implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(TuiAdapter.class);
@@ -151,8 +151,8 @@ public class TuiAdapter implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws Exception {
         // 設計說明：Phase 1（Home/Project 初始化）與 Phase 2（Agent 偵測、Skill 載入、MCP、Task、Sandbox）
-        // 已移至 GrimoStartupRunner.startupInitRunner（Order HIGHEST_PRECEDENCE + 1），
-        // 本 runner（Order HIGHEST_PRECEDENCE）在 Spring context 就緒後直接建構 TUI。
+        // 已移至 GrimoStartupRunner.startupInitRunner（Order HIGHEST_PRECEDENCE + 1，先執行），
+        // 本 runner（Order HIGHEST_PRECEDENCE + 2，後執行）在初始化完成後建構 TUI。
 
         // === 準備環境資訊 ===
         String version = getClass().getPackage().getImplementationVersion();

@@ -192,13 +192,13 @@ public class GrimoStartupRunner {
     }
 
     /**
-     * 啟動靜默初始化 runner：在 TuiAdapter（HIGHEST_PRECEDENCE）之前執行靜默初始化。
+     * 啟動靜默初始化 runner：在 TuiAdapter（HIGHEST_PRECEDENCE + 2）之前執行。
      *
      * 設計說明（為何用 ApplicationRunner 而非 @PostConstruct）：
      * - @PostConstruct 在 bean 建立時執行，彼時 Spring context 未完全就緒（CommandRegistry 等可能尚未初始化）
      * - ApplicationRunner 在 context 完全就緒後執行，確保所有 bean 都可用
-     * - Order(HIGHEST_PRECEDENCE + 1) 讓本 runner 在 TuiAdapter(HIGHEST_PRECEDENCE) 之前執行，
-     *   確保 TUI 建構時已有 agent、skill、MCP 資料可用
+     * - Order(HIGHEST_PRECEDENCE + 1) 數值小於 TuiAdapter(HIGHEST_PRECEDENCE + 2)，
+     *   Spring 先執行本 runner，再執行 TuiAdapter（TuiAdapter.run() 會阻塞在 event loop）
      *
      * 初始化步驟：
      * 1. GrimoHome 與 ProjectContext 初始化（確保目錄存在）
