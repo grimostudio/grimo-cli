@@ -133,7 +133,9 @@
 | Advisor: Validation | `GoalValidationAdvisor` | `AgentCallAdvisor`（阻擋危險操作） |
 | MCP 定義 | `McpCatalogBuilder` | `McpServerCatalog`（Portable MCP，config.yaml → AgentClient.Builder） |
 | 非阻塞對話 | `ChatDispatcher` | Virtual Thread + `eventLoop.setDirty()` 觸發重繪 |
-| 統一訊息路由 | `MessageRouter` | `@EventListener` IncomingMessageEvent → command/chat → OutgoingMessageEvent |
+| 統一輸入 Port | `InputPort` / `InputHandler` | Driving Port（六角架構）。Adapter 呼叫 `handleInput(text, metadata, callback)`，Core 路由 /command → CommandDispatcher、文字 → ChatDispatcher。`ResponseCallback` 封裝 Adapter 的回覆機制。 |
+| 指令分派 | `CommandDispatcher` | 指令 registry + executor。支援動態 register/unregister（agent/skill/MCP）。取代 Spring Shell CommandExecutor。Handler 接收 raw string。 |
+| 指令註冊 | `BuiltinCommandRegistrar` | 啟動時將所有 builtin 指令註冊到 CommandDispatcher（@PostConstruct）。 |
 | Tier 路由 | `TierRouter` | 6 級優先順序 → fallback list → `AgentModel.isAvailable()` |
 | Tier 選項 | `TierOptionsFactory` | `AgentClient.run(goal, agentOptions)` per-request model 覆寫 |
 | Tier 偵測 | `TierKeywordDetector` | config.yaml `tier-keywords` 字串比對 |
