@@ -136,6 +136,8 @@
 | 統一輸入 Port | `InputPort` / `InputHandler` | Driving Port（六角架構）。Adapter 呼叫 `handleInput(text, metadata, callback)`，Core 路由 /command → CommandDispatcher、文字 → ChatDispatcher。`ResponseCallback` 封裝 Adapter 的回覆機制。 |
 | 指令分派 | `CommandDispatcher` | 指令 registry + executor。支援動態 register/unregister（agent/skill/MCP）。取代 Spring Shell CommandExecutor。Handler 接收 raw string。 |
 | 指令註冊 | `BuiltinCommandRegistrar` | 啟動時將所有 builtin 指令註冊到 CommandDispatcher（@PostConstruct）。 |
+| 動態指令 | `DynamicCommandRegistrar` | 監聽 `AgentDetectedEvent` / `SkillInstalledEvent`，自動在 CommandDispatcher 註冊 /agentId、@agentId、/skillName 指令。 |
+| Skill 執行 | `SkillExecutor` | Skill 指令執行。讀 SKILL.md metadata → execution mode 判斷：`isolated` → DevModeRunner（worktree + 全開）、`inline` → ChatDispatcher。Grimo 的 orchestrator 角色。 |
 | Tier 路由 | `TierRouter` | 6 級優先順序 → fallback list → `AgentModel.isAvailable()` |
 | Tier 選項 | `TierOptionsFactory` | `AgentClient.run(goal, agentOptions)` per-request model 覆寫 |
 | Tier 偵測 | `TierKeywordDetector` | config.yaml `tier-keywords` 字串比對 |
