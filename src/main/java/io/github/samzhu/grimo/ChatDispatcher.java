@@ -7,6 +7,7 @@ import io.github.samzhu.grimo.agent.tier.TierKeywordDetector;
 import io.github.samzhu.grimo.agent.tier.TierOptionsFactory;
 import io.github.samzhu.grimo.agent.tier.TierRouter;
 import io.github.samzhu.grimo.agent.tier.TierSelection;
+import io.github.samzhu.grimo.command.InputPort;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
 import io.github.samzhu.grimo.tui.TuiEventBridge;
@@ -98,11 +99,12 @@ public class ChatDispatcher {
     }
 
     /**
-     * AI チャットを Agent にディスパッチする。Virtual Thread の起動は TuiAdapter が担当。
+     * AI チャットを Agent にディスパッチする（TUI バインド版）。
      *
      * 設計說明：
-     * - agentRunning チェック → Tier ルーティング → AgentClient ビルド → run() までを担当
-     * - "thinking..." 行の追加と Virtual Thread の起動は呼び出し元（TuiAdapter）で行う
+     * - TuiAdapter から呼ばれる既存エントリポイント。bindTui() 済みであること。
+     * - doDispatch() で純粋ロジックを実行し、結果を contentView/statusView に反映する。
+     * - Virtual Thread で非同期実行（agentThread に保持）。
      *
      * @param userInput ユーザーが入力したテキスト
      */
@@ -119,32 +121,8 @@ public class ChatDispatcher {
 
         try {
             // --- Tier 路由：決定用哪個 agent + model ---
-            var keywordTier = tierKeywordDetector.detect(userInput).orElse(null);
-            var tierCtx = TierRouter.Context.builder()
-                    .keywordTier(keywordTier)
-                    .sessionTier(sessionTier.get())
-                    .build();
-            var tierSelection = tierRouter.resolve(tierCtx);
+            var tierSelection = resolveTier(userInput);
             currentTierSelection = tierSelection;
-
-            var model = agentModelRegistry.get(tierSelection.agentId());
-            if (model == null) {
-                throw new IllegalStateException("Agent not found: " + tierSelection.agentId());
-            }
-
-            // 設計說明：主對話使用 DEV mode — 跟 Claude Code 預設行為一致
-            // SDK bug: 有 MCP 時 ClaudeAgentOptions 被 DefaultAgentOptions.from() 覆蓋
-            // 導致 disallowedTools 丟失（instanceof ClaudeAgentOptions → false）
-            // 隔離由 /dev 指令的 worktree 提供，不依賴工具限制
-            var tierOptions = tierOptionsFactory.build(
-                    tierSelection.agentId(), tierSelection.model());
-
-            var mcpServers = mcpCatalogBuilder.getServerNames();
-            log.info("Tier routing: {} → {} / {} (source: {}), goal: {}, mcpServers: {}",
-                    tierSelection.tier(), tierSelection.agentId(), tierSelection.model(),
-                    tierSelection.source(),
-                    userInput.length() > 100 ? userInput.substring(0, 100) + "..." : userInput,
-                    mcpServers.isEmpty() ? "none" : String.join(", ", mcpServers));
 
             agentState.agentRunning = true;
             contentView.appendLine(new AttributedString("\u23f3 thinking...",
@@ -155,40 +133,18 @@ public class ChatDispatcher {
             // 使用者選的 agent+model 已經顯示在正常 status bar，不需要額外的 tier 標示。
 
             agentState.agentThread = Thread.startVirtualThread(() -> {
-                long startTime = System.currentTimeMillis();
-                // 設計說明：主對話 Plan Mode — 直接在 CWD 工作，不建 worktree
-                // Worktree 隔離由 Dev Mode（Phase B）處理：skill metadata.grimo.execution=isolated 或 /dev 指令
-                // 參考：Claude Code 預設行為 — 直接在 CWD，worktree 是可選的
-                var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
                 try {
                     // 移除 "thinking..." 暫時狀態行
                     contentView.removeLastLine();
 
-                    // 設計說明：直接用 CWD，Plan Mode 下 agent 的 disallowedTools 限制修改
-                    var client = AgentClient.builder(model)
-                            .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
-                            .defaultMcpServers(mcpCatalogBuilder.getServerNames())
-                            .defaultWorkingDirectory(projectDir)
-                            .build();
-                    var response = client.run(userInput, tierOptions);
+                    String result = doDispatch(userInput, tierSelection);
 
-                    long duration = System.currentTimeMillis() - startTime;
-                    if (response.isSuccessful()) {
-                        log.info("Agent response received: success=true, duration={}ms, resultLength={}",
-                                duration, response.getResult() != null ? response.getResult().length() : 0);
-
-                        if (response.getResult() != null && !response.getResult().isBlank()) {
-                            contentView.appendAiReply(response.getResult());
-                        }
-                    } else {
-                        log.warn("Agent response received: success=false, duration={}ms, result={}",
-                                duration, response.getResult());
-                        contentView.appendError(response.getResult());
+                    if (result != null && !result.isBlank()) {
+                        contentView.appendAiReply(result);
                     }
-                    sessionWriter.writeAssistantMessage(response.getResult());
+                    sessionWriter.writeAssistantMessage(result);
                 } catch (Exception e) {
-                    long duration = System.currentTimeMillis() - startTime;
-                    log.error("Agent call failed: duration={}ms, error={}", duration, e.getMessage(), e);
+                    log.error("Agent call failed: error={}", e.getMessage(), e);
                     String errorMsg = formatAgentError(e);
                     contentView.appendError(errorMsg);
                 } finally {
@@ -203,6 +159,116 @@ public class ChatDispatcher {
             log.warn("Agent routing failed: {}", e.getMessage());
             contentView.appendError(e.getMessage());
         }
+    }
+
+    /**
+     * AI チャットを Agent にディスパッチする（コールバック版）。
+     *
+     * 設計說明（六角架構 Port パターン）：
+     * - TUI 以外の Adapter（LINE、Discord、SkillExecutor 等）から呼ばれる。
+     * - TUI 元件（contentView/statusView）には一切触れず、結果を callback.onResponse() で返す。
+     * - Adapter 側の ResponseCallback に channel 固有の回覆ロジックを閉じ込める。
+     *   例: TUI → contentView.append()、LINE → lineApi.reply(replyToken)
+     * - Virtual Thread で非同期実行（TUI 版と同じスレッドモデル）。
+     * - エラー時は "Error: <message>" 形式で callback に通知する。
+     *
+     * @param userInput ユーザーが入力したテキスト
+     * @param callback  結果受取り closure（channel 固有の回覆処理を封装）
+     */
+    public void dispatch(String userInput, InputPort.ResponseCallback callback) {
+        Thread.startVirtualThread(() -> {
+            try {
+                var tierSelection = resolveTier(userInput);
+                String result = doDispatch(userInput, tierSelection);
+                sessionWriter.writeAssistantMessage(result);
+                callback.onResponse(result);
+            } catch (Exception e) {
+                log.error("Agent call failed (callback dispatch): error={}", e.getMessage(), e);
+                callback.onResponse("Error: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * 純粋 AI 呼び出しロジック：Tier 選択済みの状態で AgentClient を実行し結果文字列を返す。
+     *
+     * 設計說明：
+     * - TUI 操作・Virtual Thread 管理・セッション書き込みを含まない純粋関数。
+     * - dispatch(String) と dispatch(String, ResponseCallback) の共通実装として抽出。
+     * - SkillExecutor（Plan B）からも直接呼び出せるよう package-private にする。
+     * - 失敗時は AgentResponse.isSuccessful() == false の結果テキストをそのまま返す
+     *   （呼び出し元が成功/失敗を区別する必要がある場合は AgentResponse を返すよう拡張可）。
+     *
+     * @param userInput     ユーザーが入力したテキスト
+     * @param tierSelection 解決済みの Tier 選択（resolveTier() で取得）
+     * @return Agent の応答テキスト（成功・失敗を問わず getResult() の値）
+     * @throws Exception AgentClient 実行中の例外
+     */
+    String doDispatch(String userInput, TierSelection tierSelection) throws Exception {
+        long startTime = System.currentTimeMillis();
+        // 設計說明：主對話 Plan Mode — 直接在 CWD 工作，不建 worktree
+        // Worktree 隔離由 Dev Mode（Phase B）處理：skill metadata.grimo.execution=isolated 或 /dev 指令
+        // 參考：Claude Code 預設行為 — 直接在 CWD，worktree 是可選的
+        var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
+
+        // 設計說明：主對話使用 DEV mode — 跟 Claude Code 預設行為一致
+        // SDK bug: 有 MCP 時 ClaudeAgentOptions 被 DefaultAgentOptions.from() 覆蓋
+        // 導致 disallowedTools 丟失（instanceof ClaudeAgentOptions → false）
+        // 隔離由 /dev 指令的 worktree 提供，不依賴工具限制
+        var tierOptions = tierOptionsFactory.build(
+                tierSelection.agentId(), tierSelection.model());
+
+        // 設計說明：直接用 CWD，Plan Mode 下 agent 的 disallowedTools 限制修改
+        var client = AgentClient.builder(agentModelRegistry.get(tierSelection.agentId()))
+                .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
+                .defaultMcpServers(mcpCatalogBuilder.getServerNames())
+                .defaultWorkingDirectory(projectDir)
+                .build();
+        var response = client.run(userInput, tierOptions);
+
+        long duration = System.currentTimeMillis() - startTime;
+        if (response.isSuccessful()) {
+            log.info("Agent response received: success=true, duration={}ms, resultLength={}",
+                    duration, response.getResult() != null ? response.getResult().length() : 0);
+        } else {
+            log.warn("Agent response received: success=false, duration={}ms, result={}",
+                    duration, response.getResult());
+        }
+        return response.getResult();
+    }
+
+    /**
+     * ユーザー入力から Tier を解決する。
+     *
+     * 設計說明：
+     * - dispatch() と dispatch(callback) の共通前処理として抽出。
+     * - キーワード検出 → セッション Tier → デフォルト の優先順で解決。
+     *
+     * @param userInput ユーザーが入力したテキスト
+     * @return 解決済みの TierSelection
+     * @throws IllegalStateException Agent が見つからない場合
+     */
+    private TierSelection resolveTier(String userInput) {
+        var keywordTier = tierKeywordDetector.detect(userInput).orElse(null);
+        var tierCtx = TierRouter.Context.builder()
+                .keywordTier(keywordTier)
+                .sessionTier(sessionTier.get())
+                .build();
+        var tierSelection = tierRouter.resolve(tierCtx);
+
+        var model = agentModelRegistry.get(tierSelection.agentId());
+        if (model == null) {
+            throw new IllegalStateException("Agent not found: " + tierSelection.agentId());
+        }
+
+        var mcpServers = mcpCatalogBuilder.getServerNames();
+        log.info("Tier routing: {} → {} / {} (source: {}), goal: {}, mcpServers: {}",
+                tierSelection.tier(), tierSelection.agentId(), tierSelection.model(),
+                tierSelection.source(),
+                userInput.length() > 100 ? userInput.substring(0, 100) + "..." : userInput,
+                mcpServers.isEmpty() ? "none" : String.join(", ", mcpServers));
+
+        return tierSelection;
     }
 
     /**
