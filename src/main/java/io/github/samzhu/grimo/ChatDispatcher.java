@@ -226,8 +226,17 @@ public class ChatDispatcher {
                         response.isSuccessful(), duration,
                         response.getResult() != null ? response.getResult().length() : 0);
 
-                sessionWriter.writeAssistantMessage(response.getResult());
-                callback.onResponse(response.getResult());
+                String result = response.getResult();
+                if (result == null || result.isBlank()) {
+                    if (!response.isSuccessful()) {
+                        result = "\u26a0 Agent 回應失敗（" + agentId + "）。請確認 agent 已正確設定。";
+                        log.warn("Agent returned empty failed response: agent={}", agentId);
+                    } else {
+                        result = "\u26a0 Agent 回傳空回應。";
+                    }
+                }
+                sessionWriter.writeAssistantMessage(result);
+                callback.onResponse(result);
             } catch (java.util.concurrent.TimeoutException e) {
                 log.warn("Agent call timed out (120s): {}", userInput);
                 callback.onResponse("\u26a0 Agent 回應逾時（120 秒）。可能 agent 未正確設定。");
