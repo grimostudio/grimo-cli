@@ -112,7 +112,7 @@ public class MessageRouter {
                 publishOutgoing(output, event);
             }
         } catch (Exception e) {
-            log.warn("Command execution failed: text={}, error={}", text, e.getMessage());
+            log.warn("Command execution failed: text={}, error={}", text, e.getMessage(), e);
             String errorMsg = "Error: " + e.getMessage();
             sessionWriter.writeCommandMessage(text, errorMsg);
             publishOutgoing(errorMsg, event);

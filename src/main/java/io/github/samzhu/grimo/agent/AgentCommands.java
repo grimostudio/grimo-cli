@@ -4,6 +4,7 @@ import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.shell.core.command.annotation.Argument;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
 
@@ -97,13 +98,11 @@ public class AgentCommands {
      * @param input agent ID，可選空格後接 model hint
      */
     @Command(name = "agent-use", description = "Switch agent (auto-picks model)")
-    public String use(String input) {
-        if (input == null || input.isBlank()) {
+    public String use(@Argument(index = 0) String agentId,
+                      @Argument(index = 1, defaultValue = "") String modelHint) {
+        if (agentId == null || agentId.isBlank()) {
             return "Usage: /agent-use <agent> [model]\nExample: /agent-use claude opus";
         }
-        String[] parts = input.trim().split("\\s+", 2);
-        String agentId = parts[0];
-        String modelHint = parts.length > 1 ? parts[1] : null;
 
         // 驗證 agent 存在
         if (registry.get(agentId) == null) {
@@ -112,7 +111,7 @@ public class AgentCommands {
 
         // 解析 model
         String model;
-        if (modelHint != null) {
+        if (modelHint != null && !modelHint.isBlank()) {
             model = resolveModel(agentId, modelHint);
             config.setAgentOption(agentId, "model", model);
         } else {
