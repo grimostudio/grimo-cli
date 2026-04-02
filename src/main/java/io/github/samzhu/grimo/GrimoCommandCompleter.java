@@ -22,9 +22,7 @@ import java.util.Set;
  * - 利用 @ConditionalOnMissingBean 機制覆蓋自動配置的 CommandCompleter bean
  * - Candidate value 包含 / 前綴（如 "/agent list"），讓 JLine 能正確比對
  *   使用者輸入的 /ag 與候選項 /agent list 進行前綴匹配過濾
- * - 搭配 SlashStrippingCommandParser 在命令執行前去除 / 前綴
  *
- * @see SlashStrippingCommandParser
  * @see <a href="https://github.com/jline/jline3/wiki/Completion">JLine 3 Completion Wiki</a>
  */
 public class GrimoCommandCompleter extends CommandCompleter {
@@ -55,7 +53,6 @@ public class GrimoCommandCompleter extends CommandCompleter {
      * 產生斜線命令選單的候選項。
      * Candidate value 包含 / 前綴（如 "/agent list"），使 JLine 能依使用者輸入
      * （如 /ag）進行前綴過濾，只顯示匹配的命令。
-     * 執行時由 SlashStrippingCommandParser 去除 / 前綴。
      */
     private void completeSlashCommands(List<Candidate> candidates) {
         // 1. 從 CommandRegistry 取得所有命令（prefix="" 表示全部）

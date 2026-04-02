@@ -22,9 +22,6 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.shell.core.command.CommandExecutor;
-import org.springframework.shell.core.command.CommandParser;
-import org.springframework.shell.core.command.CommandRegistry;
 import org.springframework.stereotype.Component;
 
 import io.github.samzhu.grimo.tui.TuiKeyHandler;
@@ -53,7 +50,7 @@ import java.util.List;
  * - 使用 JLine Display 做 diff-based 渲染（不閃爍）
  * - 使用 JLine BindingReader + KeyMap 正確處理 SGR mouse events（支援滾輪捲動）
  * - 雙執行緒模式（參考 JLine Tmux.java）：input thread + render thread
- * - 保留 Spring Shell CommandParser/CommandExecutor/CommandRegistry 做命令處理
+ * - 命令處理由 InputPort → InputHandler → CommandDispatcher 管線負責
  *
  * @see <a href="https://jline.org/docs/advanced/mouse-support/">JLine Mouse Support</a>
  * @see <a href="https://github.com/jline/jline3/blob/master/terminal/src/main/java/org/jline/utils/Display.java">JLine Display</a>
@@ -72,9 +69,6 @@ public class TuiAdapter implements ApplicationRunner {
     private final SkillRegistry skillRegistry;
     private final TaskSchedulerService taskSchedulerService;
     private final Banner banner;
-    private final CommandParser commandParser;
-    private final CommandExecutor commandExecutor;
-    private final CommandRegistry commandRegistry;
     private final McpCatalogBuilder mcpCatalogBuilder;
     private final WorktreeProvisioner worktreeProvisioner;
     private final GitHelper gitHelper;
@@ -116,9 +110,6 @@ public class TuiAdapter implements ApplicationRunner {
                            SkillRegistry skillRegistry,
                            TaskSchedulerService taskSchedulerService,
                            Banner banner,
-                           CommandParser commandParser,
-                           CommandExecutor commandExecutor,
-                           CommandRegistry commandRegistry,
                            McpCatalogBuilder mcpCatalogBuilder,
                            WorktreeProvisioner worktreeProvisioner,
                            GitHelper gitHelper,
@@ -134,9 +125,6 @@ public class TuiAdapter implements ApplicationRunner {
         this.skillRegistry = skillRegistry;
         this.taskSchedulerService = taskSchedulerService;
         this.banner = banner;
-        this.commandParser = commandParser;
-        this.commandExecutor = commandExecutor;
-        this.commandRegistry = commandRegistry;
         this.mcpCatalogBuilder = mcpCatalogBuilder;
         this.worktreeProvisioner = worktreeProvisioner;
         this.gitHelper = gitHelper;
@@ -204,7 +192,6 @@ public class TuiAdapter implements ApplicationRunner {
                 terminal, screen, contentView, inputView, statusView,
                 slashMenu, mcpPanel, textSelection, clipboard,
                 grimoConfig, mcpCatalogBuilder, sessionWriter,
-                commandParser, commandExecutor, commandRegistry,
                 this::processInput,
                 history, 0, "",
                 agentState);

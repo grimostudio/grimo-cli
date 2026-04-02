@@ -21,13 +21,6 @@ import org.jline.terminal.MouseEvent;
 import org.jline.terminal.Terminal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.shell.core.command.CommandContext;
-import org.springframework.shell.core.command.CommandExecutor;
-import org.springframework.shell.core.command.CommandParser;
-import org.springframework.shell.core.command.CommandRegistry;
-
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.time.Duration;
 import java.util.List;
 
@@ -85,14 +78,11 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
      */
     private EventLoop eventLoop;
 
-    // --- 業務邏輯元件（用於 select overlay 的指令執行）---
+    // --- 業務邏輯元件 ---
 
     private final GrimoConfig grimoConfig;
     private final McpCatalogBuilder mcpCatalogBuilder;
     private final SessionWriter sessionWriter;
-    private final CommandParser commandParser;
-    private final CommandExecutor commandExecutor;
-    private final CommandRegistry commandRegistry;
 
     // --- 回呼（解耦 processInput 等業務邏輯）---
 
@@ -140,9 +130,6 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
             GrimoConfig grimoConfig,
             McpCatalogBuilder mcpCatalogBuilder,
             SessionWriter sessionWriter,
-            CommandParser commandParser,
-            CommandExecutor commandExecutor,
-            CommandRegistry commandRegistry,
             InputCallback inputCallback,
             List<String> history,
             int historyIndex,
@@ -160,9 +147,6 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
         this.grimoConfig = grimoConfig;
         this.mcpCatalogBuilder = mcpCatalogBuilder;
         this.sessionWriter = sessionWriter;
-        this.commandParser = commandParser;
-        this.commandExecutor = commandExecutor;
-        this.commandRegistry = commandRegistry;
         this.inputCallback = inputCallback;
         this.history = history;
         this.historyIndex = historyIndex;
@@ -501,7 +485,7 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
                         screen.clearSelectOverlay();
                         activeSelectOverlay = null;
                         if (selected != null) {
-                            // 透過統一管線執行：callback → processInput → IncomingMessageEvent → MessageRouter
+                            // 透過統一管線執行：callback → processInput → InputPort → InputHandler
                             inputCallback.onTextSubmit("/agent-use " + selected.value());
                         }
                     }

@@ -27,7 +27,6 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.shell.core.command.CommandExecutor;
 import org.springframework.shell.core.command.CommandRegistry;
 
 import java.nio.file.Path;
@@ -153,15 +152,6 @@ public class GrimoStartupRunner {
     }
 
     /**
-     * CommandExecutor：執行解析後的命令。
-     * TerminalUI 模式下由 TuiAdapter 手動呼叫（取代 ShellRunner 的自動執行）。
-     */
-    @Bean
-    CommandExecutor commandExecutor(CommandRegistry commandRegistry) {
-        return new CommandExecutor(commandRegistry);
-    }
-
-    /**
      * 覆蓋 Spring Shell 自動配置的 CommandCompleter bean。
      * JLineShellAutoConfiguration 的 CommandCompleter 標註 @ConditionalOnMissingBean，
      * 當此 bean 存在時自動配置不會建立預設的 CommandCompleter。
@@ -174,21 +164,6 @@ public class GrimoStartupRunner {
             CommandRegistry commandRegistry,
             SkillRegistry skillRegistry) {
         return new GrimoCommandCompleter(commandRegistry, skillRegistry);
-    }
-
-    /**
-     * 覆蓋 Spring Shell 自動配置的 CommandParser bean。
-     * 去除使用者輸入的 / 前綴後再交給預設 parser 解析，
-     * 使 /agent list → agent list，讓 Spring Shell 正確找到命令。
-     * 搭配 GrimoCommandCompleter 的 / 前綴候選值使用。
-     *
-     * @see SlashStrippingCommandParser
-     * @see GrimoCommandCompleter
-     */
-    @Bean
-    org.springframework.shell.core.command.CommandParser commandParser(CommandRegistry commandRegistry) {
-        return new SlashStrippingCommandParser(
-                new org.springframework.shell.core.command.DefaultCommandParser(commandRegistry));
     }
 
     /**
