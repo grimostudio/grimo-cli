@@ -3,6 +3,7 @@ package io.github.samzhu.grimo;
 import io.github.samzhu.grimo.agent.detect.AgentModelFactory;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
+import io.github.samzhu.grimo.shared.event.AgentDetectedEvent;
 import io.github.samzhu.grimo.channel.ChannelEventListener;
 import io.github.samzhu.grimo.channel.ChannelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
@@ -188,12 +189,14 @@ public class GrimoStartupRunner {
     ApplicationRunner startupInitRunner(GrimoHome grimoHome,
                                         ProjectContext projectContext,
                                         AgentModelFactory agentModelFactory,
+                                        AgentModelRegistry agentModelRegistry,
                                         SkillLoader skillLoader,
                                         SkillRegistry skillRegistry,
                                         McpCatalogBuilder mcpCatalogBuilder,
                                         TaskSchedulerService taskSchedulerService,
                                         SandboxDetector sandboxDetector,
-                                        GrimoConfig grimoConfig) {
+                                        GrimoConfig grimoConfig,
+                                        ApplicationEventPublisher eventPublisher) {
         return args -> {
             // Step 1: Home & Project 初始化
             if (!grimoHome.isInitialized()) {
@@ -204,6 +207,11 @@ public class GrimoStartupRunner {
             // Step 2: Agent 偵測並註冊（Virtual Thread 並行偵測）
             agentModelFactory.detectAndRegister(
                     Path.of(System.getProperty("user.dir")));
+
+            // Publish AgentDetectedEvent for each detected agent
+            agentModelRegistry.listAll().forEach((agentId, model) -> {
+                eventPublisher.publishEvent(new AgentDetectedEvent(agentId, model.isAvailable()));
+            });
 
             // Step 3: Skill 載入
             try {
