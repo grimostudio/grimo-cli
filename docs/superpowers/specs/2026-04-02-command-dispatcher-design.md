@@ -1,376 +1,499 @@
-# CommandDispatcher：自建指令系統取代 Spring Shell CommandExecutor
+# InputPort + CommandDispatcher：六角架構指令系統
 
-> 解決 Spring Shell 4.0 參數綁定不適配問題，支援動態指令（agent 快捷、skill、MCP），符合六角架構。
+> 單一 Driving Port + 自建指令分派 + 正確的 Port/Event 分離。
 
 ## 目標
 
-1. 自建 `CommandDispatcher` 取代 Spring Shell `CommandExecutor` — raw string 參數，不需 `@Argument`
-2. 支援動態指令：agent 偵測 → 註冊 `/claude`；skill 安裝 → 註冊 `/brainstorming`
-3. 新增 `SkillExecutor` — 讀 SKILL.md metadata → tier routing → execution mode 判斷 → 委派 agent
-4. 六角架構：CommandDispatcher 在 Core，Adapter 只做 input/output 轉換
+1. 定義 `InputPort`（單一 Driving Port）— 所有使用者輸入的統一入口
+2. 自建 `CommandDispatcher` — raw string 參數、動態指令（agent/skill/MCP）
+3. `ResponseCallback` 封裝 adapter 的回覆機制 — Core 不耦合 channel 細節
+4. Event 只用於**狀態變更通知**（不用於 request-response）
+5. 移除 `MessageRouter`（Port interface 本身就是統一入口）
 
-## 背景
+## 六角架構原則
 
-### 為什麼不用 Spring Shell CommandExecutor
-
-Spring Shell 4.0 的 `CommandExecutor` → `MethodInvokerCommandAdapter.prepareArguments()` 要求參數標註 `@Argument`/`@Option`。Grimo 的指令方法接收 raw string 自行解析 — 不匹配。
-
-此外 Grimo 不是標準 shell：
-- 輸入來源是自建 TUI（alternate screen），不是 LineReader
-- 補全是自建 GrimoCommandCompleter，不是 Spring Shell CompletionProvider
-- 需要 runtime 動態增減指令
-
-### Claude Code 的設計參考
-
-Claude Code 完全自建指令系統（無框架依賴）：
-- 三種 command type：PromptCommand、LocalCommand、LocalJSXCommand
-- 動態發現：Skills 從磁碟、Plugin 從 npm、MCP 即時注入
-- Metadata 驅動：name、aliases、description、isEnabled()、loadedFrom
-- Command 回傳資料（messages），REPL 處理渲染
-- Memoized 載入 + 每次 fresh availability check
-
-> 參考來源：`claude-code-main/src/commands.ts`、`src/types/command.ts`、`src/utils/processUserInput/processSlashCommand.tsx`
+> **"2-4 個 port 就能代表應用程式所有有目的的對話。"** — Alistair Cockburn
+>
+> - Port = interface（Core 定義），Adapter = 實作或呼叫
+> - 直接呼叫 = 需要結果（request-response）
+> - Event = 狀態變更，多訂閱者獨立反應（pub-sub）
+> - Port 屬於 Core 內部，Adapter 屬於外部
+> - **回覆機制是 Adapter 的事，不是 Core 的事**
 
 ## 設計
 
-### 1. CommandDispatcher
+### 1. 三個 Port
 
-**位置：** `io.github.samzhu.grimo.command/CommandDispatcher.java`（新 top-level module `command/`）
+```
+Driving Port（Adapter → Core）：
+  ① InputPort — "使用者送了輸入"
+     所有互動都是同一種 Port。
+     Core 內部判斷是 command、chat、skill、mention。
+
+Driven Ports（Core → Infrastructure）：
+  ② SessionPort — "核心需要持久化對話"
+  ③ SandboxPort — "核心需要隔離執行環境"
+```
+
+### 2. InputPort（Driving Port）
+
+**位置：** `io.github.samzhu.grimo.command/InputPort.java`
 
 ```java
 /**
- * 統一指令分派器：靜態指令 + 動態指令共用同一個 registry。
- * 取代 Spring Shell CommandExecutor。
+ * Driving Port：使用者輸入入口。
+ *
+ * 設計說明（六角架構）：
+ * - 單一 Port — Adapter 不判斷 command vs chat，全部送進來
+ * - Core 內部路由：/ 開頭 → CommandDispatcher、@ 開頭 → agent mention、其他 → AI 對話
+ * - ResponseCallback 是 Adapter 的 closure — 封裝 channel-specific 回覆機制
+ *   TUI: contentView.append()、LINE: lineApi.reply(replyToken)、Discord: channelApi.send(channelId)
+ * - Core 完全不知道 replyToken、channelId 等 channel 細節
+ *
+ * @see <a href="https://alistair.cockburn.us/hexagonal-architecture/">Hexagonal Architecture</a>
+ */
+public interface InputPort {
+
+    @FunctionalInterface
+    interface ResponseCallback {
+        void onResponse(String result);
+    }
+
+    /**
+     * 使用者送了輸入。Core 解析、路由、執行。結果透過 callback 回傳。
+     *
+     * @param text     原始使用者輸入
+     * @param metadata adapter 附帶的上下文（使用者識別、session 等）
+     * @param callback adapter 的回覆 closure（Core 不知道具體回覆機制）
+     */
+    void handleInput(String text, InputMetadata metadata, ResponseCallback callback);
+
+    /**
+     * 列出可用指令（給 UI 選單用）。
+     */
+    List<CommandDispatcher.CommandEntry> listAvailableCommands();
+}
+```
+
+### 3. InputMetadata
+
+```java
+/**
+ * Adapter 附帶的上下文資訊。
  *
  * 設計說明：
- * - Handler 接收 raw string args，自行解析（不需 @Argument 標註）
- * - 支援 runtime register/unregister（動態 agent/skill/MCP 指令）
- * - ConcurrentHashMap 保證執行緒安全
- * - listAll() 供 SlashMenu 和 CommandCompleter 使用
+ * - 只帶 Core 需要的資訊（使用者識別、session 歸屬）
+ * - 不帶 channel 回覆細節（replyToken、channelId）— 那些封在 ResponseCallback 裡
+ * - LINE: userId 用於 session 歸屬、用量統計
+ * - Discord: userId 同上
+ * - TUI: sessionId 用於 JSONL session 記錄
+ */
+public record InputMetadata(
+    String source,      // "tui", "line", "discord"
+    String userId,      // 使用者識別（LINE userId, Discord userId, TUI 可 null）
+    String sessionId    // 對話 session ID
+) {
+    public static InputMetadata tui(String sessionId) {
+        return new InputMetadata("tui", null, sessionId);
+    }
+    public static InputMetadata line(String userId, String sessionId) {
+        return new InputMetadata("line", userId, sessionId);
+    }
+    public static InputMetadata discord(String userId, String sessionId) {
+        return new InputMetadata("discord", userId, sessionId);
+    }
+}
+```
+
+### 4. InputHandler（InputPort 實作）
+
+**位置：** root package `InputHandler.java`
+
+```java
+/**
+ * InputPort 實作：Core 內部路由。
  *
- * 六角架構定位：Core（Application Service）。
- * Adapter（TUI/Channel）透過 MessageRouter → CommandDispatcher 執行指令。
+ * 路由邏輯：
+ *   / 開頭 → CommandDispatcher（本地指令 or skill or agent 快捷）
+ *   @ 開頭 → CommandDispatcher（agent mention）
+ *   其他   → ChatDispatcher（AI 對話）
+ */
+@Component
+public class InputHandler implements InputPort {
+
+    private final CommandDispatcher commandDispatcher;
+    private final ChatDispatcher chatDispatcher;
+
+    @Override
+    public void handleInput(String text, InputMetadata metadata, ResponseCallback callback) {
+        if (text.startsWith("/") || text.startsWith("@")) {
+            String name = extractCommandName(text);
+            String args = extractArgs(text);
+
+            if (commandDispatcher.has(name)) {
+                // 同步指令（LocalCommand / SkillCommand 結果）
+                String result = commandDispatcher.execute(name, args);
+                if (result != null && !result.isEmpty()) {
+                    callback.onResponse(result);
+                }
+                // SkillCommand isolated 模式不回傳同步結果 — DevModeRunner 透過 event 通知
+            } else {
+                // 找不到指令 → 當作 AI 對話
+                chatDispatcher.dispatch(text, callback);
+            }
+        } else {
+            // AI 對話 — 非同步，結果透過 callback 回傳
+            chatDispatcher.dispatch(text, callback);
+        }
+    }
+
+    @Override
+    public List<CommandDispatcher.CommandEntry> listAvailableCommands() {
+        return commandDispatcher.listAll();
+    }
+
+    private String extractCommandName(String text) {
+        // "/agent-use claude opus" → "agent-use"
+        // "@claude 寫測試" → "claude"
+        String stripped = text.startsWith("/") ? text.substring(1) :
+                          text.startsWith("@") ? text.substring(1) : text;
+        int space = stripped.indexOf(' ');
+        return space > 0 ? stripped.substring(0, space) : stripped;
+    }
+
+    private String extractArgs(String text) {
+        String stripped = text.startsWith("/") ? text.substring(1) :
+                          text.startsWith("@") ? text.substring(1) : text;
+        int space = stripped.indexOf(' ');
+        return space > 0 ? stripped.substring(space + 1).trim() : "";
+    }
+}
+```
+
+### 5. CommandDispatcher
+
+**位置：** `io.github.samzhu.grimo.command/CommandDispatcher.java`
+
+```java
+/**
+ * 指令 registry + executor。
+ * 不是 Port — 是 Core 內部元件，被 InputHandler 使用。
  *
- * @see <a href="https://github.com/anthropics/claude-code">Claude Code commands.ts</a>
+ * 支援動態 register/unregister：
+ * - builtin: 啟動時註冊（/agent-use, /skill-list...）
+ * - agent: 偵測到 agent 後註冊（/claude, /gemini, @claude...）
+ * - skill: 安裝 skill 後註冊（/brainstorming, /code-review...）
+ * - mcp: MCP server 連線後註冊（未來）
  */
 @Component
 public class CommandDispatcher {
 
     @FunctionalInterface
     public interface Handler {
-        /** 執行指令，回傳結果文字。null 或空字串 = 無輸出。 */
         String execute(String rawArgs);
     }
 
-    /** 指令 metadata + handler */
-    public record Entry(
-        String name,
-        String description,
-        String source,      // "builtin", "agent", "skill", "mcp"
-        Handler handler
-    ) {}
+    public record CommandEntry(String name, String description, String source) {}
 
-    private final Map<String, Entry> commands = new ConcurrentHashMap<>();
+    private record HandlerEntry(String name, String description, String source, Handler handler) {}
 
-    /** 註冊指令。已存在則覆蓋。 */
+    private final Map<String, HandlerEntry> commands = new ConcurrentHashMap<>();
+
     public void register(String name, String description, String source, Handler handler) {
-        commands.put(name, new Entry(name, description, source, handler));
+        commands.put(name, new HandlerEntry(name, description, source, handler));
     }
 
-    /** 解除指令。 */
     public void unregister(String name) {
         commands.remove(name);
     }
 
-    /** 執行指令。找不到回傳 null。 */
     public String execute(String name, String rawArgs) {
         var entry = commands.get(name);
         if (entry == null) return null;
         return entry.handler().execute(rawArgs);
     }
 
-    /** 查詢指令是否存在。 */
     public boolean has(String name) {
         return commands.containsKey(name);
     }
 
-    /** 列出所有指令（供 SlashMenu 和 CommandCompleter）。 */
-    public List<Entry> listAll() {
-        return List.copyOf(commands.values());
-    }
-
-    /** 列出指定來源的指令。 */
-    public List<Entry> listBySource(String source) {
+    public List<CommandEntry> listAll() {
         return commands.values().stream()
-            .filter(e -> e.source().equals(source))
+            .map(e -> new CommandEntry(e.name(), e.description(), e.source()))
             .toList();
     }
 }
 ```
 
-### 2. 指令分類與 Handler
-
-**三種指令本質：**
-
-| 類型 | 觸發 | Handler 做什麼 | 範例 |
-|------|------|---------------|------|
-| **LocalCommand** | `/agent-list`, `/version` | 本地執行，回傳結果文字 | `agentCommands::list` |
-| **SkillCommand** | `/brainstorming args` | 讀 metadata → tier → execution mode → 委派 agent | `skillExecutor::execute` |
-| **AgentCommand** | `/claude args`, `@claude args` | 直接 routing 到指定 agent 對話 | `chatDispatcher::dispatchTo` |
-
-**靜態指令註冊（啟動時）：**
+### 6. ChatDispatcher 加 callback 支援
 
 ```java
-/**
- * 啟動時將 @Command 標註的方法註冊到 CommandDispatcher。
- * 參考 Claude Code commands.ts 的集中註冊模式。
- */
 @Component
-public class BuiltinCommandRegistrar {
+public class ChatDispatcher {
 
-    @PostConstruct  // 或在 startupInitRunner 中呼叫
-    void registerAll() {
-        // Local commands
-        dispatcher.register("agent-list", "List all configured agents", "builtin",
-            args -> agentCommands.list());
-        dispatcher.register("agent-use", "Switch agent (auto-picks model)", "builtin",
-            args -> agentCommands.use(args));
-        dispatcher.register("mcp", "List MCP servers", "builtin",
-            args -> mcpCommands.list());
-        dispatcher.register("mcp-add", "Add MCP server", "builtin",
-            args -> mcpCommands.add(args));
-        dispatcher.register("skill-list", "List loaded skills", "builtin",
-            args -> skillCommands.list());
-        dispatcher.register("tier", "Show/set tier", "builtin",
-            args -> tierCommands.tier(args));
-        dispatcher.register("dev", "Start Dev Mode", "builtin",
-            args -> devCommands.dev(args));
-        dispatcher.register("version", "Show version", "builtin",
-            args -> grimoCommands.version());
-        // ... 其他 builtin commands
+    /**
+     * 非同步 AI 對話。Virtual Thread 執行，結果透過 callback 回傳。
+     * 同時 publish AgentCallCompletedEvent → session 記錄、計費等。
+     */
+    public void dispatch(String text, InputPort.ResponseCallback callback) {
+        Thread.ofVirtual().name("grimo-chat").start(() -> {
+            try {
+                String result = doDispatch(text);  // 同步部分：tier routing → AgentClient.run()
+                callback.onResponse(result);        // 結果回到發起者
+
+                // 狀態變更通知（不是回傳結果 — 是通知其他關注者）
+                eventPublisher.publishEvent(
+                    new AgentCallCompletedEvent(text, result, tierSelection));
+            } catch (Exception e) {
+                callback.onResponse("Error: " + e.getMessage());
+            }
+        });
+    }
+
+    public void dispatchTo(String agentId, String text, InputPort.ResponseCallback callback) {
+        // 指定 agent，不走 tier routing
     }
 }
 ```
 
-> 設計說明：`@Command` 方法的參數改回 `String rawArgs`（單一 raw string）。方法內部自行 split/parse。不需要 Spring Shell 的 `@Argument`、`CommandContext`、`CommandExecutor`。
+### 7. Adapter 使用模式
 
-**動態 Agent 指令（偵測後註冊）：**
-
-```java
-// 在 startupInitRunner 中，Agent 偵測完成後
-agentModelRegistry.listAvailable().forEach((agentId, model) -> {
-    dispatcher.register(agentId,
-        "Chat with " + agentId,
-        "agent",
-        args -> chatDispatcher.dispatchTo(agentId, args));
-});
-```
-
-**動態 Skill 指令（安裝/載入後註冊）：**
+**TuiAdapter：**
 
 ```java
-// Skill 載入完成後
-skillRegistry.listAll().forEach(skill -> {
-    dispatcher.register(skill.name(),
-        skill.description(),
-        "skill",
-        args -> skillExecutor.execute(skill.name(), args));
-});
+private void processInput(String text) {
+    // TUI-only overlay（不進 InputPort）
+    if (text.equals("/exit")) { eventLoop.stop(); return; }
+    if (text.equals("/agent-use")) { showAgentPicker(); return; }
+    if (text.equals("/mcp")) { openMcpManager(); return; }
+
+    contentView.appendUserInput(text);
+
+    inputPort.handleInput(text,
+        InputMetadata.tui(sessionWriter.getSessionId()),
+        result -> {
+            contentView.appendResponse(result);
+            eventLoop.setDirty();
+        });
+}
 ```
 
-### 3. SkillExecutor
-
-**位置：** `io.github.samzhu.grimo.skill/SkillExecutor.java`（skill module）
+**未來 LINE Adapter：**
 
 ```java
 /**
- * Skill 指令執行：讀 metadata → tier routing → execution mode → 委派 agent。
+ * LINE webhook → InputPort。
+ * ResponseCallback 封裝 LINE replyToken 回覆機制。
+ * Core 不知道 replyToken 的存在。
+ */
+void onWebhook(LineWebhookEvent event) {
+    String text = event.getMessage().getText();
+    String replyToken = event.getReplyToken();
+    String userId = event.getSource().getUserId();
+    String sessionId = resolveSession(userId);
+
+    inputPort.handleInput(text,
+        InputMetadata.line(userId, sessionId),
+        result -> lineMessagingClient.replyMessage(
+            replyToken, TextMessage.of(result)));
+}
+```
+
+**未來 Discord Adapter：**
+
+```java
+/**
+ * Discord MESSAGE_CREATE → InputPort。
+ * ResponseCallback 封裝 Discord channelId + message_reference 回覆。
  *
  * 設計說明：
- * - execution=isolated → DevModeRunner（worktree + 全開）
- * - execution=inline（預設）→ ChatDispatcher（主對話 + Plan Mode）
- * - 無論哪種模式，都先做 tier routing 選定 agent + model
- * - 將 "/skill-name args" 完整送入 agent（agent 有對應 SKILL.md）
+ * - 一般訊息用 createMessage + message_reference 回覆
+ * - Interaction（slash command）需在 3 秒內回應或 defer
+ *   → 可先 defer，再用 callback 的 follow-up 回覆
  */
+void onMessageCreate(MessageCreateEvent event) {
+    String text = event.getMessage().getContent();
+    String channelId = event.getChannelId();
+    String messageId = event.getMessage().getId();
+    String userId = event.getAuthor().getId();
+    String sessionId = resolveSession(userId, channelId);
+
+    inputPort.handleInput(text,
+        InputMetadata.discord(userId, sessionId),
+        result -> discordApi.createMessage(channelId,
+            CreateMessageRequest.builder()
+                .content(result)
+                .messageReference(MessageReference.of(messageId))
+                .build()));
+}
+```
+
+### 8. Event 只用於狀態變更通知
+
+| Event | 觸發時機 | 訂閱者 |
+|-------|---------|--------|
+| `AgentSwitchedEvent` | `/agent-use` 切換後 | TuiEventBridge（status bar）、SessionPort（記錄） |
+| `AgentCallCompletedEvent` | ChatDispatcher 完成 AI 對話後 | SessionPort（記錄）、未來 BillingService |
+| `DevModeCompletedEvent` | DevModeRunner 完成後 | TuiEventBridge（diff summary）、SessionPort |
+| `McpCatalogChangedEvent` | MCP 增減後 | TuiEventBridge（count） |
+| `SkillInstalledEvent` | Skill 安裝後 | CommandDispatcher（註冊指令）、TuiEventBridge（count） |
+| `AgentDetectedEvent`（新） | Agent 偵測到後 | CommandDispatcher（註冊快捷指令） |
+
+**不再有 `IncomingMessageEvent` → `MessageRouter` → `OutgoingMessageEvent`** 做指令路由。
+
+### 9. 動態指令註冊
+
+**靜態 builtin（啟動時）：**
+
+```java
+@Component
+public class BuiltinCommandRegistrar {
+    void registerAll(CommandDispatcher dispatcher) {
+        dispatcher.register("agent-list", "List all configured agents", "builtin", agentCommands::list);
+        dispatcher.register("agent-use", "Switch agent", "builtin", agentCommands::use);
+        dispatcher.register("skill-list", "List loaded skills", "builtin", skillCommands::list);
+        dispatcher.register("mcp", "List MCP servers", "builtin", mcpCommands::list);
+        dispatcher.register("mcp-add", "Add MCP server", "builtin", mcpCommands::add);
+        dispatcher.register("tier", "Show/set tier", "builtin", tierCommands::tier);
+        dispatcher.register("dev", "Start Dev Mode", "builtin", devCommands::dev);
+        dispatcher.register("version", "Show version", "builtin", grimoCommands::version);
+    }
+}
+```
+
+**動態 Agent 快捷（偵測後）：**
+
+```java
+@EventListener
+void on(AgentDetectedEvent event) {
+    String agentId = event.agentId();
+    // /claude → direct chat with claude
+    dispatcher.register(agentId, "Chat with " + agentId, "agent",
+        args -> { chatDispatcher.dispatchTo(agentId, args, ???); return null; });
+    // @claude → mention
+    dispatcher.register("@" + agentId, "Mention " + agentId, "agent",
+        args -> { chatDispatcher.dispatchTo(agentId, args, ???); return null; });
+}
+```
+
+> 設計說明：Agent 快捷指令是非同步（AI 對話），但 `CommandDispatcher.Handler` 回傳 `String`（同步）。
+> 解法：Agent 快捷指令不走 `commandDispatcher.execute()` — InputHandler 辨識 agent name 後直接呼叫 `chatDispatcher.dispatchTo()`。
+> 或者：handler 回傳 null（無同步結果），ChatDispatcher 透過 callback 非同步回傳。
+
+**修正版 InputHandler 路由：**
+
+```java
+@Override
+public void handleInput(String text, InputMetadata metadata, ResponseCallback callback) {
+    if (text.startsWith("/") || text.startsWith("@")) {
+        String name = extractCommandName(text);
+        String args = extractArgs(text);
+
+        var entry = commandDispatcher.getEntry(name);
+        if (entry != null) {
+            if ("agent".equals(entry.source())) {
+                // Agent 快捷 → 非同步 AI 對話
+                chatDispatcher.dispatchTo(extractAgentId(name), args, callback);
+            } else {
+                // builtin / skill → 同步執行
+                String result = entry.handler().execute(args);
+                if (result != null && !result.isEmpty()) {
+                    callback.onResponse(result);
+                }
+            }
+        } else {
+            // 找不到 → AI 對話
+            chatDispatcher.dispatch(text, callback);
+        }
+    } else {
+        chatDispatcher.dispatch(text, callback);
+    }
+}
+```
+
+### 10. SkillExecutor
+
+```java
 @Component
 public class SkillExecutor {
-
+    /**
+     * Skill 指令執行：讀 metadata → tier → execution mode → 委派。
+     * execution=isolated → DevModeRunner（worktree + 全開）
+     * execution=inline   → ChatDispatcher（主對話 + Plan Mode）
+     */
     public String execute(String skillName, String args) {
         var skill = skillRegistry.get(skillName);
         if (skill == null) return "Skill not found: " + skillName;
 
         String executionMode = skill.metadata()
             .getOrDefault("grimo.execution", "inline");
-
         String fullGoal = "/" + skillName + " " + args;
 
         if ("isolated".equals(executionMode)) {
-            // Worktree + 全開權限 → DevModeRunner
             devModeRunner.run(fullGoal, projectDir);
-            return null;  // DevModeRunner 透過 event 通知結果
+            return null;  // 非同步 — DevModeRunner 透過 DevModeCompletedEvent 通知
         } else {
-            // 主對話脈絡 + Plan Mode → ChatDispatcher
-            return chatDispatcher.dispatch(fullGoal);
+            return chatDispatcher.doDispatch(fullGoal);  // 同步
         }
     }
 }
 ```
 
-### 4. MessageRouter 改用 CommandDispatcher
-
-```java
-@EventListener
-public void on(IncomingMessageEvent event) {
-    String text = event.text();
-
-    if (text.startsWith("/")) {
-        String name = extractCommandName(text);   // "brainstorming"
-        String args = extractArgs(text);           // "設計登入頁面"
-        String result = commandDispatcher.execute(name, args);
-        if (result == null && !commandDispatcher.has(name)) {
-            // 找不到指令 → 當作 AI 對話
-            chatDispatcher.dispatch(text);
-        } else if (result != null && !result.isEmpty()) {
-            publishOutgoing(result, event);
-        }
-    } else if (text.startsWith("@")) {
-        // @mention 語法 → agent 快捷
-        String agentId = extractMention(text);     // "claude"
-        String args = extractMentionArgs(text);    // "寫測試"
-        String result = commandDispatcher.execute(agentId, args);
-        if (result == null) chatDispatcher.dispatch(text);
-        else publishOutgoing(result, event);
-    } else {
-        chatDispatcher.dispatch(text);
-    }
-}
-```
-
-### 5. SlashMenu 改讀 CommandDispatcher
-
-```java
-// Before（Spring Shell CommandRegistry）
-var menuItems = commandRegistry.getCommands().stream()
-    .map(cmd -> new SlashMenu.MenuItem(cmd.getName(), cmd.getDescription()))
-    .toList();
-
-// After（CommandDispatcher）
-var menuItems = commandDispatcher.listAll().stream()
-    .map(e -> new SlashMenu.MenuItem(e.name(), e.description()))
-    .toList();
-```
-
-### 6. Spring Shell 移除範圍
+### 11. 移除 / 保留
 
 | 移除 | 原因 |
 |------|------|
-| `CommandExecutor` 使用 | 改用 CommandDispatcher.execute() |
-| `CommandParser` 使用 | 改用 String.split 提取 name + args |
-| `SlashStrippingCommandParser` | 不需要了（/ strip 在 extractCommandName 裡） |
-| `CommandContext` 使用 | 不需要了 |
-| `@Argument`, `@Option` 標註 | 不需要了 |
+| `MessageRouter.java` | InputHandler 取代其角色 |
+| `SlashStrippingCommandParser.java` | extractCommandName 直接做 |
+| Spring Shell `CommandExecutor` 使用 | CommandDispatcher 取代 |
+| `@Argument` 標註 | 不需要了 |
+| TuiAdapter 中的 `IncomingMessageEvent` 發送 | 改為直接呼叫 `inputPort.handleInput()` |
+| TuiAdapter 中的 `@EventListener on(OutgoingMessageEvent)` | callback 取代 |
 
 | 保留 | 原因 |
 |------|------|
-| `@Command` 標註 | 可保留做 metadata 發現（或改成自建標註） |
-| `CommandRegistry` bean | 可在 BuiltinCommandRegistrar 中讀取自動發現的指令 |
-| Spring Shell starter | Tab 補全等其他功能可能仍用到 |
+| `@Command` 標註 | 可選：metadata 發現 or 改用 BuiltinCommandRegistrar 手動註冊 |
+| `CommandRegistry` bean | SlashMenu 改讀 CommandDispatcher.listAll()，但保留備用 |
+| Spring Shell starter | 其他功能可能仍用到 |
+| 所有 domain events | 正確的狀態變更通知用法 |
 
-> 設計說明：不急著完全移除 Spring Shell — 先旁路 CommandExecutor，後續可逐步減少依賴。
-
-### 7. command/ 模組
-
-**位置：** `io.github.samzhu.grimo.command/`（新 top-level module）
+## 模組結構
 
 ```
-command/
-├── package-info.java          ← @ApplicationModule
-├── CommandDispatcher.java     ← 核心 registry + executor
-└── BuiltinCommandRegistrar.java ← 靜態指令註冊
-```
-
-**allowedDependencies：**
-- 不依賴其他模組（CommandDispatcher 是純 infrastructure）
-- BuiltinCommandRegistrar 依賴 agent、skill、mcp、config 等模組（注入 Command beans）
-
-> 設計說明：CommandDispatcher 本身不依賴任何模組。BuiltinCommandRegistrar 負責組裝，它可以放在 root package（跟 MessageRouter 一樣，避免 Modulith 依賴爆炸）。
-
-**修正歸屬：**
-```
-command/
-└── CommandDispatcher.java     ← Core infrastructure（command module）
+command/                          ← 新 top-level module
+├── InputPort.java                ← Driving Port interface
+├── InputMetadata.java            ← Adapter 附帶資訊
+├── CommandDispatcher.java        ← 指令 registry + executor
 
 root package/
-├── BuiltinCommandRegistrar.java  ← 組裝層（不是 module）
-├── MessageRouter.java            ← 路由層
-└── ChatDispatcher.java           ← AI 分派
+├── InputHandler.java             ← InputPort 實作（Core 路由）
+├── BuiltinCommandRegistrar.java  ← 靜態指令註冊
+├── ChatDispatcher.java           ← AI 對話分派（加 callback）
+├── SkillExecutor.java            ← Skill 指令執行
+├── TuiAdapter.java               ← Driving Adapter
+└── GrimoStartupRunner.java
+
+移除：
+├── MessageRouter.java
+└── SlashStrippingCommandParser.java
 ```
-
-### 8. @ Mention 語法
-
-```
-@claude 幫我寫測試
-  → extractMention("@claude 幫我寫測試") = "claude"
-  → extractMentionArgs("@claude 幫我寫測試") = "幫我寫測試"
-  → commandDispatcher.execute("claude", "幫我寫測試")
-  → Handler: chatDispatcher.dispatchTo("claude", "幫我寫測試")
-```
-
-@mention 跟 `/command` 共用同一個 CommandDispatcher registry。agent 快捷指令同時註冊兩個 name：
-
-```java
-dispatcher.register("claude", "Chat with Claude", "agent", handler);
-dispatcher.register("@claude", "@mention Claude", "agent", handler);  // alias
-```
-
-### 9. 指令優先順序
-
-當 skill name 跟 agent name 衝突時（例如安裝了名為 "claude" 的 skill）：
-
-```
-優先順序：builtin > skill > agent
-```
-
-`register()` 不覆蓋 source 優先順序更高的指令。或用 `registerIfAbsent()`。
 
 ## 測試
 
 | 元件 | 測試 |
 |------|------|
-| `CommandDispatcher` | 單元測試：register/unregister/execute/listAll、找不到回傳 null、動態增減 |
-| `BuiltinCommandRegistrar` | Integration test：驗證所有 builtin 指令已註冊 |
-| `SkillExecutor` | 單元測試：mock SkillRegistry + DevModeRunner + ChatDispatcher，驗證 isolated/inline 路徑 |
-| `MessageRouter` | 更新測試：用 CommandDispatcher 替代 CommandExecutor |
-
-## Glossary 更新
-
-| 名詞 | 英文 | 說明 |
-|------|------|------|
-| **CommandDispatcher** | Command Dispatcher | 統一指令分派器。靜態 + 動態指令共用 registry。Handler 接收 raw string，自行解析。取代 Spring Shell CommandExecutor。 |
-| **SkillExecutor** | Skill Executor | Skill 指令執行。讀 metadata → tier routing → execution mode → 委派 agent。isolated → DevModeRunner，inline → ChatDispatcher。 |
-| **BuiltinCommandRegistrar** | Builtin Command Registrar | 啟動時將 builtin command 方法註冊到 CommandDispatcher。 |
-
-## 不在範圍
-
-- 完全移除 Spring Shell（保留做 metadata 發現）
-- FuzzySearch 補全（未來加）
-- MCP tool 動態註冊為指令（未來）
-- 指令 alias 系統（未來）
-
-## 風險與緩解
-
-| 風險 | 緩解 |
-|------|------|
-| @Command 方法參數簽名改變 | 全部改回 `String rawArgs`，一次性改完 |
-| SlashMenu 資料來源改變 | 改讀 CommandDispatcher.listAll() |
-| CommandCompleter 資料來源改變 | 同上 |
-| 靜態指令遺漏未註冊 | BuiltinCommandRegistrar 的 integration test 驗證 |
+| `CommandDispatcher` | register/unregister/execute/listAll、動態增減、找不到=null |
+| `InputHandler` | / 路由到 commandDispatcher、@ 路由到 agent、文字路由到 chat、callback 被呼叫 |
+| `ChatDispatcher` | callback 被呼叫、event 被 publish |
+| `SkillExecutor` | isolated → DevModeRunner、inline → ChatDispatcher |
 
 ## 驗收標準
 
 1. `./gradlew build` 通過
-2. `/agent-use claude opus` 正常執行（不再需要 @Argument）
-3. `/brainstorming 設計登入頁面` 觸發 SkillExecutor（如有 skill）
-4. Agent 偵測後自動註冊 `/claude`、`/gemini` 等快捷指令
-5. SlashMenu 顯示所有 builtin + dynamic 指令
-6. `@claude 幫我寫測試` 等 mention 語法生效
+2. `/agent-use claude opus` 正常（raw string，不需 @Argument）
+3. `/brainstorming args` 觸發 SkillExecutor
+4. Agent 偵測後 `/claude`、`@claude` 可用
+5. SlashMenu 顯示 builtin + agent + skill 指令
+6. `MessageRouter.java` 已移除
+7. Adapter 不判斷 command vs chat — 全部走 `inputPort.handleInput()`
+8. Event 不用於指令路由（只用於狀態變更通知）
