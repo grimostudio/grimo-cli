@@ -8,6 +8,7 @@ import io.github.samzhu.grimo.agent.tier.TierOptionsFactory;
 import io.github.samzhu.grimo.agent.tier.TierRouter;
 import io.github.samzhu.grimo.agent.tier.TierSelection;
 import io.github.samzhu.grimo.command.InputPort;
+import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
 import io.github.samzhu.grimo.tui.TuiEventBridge;
@@ -49,6 +50,7 @@ public class ChatDispatcher {
     private final AtomicReference<Tier> sessionTier;
     private final SessionWriter sessionWriter;
     private final TuiEventBridge tuiEventBridge;
+    private final GrimoConfig grimoConfig;
 
     /** TUI 元件（run 時由 TuiAdapter.bindTui() 設定） */
     private volatile ContentView contentView;
@@ -67,7 +69,8 @@ public class ChatDispatcher {
                           McpCatalogBuilder mcpCatalogBuilder,
                           AtomicReference<Tier> sessionTier,
                           SessionWriter sessionWriter,
-                          TuiEventBridge tuiEventBridge) {
+                          TuiEventBridge tuiEventBridge,
+                          GrimoConfig grimoConfig) {
         this.agentModelRegistry = agentModelRegistry;
         this.agentRouter = agentRouter;
         this.tierRouter = tierRouter;
@@ -77,6 +80,7 @@ public class ChatDispatcher {
         this.sessionTier = sessionTier;
         this.sessionWriter = sessionWriter;
         this.tuiEventBridge = tuiEventBridge;
+        this.grimoConfig = grimoConfig;
     }
 
     /**
@@ -184,6 +188,50 @@ public class ChatDispatcher {
                 callback.onResponse(result);
             } catch (Exception e) {
                 log.error("Agent call failed (callback dispatch): error={}", e.getMessage(), e);
+                callback.onResponse("Error: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * 指定 agent 對話。不走 tier routing — 直接用指定的 agent。
+     * 用於 /claude args、@claude args 等 agent 快捷指令。
+     *
+     * 設計說明：
+     * - agentId 直接決定使用哪個 agent，跳過 TierRouter 的 keyword/session/fallback 邏輯。
+     * - model 從 per-agent config（agent-options.<agentId>.model）讀取；未設定時為 null，
+     *   TierOptionsFactory.build() 接受 null model，各 SDK 會用自身的預設值。
+     * - 其餘邏輯（MCP catalog、worktree、session 寫入）與 dispatch(callback) 一致。
+     *
+     * @param agentId 指定的 agent（如 "claude", "gemini"）
+     * @param text 使用者輸入文字
+     * @param callback 結果回傳
+     */
+    public void dispatchTo(String agentId, String text, InputPort.ResponseCallback callback) {
+        Thread.ofVirtual().name("grimo-chat-" + agentId).start(() -> {
+            try {
+                var model = agentModelRegistry.get(agentId);
+                if (model == null) {
+                    callback.onResponse("Agent not available: " + agentId);
+                    return;
+                }
+                // 從 per-agent config 讀取記憶的 model；未設定時 TierOptionsFactory 各 SDK 用預設值
+                var configModel = grimoConfig.getAgentOption(agentId, "model");
+                var options = tierOptionsFactory.build(agentId, configModel);
+
+                var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
+                var client = AgentClient.builder(model)
+                        .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
+                        .defaultMcpServers(mcpCatalogBuilder.getServerNames())
+                        .defaultWorkingDirectory(projectDir)
+                        .build();
+                var response = client.run(text, options);
+
+                sessionWriter.writeUserMessage(text);
+                sessionWriter.writeAssistantMessage(response.getResult());
+                callback.onResponse(response.getResult());
+            } catch (Exception e) {
+                log.error("Agent call failed (dispatchTo): agentId={}, error={}", agentId, e.getMessage(), e);
                 callback.onResponse("Error: " + e.getMessage());
             }
         });

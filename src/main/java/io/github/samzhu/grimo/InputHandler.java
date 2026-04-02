@@ -39,7 +39,7 @@ public class InputHandler implements InputPort {
                 if ("agent".equals(entry.source())) {
                     // Agent shortcut → async chat with specific agent (Plan B)
                     String agentId = name.startsWith("@") ? name.substring(1) : name;
-                    chatDispatcher.dispatch(text, callback);
+                    chatDispatcher.dispatchTo(agentId, args, callback);
                 } else {
                     // builtin / skill → sync execute
                     String result = commandDispatcher.execute(name, args);

@@ -64,4 +64,18 @@ class InputHandlerTest {
         assertThat(cmds).hasSize(2);
         assertThat(cmds.get(0).name()).isEqualTo("a-cmd");  // sorted
     }
+
+    @Test void agentSourceRoutesToDispatchTo() {
+        // /claude write tests → dispatchTo("claude", "write tests", callback)
+        dispatcher.register("claude", "Claude Code CLI shortcut", "agent", args -> "");
+        handler.handleInput("/claude write tests", InputMetadata.tui("s1"), callback);
+        verify(chatDispatcher).dispatchTo(eq("claude"), eq("write tests"), any());
+    }
+
+    @Test void atMentionRoutesToDispatchTo() {
+        // @gemini explain this → dispatchTo("gemini", "explain this", callback)
+        dispatcher.register("gemini", "Gemini CLI shortcut", "agent", args -> "");
+        handler.handleInput("@gemini explain this", InputMetadata.tui("s1"), callback);
+        verify(chatDispatcher).dispatchTo(eq("gemini"), eq("explain this"), any());
+    }
 }
