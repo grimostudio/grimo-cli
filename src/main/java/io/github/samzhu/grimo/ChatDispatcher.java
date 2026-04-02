@@ -182,10 +182,47 @@ public class ChatDispatcher {
     public void dispatch(String userInput, InputPort.ResponseCallback callback) {
         Thread.startVirtualThread(() -> {
             try {
-                var tierSelection = resolveTier(userInput);
-                String result = doDispatch(userInput, tierSelection);
-                sessionWriter.writeAssistantMessage(result);
-                callback.onResponse(result);
+                // 設計說明：主對話使用使用者選的 defaultAgent（/agent-use 設定），
+                // 不走 TierRouter 的 skill-tiers fallback list。
+                // TierRouter 是給 Skill dispatch 用的（有 tier metadata）。
+                String agentId = grimoConfig.getDefaultAgent();
+                if (agentId == null) {
+                    // Fallback：找第一個可用的 agent
+                    agentId = agentModelRegistry.listAll().entrySet().stream()
+                            .filter(e -> e.getValue().isAvailable())
+                            .map(java.util.Map.Entry::getKey)
+                            .findFirst().orElse(null);
+                }
+                if (agentId == null) {
+                    callback.onResponse("No agents available.");
+                    return;
+                }
+                String model = grimoConfig.getDefaultModel();
+                var agentModel = agentModelRegistry.get(agentId);
+                if (agentModel == null) {
+                    callback.onResponse("Agent not available: " + agentId);
+                    return;
+                }
+
+                log.info("Chat dispatch: agent={}, model={}, goal={}",
+                        agentId, model,
+                        userInput.length() > 100 ? userInput.substring(0, 100) + "..." : userInput);
+
+                var options = tierOptionsFactory.build(agentId, model);
+                var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
+                var client = AgentClient.builder(agentModel)
+                        .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
+                        .defaultMcpServers(mcpCatalogBuilder.getServerNames())
+                        .defaultWorkingDirectory(projectDir)
+                        .build();
+                var response = client.run(userInput, options);
+
+                log.info("Chat response: success={}, duration=N/A, resultLength={}",
+                        response.isSuccessful(),
+                        response.getResult() != null ? response.getResult().length() : 0);
+
+                sessionWriter.writeAssistantMessage(response.getResult());
+                callback.onResponse(response.getResult());
             } catch (Exception e) {
                 log.error("Agent call failed (callback dispatch): error={}", e.getMessage(), e);
                 callback.onResponse("Error: " + e.getMessage());

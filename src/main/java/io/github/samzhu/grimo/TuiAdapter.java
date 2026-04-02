@@ -307,8 +307,9 @@ public class TuiAdapter implements ApplicationRunner {
         if (text.equals("/agent-use")) { showAgentPicker(); return; }
         if (text.equals("/mcp")) { tuiKeyHandler.openMcpManager(); return; }
 
-        contentView.appendUserInput(text);
-        sessionWriter.writeUserMessage(text);
+        // 設計說明：appendUserInput + writeUserMessage 已在 TuiKeyHandler.handleNormalKey() 中處理
+        // （ENTER 按下時先 appendUserInput → clear input → 才呼叫 onTextSubmit → 到這裡）
+        // 不重複呼叫，避免 "hi" 出現兩次。
 
         // 六角架構：Adapter 直接呼叫 Port（不經 IncomingMessageEvent）
         inputPort.handleInput(text,
