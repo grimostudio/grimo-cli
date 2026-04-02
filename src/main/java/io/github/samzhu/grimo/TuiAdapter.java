@@ -311,11 +311,24 @@ public class TuiAdapter implements ApplicationRunner {
         // （ENTER 按下時先 appendUserInput → clear input → 才呼叫 onTextSubmit → 到這裡）
         // 不重複呼叫，避免 "hi" 出現兩次。
 
+        // 非指令輸入 → 顯示 thinking 提示（TUI-specific — LINE/Discord adapter 會用不同的 loading 機制）
+        boolean isChat = !text.startsWith("/");
+        if (isChat) {
+            contentView.appendLine(new org.jline.utils.AttributedString("\u23f3 thinking...",
+                    org.jline.utils.AttributedStyle.DEFAULT.foreground(245)));
+            eventLoop.setDirty();
+        }
+
         // 六角架構：Adapter 直接呼叫 Port（不經 IncomingMessageEvent）
         inputPort.handleInput(text,
                 InputMetadata.tui(sessionWriter.getSessionId()),
                 result -> {
-                    contentView.appendCommandOutput(result);
+                    if (isChat) {
+                        contentView.removeLastLine();  // 移除 "thinking..."
+                        contentView.appendAiReply(result);
+                    } else {
+                        contentView.appendCommandOutput(result);
+                    }
                     eventLoop.setDirty();
                 });
     }

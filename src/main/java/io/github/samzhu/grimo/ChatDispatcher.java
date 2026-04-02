@@ -215,17 +215,25 @@ public class ChatDispatcher {
                         .defaultMcpServers(mcpCatalogBuilder.getServerNames())
                         .defaultWorkingDirectory(projectDir)
                         .build();
-                var response = client.run(userInput, options);
+                // Timeout 保護：防止 agent hang（如 Gemini 沒 API key 時靜默 hang）
+                long startTime = System.currentTimeMillis();
+                var future = java.util.concurrent.CompletableFuture.supplyAsync(
+                        () -> client.run(userInput, options));
+                var response = future.get(120, java.util.concurrent.TimeUnit.SECONDS);
 
-                log.info("Chat response: success={}, duration=N/A, resultLength={}",
-                        response.isSuccessful(),
+                long duration = System.currentTimeMillis() - startTime;
+                log.info("Chat response: success={}, duration={}ms, resultLength={}",
+                        response.isSuccessful(), duration,
                         response.getResult() != null ? response.getResult().length() : 0);
 
                 sessionWriter.writeAssistantMessage(response.getResult());
                 callback.onResponse(response.getResult());
+            } catch (java.util.concurrent.TimeoutException e) {
+                log.warn("Agent call timed out (120s): {}", userInput);
+                callback.onResponse("\u26a0 Agent 回應逾時（120 秒）。可能 agent 未正確設定。");
             } catch (Exception e) {
                 log.error("Agent call failed (callback dispatch): error={}", e.getMessage(), e);
-                callback.onResponse("Error: " + e.getMessage());
+                callback.onResponse("\u26a0 " + e.getMessage());
             }
         });
     }
