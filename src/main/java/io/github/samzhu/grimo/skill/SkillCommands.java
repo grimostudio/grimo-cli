@@ -1,8 +1,10 @@
 package io.github.samzhu.grimo.skill;
 
+import io.github.samzhu.grimo.shared.event.SkillInstalledEvent;
 import io.github.samzhu.grimo.skill.loader.SkillDefinition;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
 
@@ -22,10 +24,12 @@ public class SkillCommands {
 
     private final SkillRegistry registry;
     private final Path skillsDir;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public SkillCommands(SkillRegistry registry, Path skillsDir) {
+    public SkillCommands(SkillRegistry registry, Path skillsDir, ApplicationEventPublisher eventPublisher) {
         this.registry = registry;
         this.skillsDir = skillsDir;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -91,6 +95,7 @@ public class SkillCommands {
             if (Files.exists(skillMd)) {
                 var skill = loader.load(skillMd);
                 registry.register(skill);
+                eventPublisher.publishEvent(new SkillInstalledEvent(skill.name(), skill.description()));
                 return skillName + " skill installed to skills/" + skillName + "/";
             } else {
                 return "Warning: skill installed but no SKILL.md found in " + targetDir;

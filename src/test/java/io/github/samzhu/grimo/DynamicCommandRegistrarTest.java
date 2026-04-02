@@ -2,9 +2,11 @@ package io.github.samzhu.grimo;
 
 import io.github.samzhu.grimo.command.CommandDispatcher;
 import io.github.samzhu.grimo.shared.event.AgentDetectedEvent;
+import io.github.samzhu.grimo.shared.event.SkillInstalledEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class DynamicCommandRegistrarTest {
 
@@ -14,7 +16,7 @@ class DynamicCommandRegistrarTest {
     @BeforeEach
     void setUp() {
         dispatcher = new CommandDispatcher();
-        registrar = new DynamicCommandRegistrar(dispatcher);
+        registrar = new DynamicCommandRegistrar(dispatcher, mock(SkillExecutor.class));
     }
 
     @Test void agentDetectedRegistersSlashCommand() {
@@ -38,5 +40,18 @@ class DynamicCommandRegistrarTest {
         assertThat(entry).isNotNull();
         assertThat(entry.description()).contains("gemini");
         assertThat(entry.source()).isEqualTo("agent");
+    }
+
+    @Test void skillInstalledRegistersCommand() {
+        registrar.on(new SkillInstalledEvent("brainstorming", "Generate ideas"));
+        assertThat(dispatcher.has("brainstorming")).isTrue();
+    }
+
+    @Test void skillCommandHasCorrectSourceAndDescription() {
+        registrar.on(new SkillInstalledEvent("brainstorming", "Generate ideas"));
+        var entry = dispatcher.getEntry("brainstorming");
+        assertThat(entry).isNotNull();
+        assertThat(entry.source()).isEqualTo("skill");
+        assertThat(entry.description()).isEqualTo("Generate ideas");
     }
 }

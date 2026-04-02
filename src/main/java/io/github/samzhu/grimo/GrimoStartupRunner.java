@@ -4,6 +4,7 @@ import io.github.samzhu.grimo.agent.detect.AgentModelFactory;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
 import io.github.samzhu.grimo.shared.event.AgentDetectedEvent;
+import io.github.samzhu.grimo.shared.event.SkillInstalledEvent;
 import io.github.samzhu.grimo.channel.ChannelEventListener;
 import io.github.samzhu.grimo.channel.ChannelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
@@ -219,6 +220,7 @@ public class GrimoStartupRunner {
                 skills.forEach(skill -> {
                     skillRegistry.register(skill);
                     log.info("Loaded skill: {}", skill.name());
+                    eventPublisher.publishEvent(new SkillInstalledEvent(skill.name(), skill.description()));
                 });
             } catch (Exception e) {
                 log.warn("Skill loading failed: {}", e.getMessage());

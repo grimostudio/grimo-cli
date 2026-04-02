@@ -2,6 +2,7 @@ package io.github.samzhu.grimo;
 
 import io.github.samzhu.grimo.command.CommandDispatcher;
 import io.github.samzhu.grimo.shared.event.AgentDetectedEvent;
+import io.github.samzhu.grimo.shared.event.SkillInstalledEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
@@ -12,9 +13,11 @@ import org.springframework.stereotype.Component;
 public class DynamicCommandRegistrar {
 
     private final CommandDispatcher dispatcher;
+    private final SkillExecutor skillExecutor;
 
-    public DynamicCommandRegistrar(CommandDispatcher dispatcher) {
+    public DynamicCommandRegistrar(CommandDispatcher dispatcher, SkillExecutor skillExecutor) {
         this.dispatcher = dispatcher;
+        this.skillExecutor = skillExecutor;
     }
 
     @EventListener
@@ -31,5 +34,12 @@ public class DynamicCommandRegistrar {
         dispatcher.register("@" + agentId,
             "Mention " + agentId, "agent",
             args -> null);
+    }
+
+    @EventListener
+    public void on(SkillInstalledEvent event) {
+        dispatcher.register(event.skillName(),
+            event.description(), "skill",
+            args -> skillExecutor.execute(event.skillName(), args));
     }
 }

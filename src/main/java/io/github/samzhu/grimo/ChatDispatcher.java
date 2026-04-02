@@ -190,6 +190,23 @@ public class ChatDispatcher {
     }
 
     /**
+     * SkillExecutor（同一 package）用の同期 AI 呼び出しエントリポイント。
+     *
+     * 設計說明：
+     * - Tier 解決を内包し、SkillExecutor から単純に呼び出せるシグネチャを提供。
+     * - TUI 操作・Virtual Thread 管理・セッション書き込みを含まない純粋関数。
+     * - 例外は呼び出し元に伝播させる（SkillExecutor が適切にハンドリング）。
+     *
+     * @param userInput ユーザーが入力したテキスト
+     * @return Agent の応答テキスト
+     * @throws Exception AgentClient 実行中の例外
+     */
+    String doDispatch(String userInput) throws Exception {
+        var tierSelection = resolveTier(userInput);
+        return doDispatch(userInput, tierSelection);
+    }
+
+    /**
      * 純粋 AI 呼び出しロジック：Tier 選択済みの状態で AgentClient を実行し結果文字列を返す。
      *
      * 設計說明：
