@@ -44,7 +44,7 @@ public class InputHandler implements InputPort {
                     // builtin / skill → sync execute
                     String result = commandDispatcher.execute(name, args);
                     if (result != null && !result.isEmpty()) {
-                        callback.onResponse(result);
+                        callback.onSuccess(result);
                     }
                 }
             } else {

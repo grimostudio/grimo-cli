@@ -181,31 +181,29 @@ public class ChatDispatcher {
      */
     public void dispatch(String userInput, InputPort.ResponseCallback callback) {
         Thread.startVirtualThread(() -> {
+            String agentId = null;
+            String model = null;
+            long startTime = System.currentTimeMillis();
             try {
-                // 設計說明：主對話使用使用者選的 defaultAgent（/agent-use 設定），
-                // 不走 TierRouter 的 skill-tiers fallback list。
-                // TierRouter 是給 Skill dispatch 用的（有 tier metadata）。
-                String agentId = grimoConfig.getDefaultAgent();
+                agentId = grimoConfig.getDefaultAgent();
                 if (agentId == null) {
-                    // Fallback：找第一個可用的 agent
                     agentId = agentModelRegistry.listAll().entrySet().stream()
                             .filter(e -> e.getValue().isAvailable())
                             .map(java.util.Map.Entry::getKey)
                             .findFirst().orElse(null);
                 }
                 if (agentId == null) {
-                    callback.onResponse("No agents available.");
+                    handleError(callback, null, null, userInput, startTime, "No agents available");
                     return;
                 }
-                String model = grimoConfig.getDefaultModel();
+                model = grimoConfig.getDefaultModel();
                 var agentModel = agentModelRegistry.get(agentId);
                 if (agentModel == null) {
-                    callback.onResponse("Agent not available: " + agentId);
+                    handleError(callback, agentId, model, userInput, startTime, "Agent not found in registry");
                     return;
                 }
 
-                log.info("Chat dispatch: agent={}, model={}, goal={}",
-                        agentId, model,
+                log.info("[DISPATCH] agent={}, model={}, goal={}", agentId, model,
                         userInput.length() > 100 ? userInput.substring(0, 100) + "..." : userInput);
 
                 var options = tierOptionsFactory.build(agentId, model);
@@ -215,66 +213,40 @@ public class ChatDispatcher {
                         .defaultMcpServers(mcpCatalogBuilder.getServerNames())
                         .defaultWorkingDirectory(projectDir)
                         .build();
-                // Timeout 保護：防止 agent hang（如 Gemini 沒 API key 時靜默 hang）
-                long startTime = System.currentTimeMillis();
+
                 var future = java.util.concurrent.CompletableFuture.supplyAsync(
                         () -> client.run(userInput, options));
                 var response = future.get(120, java.util.concurrent.TimeUnit.SECONDS);
 
-                long duration = System.currentTimeMillis() - startTime;
-                log.info("Chat response: success={}, duration={}ms, resultLength={}",
-                        response.isSuccessful(), duration,
-                        response.getResult() != null ? response.getResult().length() : 0);
-
-                String result = response.getResult();
-                if (result == null || result.isBlank()) {
-                    if (!response.isSuccessful()) {
-                        result = "\u26a0 Agent 回應失敗（" + agentId + "）。請確認 agent 已正確設定。";
-                        log.warn("Agent returned empty failed response: agent={}", agentId);
-                    } else {
-                        result = "\u26a0 Agent 回傳空回應。";
-                    }
-                }
-                sessionWriter.writeAssistantMessage(result);
-                callback.onResponse(result);
+                handleResponse(callback, agentId, model, userInput, startTime, response);
             } catch (java.util.concurrent.TimeoutException e) {
-                log.warn("Agent call timed out (120s): {}", userInput);
-                callback.onResponse("\u26a0 Agent 回應逾時（120 秒）。可能 agent 未正確設定。");
+                handleError(callback, agentId, model, userInput, startTime, "Agent 回應逾時（120 秒）");
             } catch (Exception e) {
-                log.error("Agent call failed (callback dispatch): error={}", e.getMessage(), e);
-                callback.onResponse("\u26a0 " + e.getMessage());
+                handleError(callback, agentId, model, userInput, startTime, e);
             }
         });
     }
 
     /**
-     * 指定 agent 對話。不走 tier routing — 直接用指定的 agent。
-     * 用於 /claude args、@claude args 等 agent 快捷指令。
-     *
-     * 設計說明：
-     * - agentId 直接決定使用哪個 agent，跳過 TierRouter 的 keyword/session/fallback 邏輯。
-     * - model 從 per-agent config（agent-options.<agentId>.model）讀取；未設定時為 null，
-     *   TierOptionsFactory.build() 接受 null model，各 SDK 會用自身的預設值。
-     * - 其餘邏輯（MCP catalog、worktree、session 寫入）與 dispatch(callback) 一致。
-     *
-     * @param agentId 指定的 agent（如 "claude", "gemini"）
-     * @param text 使用者輸入文字
-     * @param callback 結果回傳
+     * 指定 agent 對話（/claude args、@claude args）。不走 tier routing。
      */
     public void dispatchTo(String agentId, String text, InputPort.ResponseCallback callback) {
         Thread.ofVirtual().name("grimo-chat-" + agentId).start(() -> {
+            long startTime = System.currentTimeMillis();
             try {
-                var model = agentModelRegistry.get(agentId);
-                if (model == null) {
-                    callback.onResponse("Agent not available: " + agentId);
+                var agentModel = agentModelRegistry.get(agentId);
+                if (agentModel == null) {
+                    handleError(callback, agentId, null, text, startTime, "Agent not found in registry");
                     return;
                 }
-                // 從 per-agent config 讀取記憶的 model；未設定時 TierOptionsFactory 各 SDK 用預設值
                 var configModel = grimoConfig.getAgentOption(agentId, "model");
                 var options = tierOptionsFactory.build(agentId, configModel);
 
+                log.info("[DISPATCH-TO] agent={}, model={}, goal={}", agentId, configModel,
+                        text.length() > 100 ? text.substring(0, 100) + "..." : text);
+
                 var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
-                var client = AgentClient.builder(model)
+                var client = AgentClient.builder(agentModel)
                         .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
                         .defaultMcpServers(mcpCatalogBuilder.getServerNames())
                         .defaultWorkingDirectory(projectDir)
@@ -282,13 +254,87 @@ public class ChatDispatcher {
                 var response = client.run(text, options);
 
                 sessionWriter.writeUserMessage(text);
-                sessionWriter.writeAssistantMessage(response.getResult());
-                callback.onResponse(response.getResult());
+                handleResponse(callback, agentId, configModel, text, startTime, response);
             } catch (Exception e) {
-                log.error("Agent call failed (dispatchTo): agentId={}, error={}", agentId, e.getMessage(), e);
-                callback.onResponse("Error: " + e.getMessage());
+                handleError(callback, agentId, null, text, startTime, e);
             }
         });
+    }
+
+    // === 統一回應處理（不 log and throw — 只在這裡 log + callback）===
+
+    /**
+     * 統一處理 Agent 回應：驗證 result → log → session → callback。
+     * 空/失敗回應走 onError，有內容走 onSuccess。
+     */
+    private void handleResponse(InputPort.ResponseCallback callback, String agentId, String model,
+                                String goal, long startTime, org.springaicommunity.agents.client.AgentClientResponse response) {
+        long duration = System.currentTimeMillis() - startTime;
+        String result = response.getResult();
+        boolean success = response.isSuccessful();
+
+        log.info("[AGENT-RESPONSE] agent={}, model={}, success={}, duration={}ms, len={}",
+                agentId, model, success, duration, result != null ? result.length() : 0);
+
+        if (result == null || result.isBlank()) {
+            String reason = success ? "empty response" : "failed with no output";
+            log.warn("[AGENT-EMPTY] agent={}, model={}, success={}, duration={}ms, goal={}",
+                    agentId, model, success, duration, goalPreview(goal));
+            callback.onError(agentId + " 回應為空（" + reason + "）。請確認 agent 設定正確，或嘗試其他 agent。");
+            return;
+        }
+
+        sessionWriter.writeAssistantMessage(result);
+        callback.onSuccess(result);
+    }
+
+    /**
+     * 統一處理錯誤（Exception）：log 完整 context + full stack trace → 使用者友善訊息。
+     * SLF4J 最後的 Throwable 參數自動印出完整 stack trace。
+     */
+    private void handleError(InputPort.ResponseCallback callback, String agentId, String model,
+                             String goal, long startTime, Exception e) {
+        long duration = System.currentTimeMillis() - startTime;
+        // 開發者 log：完整 context + full stack trace
+        log.error("[AGENT-ERROR] agent={}, model={}, duration={}ms, errorClass={}, goal={}",
+                agentId, model, duration, e.getClass().getName(), goalPreview(goal),
+                e);  // ← SLF4J auto-prints full stack trace
+
+        callback.onError(classifyAndFormat(agentId, e));
+    }
+
+    /**
+     * 統一處理錯誤（已知原因字串）：log warn + 使用者訊息。
+     */
+    private void handleError(InputPort.ResponseCallback callback, String agentId, String model,
+                             String goal, long startTime, String reason) {
+        long duration = System.currentTimeMillis() - startTime;
+        log.warn("[AGENT-ERROR] agent={}, model={}, duration={}ms, reason={}, goal={}",
+                agentId, model, duration, reason, goalPreview(goal));
+
+        String agent = agentId != null ? agentId : "agent";
+        callback.onError(agent + "：" + reason);
+    }
+
+    /**
+     * 根據 exception 類型格式化使用者友善訊息（不暴露 stack trace）。
+     */
+    private String classifyAndFormat(String agentId, Exception e) {
+        String name = e.getClass().getSimpleName();
+        String agent = agentId != null ? agentId : "agent";
+        if (e instanceof java.util.concurrent.TimeoutException)
+            return agent + " 回應逾時。請稍後再試或換其他 agent。";
+        if (name.contains("Timeout")) return agent + " 回應逾時。請稍後再試。";
+        if (name.contains("NotFound") || name.contains("ProcessException"))
+            return agent + " CLI 未安裝或無法執行。請確認已安裝對應 CLI。";
+        if (name.contains("Authentication") || name.contains("Auth"))
+            return agent + " 認證失敗。請執行 agent 登入指令。";
+        return agent + " 執行錯誤：" + e.getMessage();
+    }
+
+    private String goalPreview(String goal) {
+        if (goal == null) return "(null)";
+        return goal.length() > 200 ? goal.substring(0, 200) + "..." : goal;
     }
 
     /**

@@ -322,14 +322,21 @@ public class TuiAdapter implements ApplicationRunner {
         // 六角架構：Adapter 直接呼叫 Port（不經 IncomingMessageEvent）
         inputPort.handleInput(text,
                 InputMetadata.tui(sessionWriter.getSessionId()),
-                result -> {
-                    if (isChat) {
-                        contentView.removeLastLine();  // 移除 "thinking..."
-                        contentView.appendAiReply(result);
-                    } else {
-                        contentView.appendCommandOutput(result);
+                new InputPort.ResponseCallback() {
+                    @Override public void onSuccess(String result) {
+                        if (isChat) {
+                            contentView.removeLastLine();
+                            contentView.appendAiReply(result);
+                        } else {
+                            contentView.appendCommandOutput(result);
+                        }
+                        eventLoop.setDirty();
                     }
-                    eventLoop.setDirty();
+                    @Override public void onError(String message) {
+                        if (isChat) contentView.removeLastLine();
+                        contentView.appendError(message);
+                        eventLoop.setDirty();
+                    }
                 });
     }
 

@@ -14,9 +14,16 @@ import java.util.List;
  */
 public interface InputPort {
 
-    @FunctionalInterface
+    /**
+     * Adapter 的回應 callback。區分 success / error 讓 Adapter 能正確渲染。
+     * TUI: onSuccess → appendAiReply、onError → appendError
+     * LINE: onSuccess → reply(text)、onError → reply("⚠ " + text)
+     */
     interface ResponseCallback {
-        void onResponse(String result);
+        /** Agent 成功回應 */
+        void onSuccess(String result);
+        /** 錯誤（使用者友善訊息，Adapter 用 error 樣式渲染） */
+        void onError(String userMessage);
     }
 
     void handleInput(String text, InputMetadata metadata, ResponseCallback callback);

@@ -13,6 +13,7 @@ class InputHandlerTest {
     private InputHandler handler;
     private InputPort.ResponseCallback callback;
     private String capturedResult;
+    private String capturedError;
 
     @BeforeEach
     void setUp() {
@@ -20,7 +21,11 @@ class InputHandlerTest {
         chatDispatcher = mock(ChatDispatcher.class);
         handler = new InputHandler(dispatcher, chatDispatcher);
         capturedResult = null;
-        callback = result -> capturedResult = result;
+        capturedError = null;
+        callback = new InputPort.ResponseCallback() {
+            @Override public void onSuccess(String result) { capturedResult = result; }
+            @Override public void onError(String message) { capturedError = message; }
+        };
     }
 
     @Test void slashCommandRoutesToDispatcher() {
