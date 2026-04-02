@@ -6,7 +6,6 @@ import io.github.samzhu.grimo.task.model.TaskType;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import io.github.samzhu.grimo.task.store.MarkdownTaskStore;
 import org.springframework.shell.core.command.annotation.Command;
-import org.springframework.shell.core.command.annotation.Option;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -41,16 +40,35 @@ public class TaskCommands {
     /**
      * 建立新任務。若提供 cron 表達式則自動排程為 CRON 類型任務，否則為 IMMEDIATE 類型。
      *
-     * @param description 任務描述
-     * @param cron        可選的 cron 表達式（Spring 6 欄位格式，如 "0 0 9 * * *"）
+     * 設計說明：rawArgs 支援兩種格式：
+     * - 純描述（無 cron）：/task-create Check API health
+     * - 含 cron：/task-create --cron "0 0 9 * * *" Check API health
+     *   或：/task-create Check API health --cron "0 0 9 * * *"
+     *
+     * @param rawArgs 原始參數字串
      * @return 建立確認訊息，包含生成的 task ID
      */
     @Command(name = "task-create", description = "Create a new task")
-    public String create(
-            @Option(longName = "description", shortName = 'd', description = "Task description", required = true)
-            String description,
-            @Option(longName = "cron", shortName = 'c', description = "Cron expression for scheduled tasks")
-            String cron) {
+    public String create(String rawArgs) {
+        if (rawArgs == null || rawArgs.isBlank()) {
+            return "Usage: /task-create <description> [--cron <expression>]\nExample: /task-create Check API health --cron \"0 0 9 * * *\"";
+        }
+
+        // 解析 --cron flag（若存在）
+        String cron = null;
+        String descriptionPart = rawArgs;
+        java.util.regex.Matcher cronMatcher = java.util.regex.Pattern
+                .compile("--cron\\s+\"([^\"]+)\"|--cron\\s+(\\S+)")
+                .matcher(rawArgs);
+        if (cronMatcher.find()) {
+            cron = cronMatcher.group(1) != null ? cronMatcher.group(1) : cronMatcher.group(2);
+            descriptionPart = rawArgs.substring(0, cronMatcher.start())
+                    + rawArgs.substring(cronMatcher.end());
+        }
+        String description = descriptionPart.trim();
+        if (description.isEmpty()) {
+            return "Usage: /task-create <description> [--cron <expression>]";
+        }
 
         // 若 cron 為空字串則視為 null（Spring Shell 預設值為空字串）
         String effectiveCron = (cron != null && !cron.isEmpty()) ? cron : null;
@@ -92,12 +110,14 @@ public class TaskCommands {
     /**
      * 顯示指定任務的詳細資訊，包含排程、執行時間與 Markdown 內容。
      *
-     * @param taskId 任務 ID
+     * @param rawArgs 原始參數字串，格式：<taskId>
      */
     @Command(name = "task-show", description = "Show task details")
-    public String show(
-            @Option(longName = "id", description = "Task ID", required = true)
-            String taskId) {
+    public String show(String rawArgs) {
+        if (rawArgs == null || rawArgs.isBlank()) {
+            return "Usage: /task-show <task-id>";
+        }
+        String taskId = rawArgs.trim();
         return store.load(taskId)
             .map(t -> String.format("""
                 ID:          %s
@@ -122,12 +142,14 @@ public class TaskCommands {
     /**
      * 取消指定任務，將狀態更新為 CANCELLED 並從排程器移除。
      *
-     * @param taskId 任務 ID
+     * @param rawArgs 原始參數字串，格式：<taskId>
      */
     @Command(name = "task-cancel", description = "Cancel a task")
-    public String cancel(
-            @Option(longName = "id", description = "Task ID", required = true)
-            String taskId) {
+    public String cancel(String rawArgs) {
+        if (rawArgs == null || rawArgs.isBlank()) {
+            return "Usage: /task-cancel <task-id>";
+        }
+        String taskId = rawArgs.trim();
         return store.load(taskId).map(task -> {
             store.save(task.withStatus(TaskStatus.CANCELLED));
             schedulerService.cancel(taskId);

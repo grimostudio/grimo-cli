@@ -1,7 +1,6 @@
 package io.github.samzhu.grimo.agent.tier;
 
 import io.github.samzhu.grimo.config.GrimoConfig;
-import org.springframework.lang.Nullable;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
 
@@ -34,16 +33,19 @@ public class TierCommands {
      * 查看或設定 session tier。
      * /tier       → 顯示目前 tier
      * /tier pro   → 設定 session tier 為 pro
+     *
+     * @param rawArgs 原始參數字串，可為 null 或空（查看）、或 tier 名稱（設定）
      */
     @Command(name = "tier", description = "View or set the session tier (lite/std/pro)")
-    public String tier(@Nullable String level) {
+    public String tier(String rawArgs) {
+        String level = (rawArgs != null) ? rawArgs.trim() : null;
         if (level == null || level.isBlank()) {
             Tier current = sessionTier.get();
             String tierName = current != null ? current.value() : "std (default)";
             return "Current session tier: " + tierName;
         }
 
-        if (!VALID_TIERS.contains(level.strip().toLowerCase())) {
+        if (!VALID_TIERS.contains(level.toLowerCase())) {
             return "Unknown tier: '" + level + "'. Valid values: lite, std, pro";
         }
 
@@ -55,9 +57,20 @@ public class TierCommands {
     /**
      * 覆寫特定 skill 的 tier（永久寫入 config.yaml）。
      * /skill-tier deep-research pro
+     *
+     * @param rawArgs 原始參數字串，格式：<skillName> <tier>
      */
     @Command(name = "skill-tier", description = "Override tier for a specific skill")
-    public String skillTier(String skillName, String tierLevel) {
+    public String skillTier(String rawArgs) {
+        if (rawArgs == null || rawArgs.isBlank()) {
+            return "Usage: /skill-tier <skill-name> <tier>\nExample: /skill-tier deep-research pro";
+        }
+        String[] parts = rawArgs.trim().split("\\s+", 2);
+        if (parts.length < 2) {
+            return "Usage: /skill-tier <skill-name> <tier>\nExample: /skill-tier deep-research pro";
+        }
+        String skillName = parts[0];
+        String tierLevel = parts[1];
         Tier tier = Tier.fromString(tierLevel);
         config.setSkillOverride(skillName, Map.of("tier", tier.value()));
         return "Skill '" + skillName + "' tier override set to: " + tier.value()

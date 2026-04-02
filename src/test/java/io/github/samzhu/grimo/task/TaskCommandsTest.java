@@ -33,7 +33,7 @@ class TaskCommandsTest {
 
     @Test
     void createShouldSaveTaskAndReturnConfirmation() {
-        String result = commands.create("Check API health", "0 0 9 * * *");
+        String result = commands.create("Check API health --cron \"0 0 9 * * *\"");
 
         assertThat(result).contains("Task created");
         assertThat(store.loadAll()).hasSize(1);
@@ -41,14 +41,14 @@ class TaskCommandsTest {
 
     @Test
     void createCronShouldScheduleTask() {
-        commands.create("Check API health", "0 0 9 * * *");
+        commands.create("Check API health --cron \"0 0 9 * * *\"");
 
         verify(schedulerService).scheduleCron(any(Task.class));
     }
 
     @Test
     void createImmediateShouldNotSchedule() {
-        commands.create("One-time task", null);
+        commands.create("One-time task");
 
         verify(schedulerService, never()).scheduleCron(any(Task.class));
     }

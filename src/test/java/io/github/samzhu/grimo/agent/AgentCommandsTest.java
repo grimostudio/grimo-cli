@@ -48,7 +48,7 @@ class AgentCommandsTest {
 
     @Test
     void useShouldSetRecommendedModelWhenNoModelSpecified() {
-        String result = commands.use("claude", "");
+        String result = commands.use("claude");
         assertThat(result).contains("claude").contains("claude-sonnet-4-6");
         assertThat(config.getDefaultAgent()).isEqualTo("claude");
         assertThat(config.getDefaultModel()).isEqualTo("claude-sonnet-4-6");
@@ -56,21 +56,21 @@ class AgentCommandsTest {
 
     @Test
     void useShouldSetRecommendedModelForGemini() {
-        String result = commands.use("gemini", "");
+        String result = commands.use("gemini");
         assertThat(result).contains("gemini").contains("gemini-2.5-pro");
         assertThat(config.getDefaultModel()).isEqualTo("gemini-2.5-pro");
     }
 
     @Test
     void useShouldSetRecommendedModelForCodex() {
-        String result = commands.use("codex", "");
+        String result = commands.use("codex");
         assertThat(result).contains("codex").contains("o4-mini");
         assertThat(config.getDefaultModel()).isEqualTo("o4-mini");
     }
 
     @Test
     void useShouldSmartMatchAlias() {
-        String result = commands.use("claude", "opus");
+        String result = commands.use("claude opus");
         assertThat(result).contains("claude-opus-4-6");
         assertThat(config.getDefaultModel()).isEqualTo("claude-opus-4-6");
         assertThat(config.getAgentOption("claude", "model")).isEqualTo("claude-opus-4-6");
@@ -78,7 +78,7 @@ class AgentCommandsTest {
 
     @Test
     void useShouldSmartMatchGeminiFlash() {
-        String result = commands.use("gemini", "flash");
+        String result = commands.use("gemini flash");
         assertThat(result).contains("gemini-2.5-flash");
         assertThat(config.getAgentOption("gemini", "model")).isEqualTo("gemini-2.5-flash");
     }
@@ -86,28 +86,28 @@ class AgentCommandsTest {
     @Test
     void useShouldRememberModelAcrossSwitches() {
         // 設定 claude 用 opus
-        commands.use("claude", "opus");
+        commands.use("claude opus");
         assertThat(config.getDefaultModel()).isEqualTo("claude-opus-4-6");
 
         // 切到 gemini
-        commands.use("gemini", "");
+        commands.use("gemini");
         assertThat(config.getDefaultModel()).isEqualTo("gemini-2.5-pro");
 
         // 切回 claude — 應該記住 opus
-        commands.use("claude", "");
+        commands.use("claude");
         assertThat(config.getDefaultModel()).isEqualTo("claude-opus-4-6");
     }
 
     @Test
     void useShouldAcceptFullModelId() {
-        String result = commands.use("claude", "claude-opus-4-6");
+        String result = commands.use("claude claude-opus-4-6");
         assertThat(result).contains("claude-opus-4-6");
         assertThat(config.getDefaultModel()).isEqualTo("claude-opus-4-6");
     }
 
     @Test
     void useShouldRejectUnknownAgent() {
-        String result = commands.use("unknown", "");
+        String result = commands.use("unknown");
         assertThat(result).contains("not found");
     }
 }

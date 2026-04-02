@@ -42,7 +42,7 @@ class GrimoCommandsTest {
 
     @Test
     void chatShouldReturnAgentResponse() {
-        String result = commands.chat("Hello", null);
+        String result = commands.chat("Hello");
         assertThat(result).contains("Echo: Hello");
     }
 

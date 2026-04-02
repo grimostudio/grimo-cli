@@ -6,7 +6,6 @@ import io.github.samzhu.grimo.channel.ChannelRegistry;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import org.springaicommunity.agents.model.AgentTaskRequest;
 import org.springframework.shell.core.command.annotation.Command;
-import org.springframework.shell.core.command.annotation.Option;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
@@ -43,13 +42,29 @@ public class GrimoCommands {
         this.skillRegistry = skillRegistry;
     }
 
+    /**
+     * 發送訊息給 AI agent。
+     *
+     * @param rawArgs 原始訊息字串（直接發送給 agent）
+     */
     @Command(name = "chat", description = "Send a message to the agent")
-    public String chat(String message, @Option(defaultValue = "") String agent) {
-        String agentId = agent != null && !agent.isBlank() ? agent : null;
-        var model = router.route(agentId);
+    public String chat(String rawArgs) {
+        if (rawArgs == null || rawArgs.isBlank()) {
+            return "Usage: /chat <message>";
+        }
+        String message = rawArgs.trim();
+        var model = router.route(null);
         var request = AgentTaskRequest.builder(message, Path.of(".")).build();
         var response = model.call(request);
         return response.isSuccessful() ? response.getText() : "Error: agent call failed";
+    }
+
+    /**
+     * 顯示 Grimo 版本資訊。
+     */
+    @Command(name = "version", description = "Show version")
+    public String version() {
+        return "Grimo CLI";
     }
 
     @Command(name = "status", description = "Show system status")

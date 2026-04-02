@@ -63,7 +63,7 @@ class TierCommandsTest {
 
     @Test
     void skillTierShouldSetOverride() {
-        String output = commands.skillTier("deep-research", "pro");
+        String output = commands.skillTier("deep-research pro");
         assertThat(output).contains("deep-research").contains("pro");
 
         var overrides = config.getSkillOverrides();

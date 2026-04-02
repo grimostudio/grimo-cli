@@ -3,9 +3,7 @@ package io.github.samzhu.grimo.mcp;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.event.McpCatalogChangedEvent;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.shell.core.command.annotation.Argument;
 import org.springframework.shell.core.command.annotation.Command;
-import org.springframework.shell.core.command.annotation.Option;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -76,32 +74,47 @@ public class McpCommands {
      * 新增 MCP server 到 config.yaml 並即時重建 catalog。
      *
      * 設計說明：
-     * - name（位置 0）和 url（位置 1）使用 @Argument，對齊業界 CLI 慣例
+     * - rawArgs 格式：<name> [<url>] [--transport <stdio|sse|http>] [--exec "<command>"]
      * - transport 可省略，依據 url/exec 自動推斷（有 url → sse，有 exec → stdio）
      * - --exec 值以空格切割：第一個 token 為 command，其餘為 args
      * - 限制：--exec 中路徑含空格時無法正確切割（業界 CLI 共通限制）
+     *
+     * @param rawArgs 原始參數字串
      */
     @Command(name = "mcp-add", description = "Add an MCP server")
-    public String add(
-            @Argument(index = 0, description = "Server name",
-                      defaultValue = "") String name,
-            @Argument(index = 1, description = "URL (for sse/http)",
-                      defaultValue = "") String url,
-            @Option(longName = "transport", shortName = 't',
-                    description = "Transport: stdio, sse, http") String transport,
-            @Option(longName = "exec", shortName = 'e',
-                    description = "Stdio command (space-separated)") String exec) {
+    public String add(String rawArgs) {
+        if (rawArgs == null || rawArgs.isBlank()) {
+            return addUsage();
+        }
+
+        // 簡易 flag 解析：先抽出 --exec 和 --transport，剩餘為位置參數
+        String exec = extractFlag(rawArgs, "--exec", "-e");
+        String transport = extractFlag(rawArgs, "--transport", "-t");
+        String remaining = removeFlags(rawArgs);
+
+        String[] positional = remaining.trim().isEmpty() ? new String[0] : remaining.trim().split("\\s+", 3);
+        String name = positional.length > 0 ? positional[0] : "";
+        String url = positional.length > 1 ? positional[1] : "";
+
+        return addImpl(name, url, transport, exec);
+    }
+
+    /**
+     * 內部 add 邏輯，接受已解析的 name/url/transport/exec 參數。
+     * 保留此簽名以便測試直接呼叫（不透過 rawArgs 解析）。
+     */
+    String add(String name, String url, String transport, String exec) {
+        return addImpl(name, url, transport, exec);
+    }
+
+    private String addImpl(String name, String url, String transport, String exec) {
+        // 正規化空字串
+        if (name == null) name = "";
+        if (url == null) url = "";
 
         // === 缺少 name → 顯示 usage ===
         if (name.isEmpty()) {
-            return """
-                    Usage: /mcp-add <name> [<url>] [--transport <stdio|sse|http>] [--exec "<command>"]
-
-                    Examples:
-                      /mcp-add deepwiki https://mcp.deepwiki.com/sse
-                      /mcp-add deepwiki --transport sse https://mcp.deepwiki.com/sse
-                      /mcp-add fs --exec "npx -y @modelcontextprotocol/server-filesystem /tmp"
-                      /mcp-add fs --transport stdio --exec "npx -y @pkg /tmp\"""";
+            return addUsage();
         }
 
         // === name 格式驗證 ===
@@ -116,12 +129,7 @@ public class McpCommands {
             } else if (exec != null && !exec.isEmpty()) {
                 transport = "stdio";
             } else {
-                return """
-                        Usage: /mcp-add <name> [<url>] [--transport <stdio|sse|http>] [--exec "<command>"]
-
-                        Examples:
-                          /mcp-add deepwiki https://mcp.deepwiki.com/sse
-                          /mcp-add fs --exec "npx -y @modelcontextprotocol/server-filesystem /tmp\"""";
+                return addUsage();
             }
         }
 
@@ -172,13 +180,46 @@ public class McpCommands {
         return "Added: " + name + " (" + transport + ")";
     }
 
+    private String addUsage() {
+        return """
+                Usage: /mcp-add <name> [<url>] [--transport <stdio|sse|http>] [--exec "<command>"]
+
+                Examples:
+                  /mcp-add deepwiki https://mcp.deepwiki.com/sse
+                  /mcp-add deepwiki --transport sse https://mcp.deepwiki.com/sse
+                  /mcp-add fs --exec "npx -y @modelcontextprotocol/server-filesystem /tmp"
+                  /mcp-add fs --transport stdio --exec "npx -y @pkg /tmp\"""";
+    }
+
+    /**
+     * 從 rawArgs 中解析指定 flag 的值（長或短格式），回傳 flag 值或 null。
+     */
+    private String extractFlag(String rawArgs, String longName, String shortName) {
+        // 匹配 --flag value 或 -f value（value 到下一個 -- 之前）
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+                "(?:" + java.util.regex.Pattern.quote(longName)
+                + "|" + java.util.regex.Pattern.quote(shortName)
+                + ")\\s+([^-][^\\s]*)");
+        var matcher = pattern.matcher(rawArgs);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    /**
+     * 從 rawArgs 中移除所有 --flag value 和 -f value 片段，回傳剩餘位置參數字串。
+     */
+    private String removeFlags(String rawArgs) {
+        // 移除 --xxx value 或 -x value（value 不以 - 開頭）
+        return rawArgs.replaceAll("(?:--[a-zA-Z-]+|-[a-zA-Z])\\s+[^-]\\S*\\s*", "").trim();
+    }
+
     /**
      * 從 config.yaml 移除 MCP server 並即時重建 catalog。
+     *
+     * @param rawArgs 原始參數字串，格式：<name>
      */
     @Command(name = "mcp-remove", description = "Remove an MCP server")
-    public String remove(
-            @Argument(index = 0, description = "Server name",
-                      defaultValue = "") String name) {
+    public String remove(String rawArgs) {
+        String name = (rawArgs != null) ? rawArgs.trim() : "";
 
         if (name.isEmpty()) {
             return "Usage: /mcp-remove <name>";

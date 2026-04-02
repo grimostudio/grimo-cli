@@ -41,7 +41,11 @@ public class ChannelCommands {
     }
 
     @Command(name = "channel-remove", description = "Remove a channel")
-    public String remove(String channelType) {
+    public String remove(String rawArgs) {
+        if (rawArgs == null || rawArgs.isBlank()) {
+            return "Usage: /channel-remove <channel-type>";
+        }
+        String channelType = rawArgs.trim();
         if (registry.get(channelType).isEmpty()) {
             return "Channel not found: " + channelType;
         }

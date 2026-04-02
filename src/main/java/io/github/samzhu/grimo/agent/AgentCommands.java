@@ -4,7 +4,6 @@ import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.shell.core.command.annotation.Argument;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
 
@@ -95,14 +94,16 @@ public class AgentCommands {
      *   /agent-use claude opus     → claude + claude-opus-4-6（智慧匹配 + 存記憶）
      *   /agent-use gemini flash    → gemini + gemini-2.5-flash
      *
-     * @param input agent ID，可選空格後接 model hint
+     * @param rawArgs 原始參數字串，格式：<agentId> [modelHint]
      */
     @Command(name = "agent-use", description = "Switch agent (auto-picks model)")
-    public String use(@Argument(index = 0) String agentId,
-                      @Argument(index = 1, defaultValue = "") String modelHint) {
-        if (agentId == null || agentId.isBlank()) {
+    public String use(String rawArgs) {
+        if (rawArgs == null || rawArgs.isBlank()) {
             return "Usage: /agent-use <agent> [model]\nExample: /agent-use claude opus";
         }
+        String[] parts = rawArgs.trim().split("\\s+", 2);
+        String agentId = parts[0];
+        String modelHint = parts.length > 1 ? parts[1] : null;
 
         // 驗證 agent 存在
         if (registry.get(agentId) == null) {

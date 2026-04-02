@@ -47,7 +47,11 @@ public class SkillCommands {
     }
 
     @Command(name = "skill-remove", description = "Remove a loaded skill")
-    public String remove(String name) {
+    public String remove(String rawArgs) {
+        if (rawArgs == null || rawArgs.isBlank()) {
+            return "Usage: /skill-remove <name>";
+        }
+        String name = rawArgs.trim();
         if (registry.get(name).isEmpty()) {
             return "Skill not found: " + name;
         }
@@ -59,9 +63,15 @@ public class SkillCommands {
      * Installs a skill by cloning its Git repository into the ~/.grimo/skills directory,
      * then loads and registers the SKILL.md definition found in the cloned repo.
      * Convention: repository name prefix 'grimo-skill-' is stripped for the skill directory name.
+     *
+     * @param rawArgs 原始參數字串，格式：<git-url>
      */
     @Command(name = "skill-install", description = "Install a skill from a Git repository URL")
-    public String install(String url) {
+    public String install(String rawArgs) {
+        if (rawArgs == null || rawArgs.isBlank()) {
+            return "Usage: /skill-install <git-url>\nExample: /skill-install https://github.com/example/grimo-skill-foo";
+        }
+        String url = rawArgs.trim();
         String skillName = url.substring(url.lastIndexOf('/') + 1)
             .replace("grimo-skill-", "");
         Path targetDir = skillsDir.resolve(skillName);
