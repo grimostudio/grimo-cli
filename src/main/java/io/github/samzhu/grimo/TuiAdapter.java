@@ -2,12 +2,12 @@ package io.github.samzhu.grimo;
 
 import io.github.samzhu.grimo.agent.AgentCommands;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
+import io.github.samzhu.grimo.command.InputMetadata;
+import io.github.samzhu.grimo.command.InputPort;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.home.GrimoHome;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.project.ProjectContext;
-import io.github.samzhu.grimo.shared.event.IncomingMessageEvent;
-import io.github.samzhu.grimo.shared.event.OutgoingMessageEvent;
 import io.github.samzhu.grimo.shared.sandbox.GitHelper;
 import io.github.samzhu.grimo.shared.sandbox.WorktreeProvisioner;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
@@ -20,8 +20,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.shell.core.command.CommandExecutor;
@@ -44,7 +42,6 @@ import io.github.samzhu.grimo.tui.widget.Banner;
 import io.github.samzhu.grimo.tui.widget.GroupedSelect;
 import io.github.samzhu.grimo.tui.widget.ListSelect;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -83,7 +80,7 @@ public class TuiAdapter implements ApplicationRunner {
     private final GitHelper gitHelper;
     private final TuiEventBridge tuiEventBridge;
     private final ChatDispatcher chatDispatcher;
-    private final ApplicationEventPublisher eventPublisher;
+    private final InputPort inputPort;
 
     /** Status bar 元件（run 時初始化，需在 agent thread 中更新） */
     private StatusView statusView;
@@ -127,7 +124,7 @@ public class TuiAdapter implements ApplicationRunner {
                            GitHelper gitHelper,
                            TuiEventBridge tuiEventBridge,
                            ChatDispatcher chatDispatcher,
-                           ApplicationEventPublisher eventPublisher) {
+                           InputPort inputPort) {
         this.terminal = terminal;
         this.grimoHome = grimoHome;
         this.projectContext = projectContext;
@@ -145,7 +142,7 @@ public class TuiAdapter implements ApplicationRunner {
         this.gitHelper = gitHelper;
         this.tuiEventBridge = tuiEventBridge;
         this.chatDispatcher = chatDispatcher;
-        this.eventPublisher = eventPublisher;
+        this.inputPort = inputPort;
     }
 
     @Override
@@ -288,92 +285,51 @@ public class TuiAdapter implements ApplicationRunner {
     }
 
     /**
-     * 從 CommandRegistry + SkillRegistry 建構斜線指令選單項目。
+     * 從 InputPort（CommandDispatcher + SkillRegistry）建構斜線指令選單項目。
+     *
+     * 設計說明（六角架構）：
+     * - TuiAdapter 是 Driving Adapter，透過 InputPort 取得可用指令清單
+     * - 不直接讀 CommandRegistry（Spring Shell），改讀 CommandDispatcher（Core）
+     * - @mentions 不顯示在斜線選單（屬於 agent mention 路徑）
      */
     private List<SlashMenu.MenuItem> buildMenuItems() {
-        var items = new java.util.ArrayList<SlashMenu.MenuItem>();
-
-        commandRegistry.getCommandsByPrefix("").stream()
-                .filter(cmd -> !"chat".equals(cmd.getName()))
-                .forEach(cmd -> items.add(new SlashMenu.MenuItem(
-                        cmd.getName(), cmd.getDescription())));
-
-        skillRegistry.listAll().forEach(skill ->
-                items.add(new SlashMenu.MenuItem(
-                        skill.name(), skill.description())));
-
-        return items;
+        return inputPort.listAvailableCommands().stream()
+                .filter(e -> !e.name().startsWith("@"))
+                .map(e -> new SlashMenu.MenuItem(e.name(), e.description()))
+                .toList();
     }
 
     /**
-     * 處理使用者輸入：TUI 專屬攔截直接處理，其餘透過 IncomingMessageEvent 進入統一管線。
+     * 處理使用者輸入：TUI 專屬攔截直接處理，其餘透過 InputPort 進入 Core。
      *
-     * 設計說明（事件管線架構）：
+     * 設計說明（六角架構）：
      * <pre>
      * TUI input
-     *   ├─ TUI 專屬攔截（/exit、/mcp 無參數、/agent-use 無參數）→ 直接處理（不進管線）
-     *   └─ 其他輸入 → sessionWriter.writeUserMessage() + publishEvent(IncomingMessageEvent)
-     *        → MessageRouter.on(IncomingMessageEvent)
-     *            ├─ /command → CommandExecutor → OutgoingMessageEvent(targetAdapter="tui")
+     *   ├─ TUI 專屬攔截（/exit、/mcp 無參數、/agent-use 無參數）→ 直接處理（不進 Core）
+     *   └─ 其他輸入 → sessionWriter.writeUserMessage() + inputPort.handleInput()
+     *        → InputHandler（Core）
+     *            ├─ /command → CommandDispatcher → ResponseCallback → contentView
      *            └─ AI text  → ChatDispatcher（含 Virtual Thread，直接更新 TUI）
      * </pre>
      *
-     * 指令輸出回傳路徑：OutgoingMessageEvent → TuiAdapter.on(OutgoingMessageEvent) → contentView
+     * Adapter 呼叫 Port（不走 IncomingMessageEvent），符合六角架構：Adapter → Port → Core。
      */
     private void processInput(String text) {
-        if (text.equals("/exit")) {
-            eventLoop.stop();
-            return;
-        }
+        // TUI 專屬 overlays（不進 InputPort）
+        if (text.equals("/exit")) { eventLoop.stop(); return; }
+        if (text.equals("/agent-use")) { showAgentPicker(); return; }
+        if (text.equals("/mcp")) { tuiKeyHandler.openMcpManager(); return; }
 
-        // /mcp 無子指令時開啟互動 overlay（TUI 專屬，不走 MessageRouter）
-        if (text.equals("/mcp")) {
-            tuiKeyHandler.openMcpManager();
-            return;
-        }
-
-        // /agent-use 無參數時開啟互動選擇器（TUI 專屬，不走 MessageRouter）
-        if (text.equals("/agent-use")) {
-            showAgentPicker();
-            return;
-        }
-
-        // 記錄使用者輸入到 session（指令輸出由 MessageRouter 透過 SessionWriter 記錄）
         contentView.appendUserInput(text);
         sessionWriter.writeUserMessage(text);
 
-        // 發布入站事件，進入統一訊息管線（MessageRouter 負責路由）
-        eventPublisher.publishEvent(new IncomingMessageEvent(
-                "tui",           // channelType
-                null,            // channelUserId
-                null,            // conversationId
-                text,
-                List.of(),       // attachments
-                Instant.now(),   // timestamp
-                "tui",           // sourceAdapter
-                sessionWriter.getSessionId()  // sessionId
-        ));
-    }
-
-    /**
-     * 接收 OutgoingMessageEvent，顯示指令輸出到 TUI contentView。
-     *
-     * 設計說明：
-     * - targetAdapter == "tui" 或 null（broadcast）的訊息才顯示
-     * - AI 對話回應由 ChatDispatcher 直接更新 contentView，不走此路徑
-     * - appendCommandOutput 格式化指令輸出（有縮排/顏色區別）
-     */
-    @EventListener
-    public void on(OutgoingMessageEvent event) {
-        String target = event.targetAdapter();
-        if (!"tui".equals(target) && target != null) {
-            return; // 不是給 TUI 的訊息，忽略
-        }
-        if (contentView == null || eventLoop == null) {
-            return; // TUI 尚未初始化（事件在 TUI run() 之前到達）
-        }
-        contentView.appendCommandOutput(event.text());
-        eventLoop.setDirty();
+        // 六角架構：Adapter 直接呼叫 Port（不經 IncomingMessageEvent）
+        inputPort.handleInput(text,
+                InputMetadata.tui(sessionWriter.getSessionId()),
+                result -> {
+                    contentView.appendCommandOutput(result);
+                    eventLoop.setDirty();
+                });
     }
 
     /**
