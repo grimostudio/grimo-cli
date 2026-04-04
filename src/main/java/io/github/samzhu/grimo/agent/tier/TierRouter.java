@@ -2,6 +2,7 @@ package io.github.samzhu.grimo.agent.tier;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.lang.Nullable;
@@ -20,7 +21,7 @@ import java.util.Map;
  * 5. 安裝時自動分析結果（已寫入 metadata） → 等同 #4
  * 6. 預設 std
  *
- * Tier 確定後，walk skill-tiers.<tier> fallback list：
+ * Tier 確定後，walk tier-models.<tier> fallback list：
  * - 每個 entry 查 registry.get(agentId) → isAvailable()
  * - 第一個可用的就選定
  * - 全都不可用 → throw IllegalStateException
@@ -33,10 +34,12 @@ public class TierRouter {
 
     private final AgentModelRegistry registry;
     private final GrimoConfig config;
+    private final GrimoProperties grimoProperties;
 
-    public TierRouter(AgentModelRegistry registry, GrimoConfig config) {
+    public TierRouter(AgentModelRegistry registry, GrimoConfig config, GrimoProperties grimoProperties) {
         this.registry = registry;
         this.config = config;
+        this.grimoProperties = grimoProperties;
     }
 
     public TierSelection resolve(Context ctx) {
@@ -91,8 +94,20 @@ public class TierRouter {
     }
 
     private TierSelection walkFallbackList(Tier tier, String source) {
-        var tiers = config.getTierModels();
-        List<Map<String, String>> fallbackList = tiers.get(tier.value());
+        // per-tier fallback：user config > built-in
+        var configTiers = config.getTierModels();
+        List<Map<String, String>> fallbackList = configTiers.get(tier.value());
+
+        if (fallbackList == null || fallbackList.isEmpty()) {
+            // 該 tier 在 user config 沒設定 → fallback 到 built-in (application.yaml)
+            var builtIn = grimoProperties.getTierModels();
+            var entries = builtIn.get(tier.value());
+            if (entries != null) {
+                fallbackList = entries.stream()
+                    .map(e -> Map.of("agent", e.agent(), "model", e.model()))
+                    .toList();
+            }
+        }
 
         if (fallbackList != null && !fallbackList.isEmpty()) {
             for (var entry : fallbackList) {
@@ -109,7 +124,7 @@ public class TierRouter {
                     "沒有可用的 agent 符合 %s 等級。請確認至少一個 CLI agent 已安裝。".formatted(tier.value()));
         }
 
-        // skill-tiers 未設定 → fallback to conversation default
+        // tier-models 未設定 → fallback to conversation default
         return fallbackToConversationDefault(tier, source);
     }
 

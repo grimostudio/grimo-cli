@@ -2,6 +2,7 @@ package io.github.samzhu.grimo.agent.tier;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -14,6 +15,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import java.util.Map;
+
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -31,6 +34,7 @@ class TierIntegrationTest {
     Path tempDir;
 
     private GrimoConfig config;
+    private GrimoProperties grimoProperties;
     private AgentModelRegistry registry;
     private TierRouter router;
     private TierKeywordDetector keywordDetector;
@@ -80,11 +84,13 @@ class TierIntegrationTest {
             """);
 
         config = new GrimoConfig(configFile);
+        grimoProperties = mock(GrimoProperties.class);
+        when(grimoProperties.getTierModels()).thenReturn(Map.of());
         registry = new AgentModelRegistry();
         sessionTier = new AtomicReference<>(null);
 
         // 真實 GrimoConfig + 真實 TierRouter + 真實 TierKeywordDetector
-        router = new TierRouter(registry, config);
+        router = new TierRouter(registry, config, grimoProperties);
         keywordDetector = new TierKeywordDetector(config.getTierKeywords());
     }
 
@@ -265,7 +271,7 @@ class TierIntegrationTest {
         config.setSkillOverride("code-review", java.util.Map.of("tier", "lite"));
 
         // 重建 router（因為 config 已更新）
-        router = new TierRouter(registry, config);
+        router = new TierRouter(registry, config, grimoProperties);
 
         var ctx = TierRouter.Context.builder()
                 .skillName("code-review")
@@ -291,7 +297,7 @@ class TierIntegrationTest {
                 model: claude-sonnet-4
             """);
         var minimalConfig = new GrimoConfig(configFile);
-        var minimalRouter = new TierRouter(registry, minimalConfig);
+        var minimalRouter = new TierRouter(registry, minimalConfig, grimoProperties);
 
         registerAgent("claude");
 

@@ -2,6 +2,7 @@ package io.github.samzhu.grimo.agent.tier;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springaicommunity.agents.model.AgentModel;
@@ -17,12 +18,14 @@ class TierRouterTest {
 
     private AgentModelRegistry registry;
     private GrimoConfig config;
+    private GrimoProperties grimoProperties;
     private TierRouter router;
 
     @BeforeEach
     void setUp() {
         registry = new AgentModelRegistry();
         config = mock(GrimoConfig.class);
+        grimoProperties = mock(GrimoProperties.class);
 
         when(config.getTierModels()).thenReturn(Map.of(
                 "lite", List.of(
@@ -36,8 +39,9 @@ class TierRouterTest {
         ));
         when(config.getSkillOverrides()).thenReturn(Map.of());
         when(config.getTierKeywords()).thenReturn(Map.of());
+        when(grimoProperties.getTierModels()).thenReturn(Map.of());
 
-        router = new TierRouter(registry, config);
+        router = new TierRouter(registry, config, grimoProperties);
     }
 
     private void registerAgent(String id) {
@@ -131,9 +135,26 @@ class TierRouterTest {
         when(config.getDefaultAgent()).thenReturn("claude");
         when(config.getAgentOption("claude", "model")).thenReturn("claude-sonnet-4");
 
-        router = new TierRouter(registry, config);
+        router = new TierRouter(registry, config, grimoProperties);
         var ctx = TierRouter.Context.builder().build();
         var selection = router.resolve(ctx);
         assertThat(selection.agentId()).isEqualTo("claude");
+    }
+
+    @Test
+    void resolveFallsBackToGrimoPropertiesWhenConfigTierEmpty() {
+        registerAgent("claude");
+        when(config.getTierModels()).thenReturn(Map.of(
+                "std", List.of(Map.of("agent", "claude", "model", "claude-sonnet-4"))
+        ));
+        when(grimoProperties.getTierModels()).thenReturn(Map.of(
+                "pro", List.of(new GrimoProperties.TierEntry("claude", "claude-opus-4"))
+        ));
+        router = new TierRouter(registry, config, grimoProperties);
+
+        var ctx = TierRouter.Context.builder().skillTier("pro").build();
+        var selection = router.resolve(ctx);
+        assertThat(selection.agentId()).isEqualTo("claude");
+        assertThat(selection.model()).isEqualTo("claude-opus-4");
     }
 }

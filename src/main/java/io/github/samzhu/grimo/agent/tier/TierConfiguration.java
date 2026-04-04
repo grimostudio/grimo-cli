@@ -2,6 +2,7 @@ package io.github.samzhu.grimo.agent.tier;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -19,8 +20,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public class TierConfiguration {
 
     @Bean
-    public TierRouter tierRouter(AgentModelRegistry registry, GrimoConfig config) {
-        return new TierRouter(registry, config);
+    public TierRouter tierRouter(AgentModelRegistry registry, GrimoConfig config, GrimoProperties grimoProperties) {
+        return new TierRouter(registry, config, grimoProperties);
     }
 
     @Bean
