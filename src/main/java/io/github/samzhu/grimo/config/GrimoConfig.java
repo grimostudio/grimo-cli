@@ -148,17 +148,18 @@ public class GrimoConfig {
     }
 
     /**
-     * 取得 skill-tiers 設定：每個 tier 對應一個 agent+model fallback list。
+     * 取得 tier-models 設定：每個 tier 對應一個 agent+model fallback list。
      * 回傳格式：Map<tierName, List<Map<"agent"|"model", value>>>
      *
      * 設計說明：
+     * - 更名自 getSkillTiers — tier 機制通用，不只 skill 用
      * - 每級可配多組 agent+model，按順序 fallback
      * - 回傳原始結構，TierRouter 負責解析與 isAvailable() 檢查
      */
     @SuppressWarnings("unchecked")
-    public synchronized Map<String, List<Map<String, String>>> getSkillTiers() {
+    public synchronized Map<String, List<Map<String, String>>> getTierModels() {
         var data = load();
-        var tiers = (Map<String, List<Map<String, String>>>) data.get("skill-tiers");
+        var tiers = (Map<String, List<Map<String, String>>>) data.get("tier-models");
         return tiers != null ? tiers : Map.of();
     }
 

@@ -178,10 +178,10 @@ class GrimoConfigTest {
     }
 
     @Test
-    void getSkillTiersShouldReturnFallbackListPerTier() throws IOException {
+    void getTierModelsShouldReturnFallbackListPerTier() throws IOException {
         var configFile = tempDir.resolve("config.yaml");
         Files.writeString(configFile, """
-            skill-tiers:
+            tier-models:
               lite:
                 - agent: gemini
                   model: gemini-2.5-flash
@@ -196,7 +196,7 @@ class GrimoConfigTest {
             """);
 
         var config = new GrimoConfig(configFile);
-        var tiers = config.getSkillTiers();
+        var tiers = config.getTierModels();
 
         assertThat(tiers).containsKey("lite");
         assertThat(tiers.get("lite")).hasSize(2);
@@ -207,9 +207,9 @@ class GrimoConfigTest {
     }
 
     @Test
-    void getSkillTiersShouldReturnEmptyWhenNotConfigured() {
+    void getTierModelsShouldReturnEmptyWhenNotConfigured() {
         var config = new GrimoConfig(tempDir.resolve("config.yaml"));
-        assertThat(config.getSkillTiers()).isEmpty();
+        assertThat(config.getTierModels()).isEmpty();
     }
 
     @Test

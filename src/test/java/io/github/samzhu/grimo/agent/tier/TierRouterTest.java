@@ -24,7 +24,7 @@ class TierRouterTest {
         registry = new AgentModelRegistry();
         config = mock(GrimoConfig.class);
 
-        when(config.getSkillTiers()).thenReturn(Map.of(
+        when(config.getTierModels()).thenReturn(Map.of(
                 "lite", List.of(
                         Map.of("agent", "gemini", "model", "gemini-2.5-flash"),
                         Map.of("agent", "claude", "model", "claude-haiku-4")),
@@ -127,7 +127,7 @@ class TierRouterTest {
     @Test
     void resolveHandlesEmptyTierConfig() {
         registerAgent("claude");
-        when(config.getSkillTiers()).thenReturn(Map.of());
+        when(config.getTierModels()).thenReturn(Map.of());
         when(config.getDefaultAgent()).thenReturn("claude");
         when(config.getAgentOption("claude", "model")).thenReturn("claude-sonnet-4");
 

@@ -91,7 +91,7 @@ public class TierRouter {
     }
 
     private TierSelection walkFallbackList(Tier tier, String source) {
-        var tiers = config.getSkillTiers();
+        var tiers = config.getTierModels();
         List<Map<String, String>> fallbackList = tiers.get(tier.value());
 
         if (fallbackList != null && !fallbackList.isEmpty()) {
