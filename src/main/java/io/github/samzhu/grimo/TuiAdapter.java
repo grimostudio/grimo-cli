@@ -258,21 +258,17 @@ public class TuiAdapter implements ApplicationRunner {
     }
 
     private List<ListSelect.Item<String>> buildModelItems(String agentId) {
-        var items = new java.util.ArrayList<ListSelect.Item<String>>();
-        // 設計說明：預設模型由 GrimoProperties.getDefaults() 提供（application.yaml grimo.defaults.*）
-        String recommended = grimoProperties.getDefaults().get(agentId);
-        if (recommended != null) {
-            items.add(new ListSelect.Item<>(recommended, "推薦", agentId + " " + recommended));
+        // 設計說明：從 GrimoProperties.getModels() 讀取該 agent 所有可用模型
+        // 模型清單由開發者在 application.yaml grimo.models 維護，不替使用者過濾
+        var modelEntries = grimoProperties.getModels().get(agentId);
+        if (modelEntries != null && !modelEntries.isEmpty()) {
+            return modelEntries.stream()
+                    .map(entry -> new ListSelect.Item<>(entry.id(), "", agentId + " " + entry.id()))
+                    .toList();
         }
-        String remembered = grimoConfig.getAgentOption(agentId, "model");
-        if (remembered != null && !remembered.equals(recommended)) {
-            items.add(new ListSelect.Item<>(remembered, "上次使用", agentId + " " + remembered));
-        }
-        // If no items found, add a default entry
-        if (items.isEmpty()) {
-            items.add(new ListSelect.Item<>(agentId, "default", agentId));
-        }
-        return items;
+        // fallback：models 沒有該 agent 時，用 defaults
+        String defaultModel = grimoProperties.getDefaults().getOrDefault(agentId, agentId);
+        return List.of(new ListSelect.Item<>(defaultModel, "", agentId + " " + defaultModel));
     }
 
     /**
