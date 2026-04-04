@@ -97,15 +97,21 @@ public class ContentView implements Renderable {
 
     /**
      * 附加錯誤訊息：⚠ 前綴 + 紅色文字。
+     * 設計說明：同 appendAiReply — split("\n") 保證單行不變量。
      */
     public synchronized void appendError(String text) {
-        var sb = new AttributedStringBuilder();
-        sb.styled(AttributedStyle.DEFAULT.foreground(196), "⚠ " + text);
-        lines.add(sb.toAttributedString());
+        String[] parts = text.split("\n", -1);
+        for (int i = 0; i < parts.length; i++) {
+            var sb = new AttributedStringBuilder();
+            sb.styled(AttributedStyle.DEFAULT.foreground(196),
+                    (i == 0 ? "⚠ " : "  ") + parts[i]);
+            var line = sb.toAttributedString();
+            lines.add(line);
+            incrementalCacheUpdate(line);
+        }
         lines.add(AttributedString.EMPTY);
-        scrollToBottomIfAutoFollow();
-        incrementalCacheUpdate(sb.toAttributedString());
         incrementalCacheUpdate(AttributedString.EMPTY);
+        scrollToBottomIfAutoFollow();
     }
 
     /**
