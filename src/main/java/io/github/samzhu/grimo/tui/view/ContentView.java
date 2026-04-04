@@ -143,11 +143,16 @@ public class ContentView implements Renderable {
     public synchronized void removeLastLine() {
         if (!lines.isEmpty()) {
             lines.removeLast();
-            while (!wrappedCache.isEmpty() && wrappedCache.getLast().wrapped()) {
-                wrappedCache.removeLast();
-            }
-            if (!wrappedCache.isEmpty()) {
-                wrappedCache.removeLast();
+            if (cachedCols > 0 && !wrappedCache.isEmpty()) {
+                while (!wrappedCache.isEmpty() && wrappedCache.getLast().wrapped()) {
+                    wrappedCache.removeLast();
+                }
+                if (!wrappedCache.isEmpty()) {
+                    wrappedCache.removeLast();
+                }
+            } else {
+                // Cache not initialized — invalidate so next getBufferLines() rebuilds
+                cachedCols = -1;
             }
         }
     }
