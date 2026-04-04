@@ -75,6 +75,7 @@ grimo:
         pricing: "$0.50/$3"
         context: "1M"
 
+    # 來源：Codex CLI v0.118.0 /model 清單（2026-04-04 實測）
     codex:
       - id: gpt-5.4
         pricing: "$2.50/$15"
@@ -85,7 +86,16 @@ grimo:
       - id: gpt-5.3-codex
         pricing: "—"
         context: "—"
-      - id: gpt-5-codex
+      - id: gpt-5.2-codex
+        pricing: "—"
+        context: "—"
+      - id: gpt-5.2
+        pricing: "—"
+        context: "—"
+      - id: gpt-5.1-codex-max
+        pricing: "—"
+        context: "—"
+      - id: gpt-5.1-codex-mini
         pricing: "—"
         context: "—"
 
