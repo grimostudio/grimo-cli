@@ -1,6 +1,5 @@
 package io.github.samzhu.grimo;
 
-import io.github.samzhu.grimo.agent.AgentCommands;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.command.InputMetadata;
 import io.github.samzhu.grimo.command.InputPort;
@@ -145,7 +144,7 @@ public class TuiAdapter implements ApplicationRunner {
         String agentId = resolveAgentId();
         String model = grimoConfig.getAgentOption(agentId, "model");
         if (model == null) model = grimoConfig.getDefaultModel();
-        if (model == null) model = AgentCommands.RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
+        if (model == null) model = "unknown"; // TODO Task 6: migrate to grimoProperties.getDefaults()
         String projectPath = projectContext.displayPath();
         long agentCount = agentModelRegistry.listAll().values().stream()
                 .filter(m -> m.isAvailable()).count();
@@ -256,7 +255,8 @@ public class TuiAdapter implements ApplicationRunner {
 
     private List<ListSelect.Item<String>> buildModelItems(String agentId) {
         var items = new java.util.ArrayList<ListSelect.Item<String>>();
-        String recommended = AgentCommands.RECOMMENDED_MODELS.get(agentId);
+        // TODO Task 6: migrate to grimoProperties.getDefaults() for recommended model
+        String recommended = null; // placeholder until Task 6 injects GrimoProperties
         if (recommended != null) {
             items.add(new ListSelect.Item<>(recommended, "推薦", agentId + " " + recommended));
         }

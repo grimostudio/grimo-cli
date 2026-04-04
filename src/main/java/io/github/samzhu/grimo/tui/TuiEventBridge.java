@@ -1,6 +1,5 @@
 package io.github.samzhu.grimo.tui;
 
-import io.github.samzhu.grimo.agent.AgentCommands;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.project.ProjectContext;
@@ -177,7 +176,7 @@ public class TuiEventBridge {
         if (agentId == null) agentId = "no agent";
         String model = grimoConfig.getAgentOption(agentId, "model");
         if (model == null) model = grimoConfig.getDefaultModel();
-        if (model == null) model = AgentCommands.RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
+        if (model == null) model = "unknown"; // TODO Task 6: migrate to grimoProperties.getDefaults()
 
         String projectPath = projectContext.displayPath();
         long agentCount = agentModelRegistry.listAll().values().stream()

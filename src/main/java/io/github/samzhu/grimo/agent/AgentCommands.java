@@ -2,6 +2,7 @@ package io.github.samzhu.grimo.agent;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoProperties;
 import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.shell.core.command.annotation.Command;
@@ -16,7 +17,8 @@ import java.util.Map;
  * - 合併原本的 /agent-use 和 /agent-model 為單一指令
  * - 懶人原則：只指定 agent → 自動帶推薦模型或記憶的模型
  * - Per-agent 模型記憶：切到 opus 後換 gemini 再換回 claude，記住 opus
- * - 智慧匹配：簡寫 "opus" → "claude-opus-4-6"
+ * - 推薦預設模型從 GrimoProperties（application.yaml grimo.defaults）讀取，不再硬編碼
+ * - 模型 alias 解析由各 CLI 自行處理（passthrough），Grimo 不再維護 alias 表
  *
  * @see <a href="https://code.claude.com/docs/en/model-config">Claude Code Model Config</a>
  * @see <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a>
@@ -28,35 +30,15 @@ public class AgentCommands {
     private final AgentModelRegistry registry;
     private final GrimoConfig config;
     private final ApplicationEventPublisher eventPublisher;
-
-    /**
-     * 各 CLI agent 的推薦預設模型（對齊各 CLI 官方預設）。
-     */
-    public static final Map<String, String> RECOMMENDED_MODELS = Map.of(
-            "claude", "claude-sonnet-4-6",
-            "gemini", "gemini-2.5-pro",
-            "codex", "o4-mini"
-    );
-
-    /**
-     * 簡寫 → 完整模型 ID 對應表。
-     * key 格式：agentId + ":" + alias
-     */
-    static final Map<String, String> MODEL_ALIASES = Map.ofEntries(
-            Map.entry("claude:opus", "claude-opus-4-6"),
-            Map.entry("claude:sonnet", "claude-sonnet-4-6"),
-            Map.entry("claude:haiku", "claude-haiku-4-5"),
-            Map.entry("gemini:pro", "gemini-2.5-pro"),
-            Map.entry("gemini:flash", "gemini-2.5-flash"),
-            Map.entry("codex:o4-mini", "o4-mini"),
-            Map.entry("codex:o3", "o3")
-    );
+    private final GrimoProperties grimoProperties;
 
     public AgentCommands(AgentModelRegistry registry, GrimoConfig config,
-                         ApplicationEventPublisher eventPublisher) {
+                         ApplicationEventPublisher eventPublisher,
+                         GrimoProperties grimoProperties) {
         this.registry = registry;
         this.config = config;
         this.eventPublisher = eventPublisher;
+        this.grimoProperties = grimoProperties;
     }
 
     @Command(name = "agent-list", description = "List all configured agents")
@@ -80,7 +62,7 @@ public class AgentCommands {
             String indicator = id.equals(defaultAgent) ? "> " : "  ";
             String status = entry.getValue().isAvailable() ? "ready" : "not available";
             String model = config.getAgentOption(id, "model");
-            if (model == null) model = RECOMMENDED_MODELS.getOrDefault(id, "");
+            if (model == null) model = grimoProperties.getDefaults().getOrDefault(id, "");
             sb.append(String.format("%s%-10s %-14s %s%n", indicator, id, status, model));
         }
         return sb.toString().stripTrailing();
@@ -90,9 +72,9 @@ public class AgentCommands {
      * 統一切換 agent + model。
      *
      * 用法：
-     *   /agent-use claude          → claude + 記憶模型 or 推薦預設
-     *   /agent-use claude opus     → claude + claude-opus-4-6（智慧匹配 + 存記憶）
-     *   /agent-use gemini flash    → gemini + gemini-2.5-flash
+     *   /agent-use claude          → claude + 記憶模型 or 推薦預設（from GrimoProperties）
+     *   /agent-use claude opus     → claude + "opus"（passthrough，由 CLI 自行解析 alias）
+     *   /agent-use gemini flash    → gemini + "flash"（passthrough）
      *
      * @param rawArgs 原始參數字串，格式：<agentId> [modelHint]
      */
@@ -110,16 +92,16 @@ public class AgentCommands {
             return "Agent not found: " + agentId + ". Run '/agent-list' to see available agents.";
         }
 
-        // 解析 model
+        // 解析 model：有 hint 就 passthrough（CLI 自行解析 alias），否則讀記憶或 properties 預設
         String model;
         if (modelHint != null && !modelHint.isBlank()) {
-            model = resolveModel(agentId, modelHint);
+            model = modelHint;  // passthrough — CLI 自行解析 alias
             config.setAgentOption(agentId, "model", model);
         } else {
-            // 讀記憶，沒有就用推薦預設
+            // 讀記憶，沒有就用 GrimoProperties 推薦預設
             model = config.getAgentOption(agentId, "model");
             if (model == null) {
-                model = RECOMMENDED_MODELS.getOrDefault(agentId, "unknown");
+                model = grimoProperties.getDefaults().getOrDefault(agentId, "unknown");
             }
         }
 
@@ -128,14 +110,5 @@ public class AgentCommands {
         eventPublisher.publishEvent(new AgentSwitchedEvent(agentId, model));
 
         return "Switched to " + agentId + " \u00b7 " + model;
-    }
-
-    /**
-     * 智慧匹配：簡寫 alias → 完整模型 ID。
-     * 先查 alias 表，不匹配則直接當完整 model ID。
-     */
-    private String resolveModel(String agentId, String hint) {
-        String aliasKey = agentId + ":" + hint.toLowerCase();
-        return MODEL_ALIASES.getOrDefault(aliasKey, hint);
     }
 }
