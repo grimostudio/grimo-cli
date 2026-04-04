@@ -206,7 +206,9 @@ public class ChatDispatcher {
                 log.info("[DISPATCH] agent={}, model={}, goal={}", agentId, model,
                         userInput.length() > 100 ? userInput.substring(0, 100) + "..." : userInput);
 
-                var options = tierOptionsFactory.build(agentId, model);
+                // 主對話 PLAN mode（同 doDispatch 說明）
+                var options = tierOptionsFactory.build(agentId, model,
+                        TierOptionsFactory.ExecutionMode.PLAN);
                 var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
                 var client = AgentClient.builder(agentModel)
                         .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
@@ -240,7 +242,9 @@ public class ChatDispatcher {
                     return;
                 }
                 var configModel = grimoConfig.getAgentOption(agentId, "model");
-                var options = tierOptionsFactory.build(agentId, configModel);
+                // @mention 直接指定 agent 也走 PLAN mode
+                var options = tierOptionsFactory.build(agentId, configModel,
+                        TierOptionsFactory.ExecutionMode.PLAN);
 
                 log.info("[DISPATCH-TO] agent={}, model={}, goal={}", agentId, configModel,
                         text.length() > 100 ? text.substring(0, 100) + "..." : text);
@@ -376,12 +380,16 @@ public class ChatDispatcher {
         // 參考：Claude Code 預設行為 — 直接在 CWD，worktree 是可選的
         var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
 
-        // 設計說明：主對話使用 DEV mode — 跟 Claude Code 預設行為一致
-        // SDK bug: 有 MCP 時 ClaudeAgentOptions 被 DefaultAgentOptions.from() 覆蓋
-        // 導致 disallowedTools 丟失（instanceof ClaudeAgentOptions → false）
-        // 隔離由 /dev 指令的 worktree 提供，不依賴工具限制
+        // 設計說明：主對話使用 PLAN mode — 限制 agent 修改檔案的能力
+        // Claude: disallowedTools=["Edit","Write","MultiEdit"]
+        // Gemini: yolo=false（需確認）
+        // Codex: ApprovalPolicy.SMART + fullAuto=false
+        // 注意：有 MCP 時 SDK bug 會導致 ClaudeAgentOptions.disallowedTools 丟失
+        // （DefaultAgentClient.resolveMcpServers() 包成 DefaultAgentOptions），
+        // 屆時需 workaround 或等 SDK 修復。目前無 MCP 不受影響。
         var tierOptions = tierOptionsFactory.build(
-                tierSelection.agentId(), tierSelection.model());
+                tierSelection.agentId(), tierSelection.model(),
+                TierOptionsFactory.ExecutionMode.PLAN);
 
         // 設計說明：直接用 CWD，Plan Mode 下 agent 的 disallowedTools 限制修改
         var client = AgentClient.builder(agentModelRegistry.get(tierSelection.agentId()))
