@@ -79,20 +79,19 @@ public class TierOptionsFactory {
                 .build();
     }
 
+    /**
+     * Codex PLAN/DEV 都用 fullAuto=true — Codex CLI 不支援 disallowedTools 等精細工具限制。
+     * fullAuto=false 會要求 interactive terminal 確認，SDK subprocess 模式無法提供 → 空回應。
+     * Codex 的隔離由 worktree + sandbox 層處理，不靠 approval policy。
+     */
     private CodexAgentOptions buildCodex(String model, ExecutionMode mode) {
-        var builder = CodexAgentOptions.builder()
+        var options = CodexAgentOptions.builder()
                 .model(model)
-                .timeout(DEFAULT_TIMEOUT);
+                .timeout(DEFAULT_TIMEOUT)
+                .approvalPolicy(ApprovalPolicy.NEVER)
+                .fullAuto(true)
+                .build();
 
-        if (mode == ExecutionMode.PLAN) {
-            builder.approvalPolicy(ApprovalPolicy.SMART);
-            builder.fullAuto(false);
-        } else {
-            builder.approvalPolicy(ApprovalPolicy.NEVER);
-            builder.fullAuto(true);
-        }
-
-        var options = builder.build();
         log.info("[TIER-OPTIONS] codex: model={}, mode={}, fullAuto={}, approvalPolicy={}",
                 model, mode, options.isFullAuto(), options.getApprovalPolicy());
         return options;
