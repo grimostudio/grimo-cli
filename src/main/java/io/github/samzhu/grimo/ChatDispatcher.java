@@ -287,14 +287,52 @@ public class ChatDispatcher {
             log.info("[AGENT-RAW] agent={}, raw='{}'", agentId, escaped);
         }
 
-        // 記錄 response metadata
+        // 記錄 response metadata + 逐行拆解 activityLog
         try {
             var metadata = response.getMetadata();
-            if (metadata != null) {
-                log.info("[AGENT-META] agent={}, metadata={}", agentId, metadata);
+            log.info("[AGENT-META] agent={}, metadata={}", agentId, metadata);
+
+            // 用 reflection 取 providerFields（accessor 名稱可能不同）
+            java.util.Map<String, Object> fields = null;
+            for (var method : metadata.getClass().getMethods()) {
+                if (method.getName().contains("rovider") && method.getParameterCount() == 0) {
+                    var val = method.invoke(metadata);
+                    if (val instanceof java.util.Map<?,?> m) {
+                        @SuppressWarnings("unchecked")
+                        var cast = (java.util.Map<String, Object>) m;
+                        fields = cast;
+                        break;
+                    }
+                }
+            }
+
+            if (fields != null) {
+                log.info("[AGENT-META-FIELDS] agent={}, exitCode={}, successful={}, keys={}",
+                        agentId, fields.get("exitCode"), fields.get("successful"), fields.keySet());
+
+                // 逐行拆解 activityLog，標出 SDK parser 的 marker 位置
+                var activityLog = fields.get("activityLog");
+                if (activityLog != null) {
+                    String[] logLines = activityLog.toString().split("\n");
+                    log.info("[AGENT-ACTIVITY] agent={}, totalLines={}", agentId, logLines.length);
+                    for (int i = 0; i < logLines.length; i++) {
+                        String tag = "";
+                        if (logLines[i].startsWith("codex")) tag = " ← MARKER(codex)";
+                        if (logLines[i].startsWith("tokens used")) tag = " ← MARKER(tokens used)";
+                        if (logLines[i].startsWith("user")) tag = " ← MARKER(user)";
+                        log.info("[AGENT-ACTIVITY] L{}: '{}'{}", i, logLines[i], tag);
+                    }
+                }
+
+                // 比對 success 判定差異
+                var providerSuccess = fields.get("successful");
+                if (providerSuccess != null && !providerSuccess.equals(success)) {
+                    log.warn("[AGENT-SUCCESS-MISMATCH] response.isSuccessful()={}, provider.successful={}",
+                            success, providerSuccess);
+                }
             }
         } catch (Exception e) {
-            log.debug("[AGENT-META] failed to read metadata: {}", e.getMessage());
+            log.debug("[AGENT-META] failed: {}", e.getMessage());
         }
 
         if (result == null || result.isBlank()) {
