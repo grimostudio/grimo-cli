@@ -116,11 +116,22 @@ public class ContentView implements Renderable {
 
     /**
      * 附加一行原始 AttributedString（用於 streaming 等特殊場景）。
+     * 設計說明：防禦性檢查 — 若含 \n 則 split（會丟失 style，
+     * 可接受因為目前 caller 都不傳含 \n 的 AttributedString）。
      */
     public synchronized void appendLine(AttributedString line) {
-        lines.add(line);
+        String raw = line.toString();
+        if (raw.contains("\n")) {
+            for (String part : raw.split("\n", -1)) {
+                var as = new AttributedString(part);
+                lines.add(as);
+                incrementalCacheUpdate(as);
+            }
+        } else {
+            lines.add(line);
+            incrementalCacheUpdate(line);
+        }
         scrollToBottomIfAutoFollow();
-        incrementalCacheUpdate(line);
     }
 
     /**
