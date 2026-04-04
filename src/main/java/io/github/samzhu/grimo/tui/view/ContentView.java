@@ -136,10 +136,19 @@ public class ContentView implements Renderable {
 
     /**
      * 移除最後一行（用於移除 "thinking..." 等暫時狀態行）。
+     * 設計說明：同步清理 wrappedCache — 一個 logical line 可能佔多個
+     * wrappedCache entry（寬行 wrap 時 continuation 的 wrapped=true），
+     * 需要反向移除所有 continuation 再移除 head。
      */
     public synchronized void removeLastLine() {
         if (!lines.isEmpty()) {
             lines.removeLast();
+            while (!wrappedCache.isEmpty() && wrappedCache.getLast().wrapped()) {
+                wrappedCache.removeLast();
+            }
+            if (!wrappedCache.isEmpty()) {
+                wrappedCache.removeLast();
+            }
         }
     }
 
