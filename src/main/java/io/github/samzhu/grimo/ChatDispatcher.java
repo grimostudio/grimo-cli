@@ -280,6 +280,23 @@ public class ChatDispatcher {
         log.info("[AGENT-RESPONSE] agent={}, model={}, success={}, duration={}ms, len={}",
                 agentId, model, success, duration, result != null ? result.length() : 0);
 
+        // 記錄 raw response 內容（截斷 500 字元，含不可見字元轉義）
+        if (result != null) {
+            String preview = result.length() > 500 ? result.substring(0, 500) + "..." : result;
+            String escaped = preview.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+            log.info("[AGENT-RAW] agent={}, raw='{}'", agentId, escaped);
+        }
+
+        // 記錄 response metadata
+        try {
+            var metadata = response.getMetadata();
+            if (metadata != null) {
+                log.info("[AGENT-META] agent={}, metadata={}", agentId, metadata);
+            }
+        } catch (Exception e) {
+            log.debug("[AGENT-META] failed to read metadata: {}", e.getMessage());
+        }
+
         if (result == null || result.isBlank()) {
             String reason = success ? "empty response" : "failed with no output";
             log.warn("[AGENT-EMPTY] agent={}, model={}, success={}, duration={}ms, goal={}",

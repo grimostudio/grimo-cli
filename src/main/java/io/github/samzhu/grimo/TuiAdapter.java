@@ -320,10 +320,15 @@ public class TuiAdapter implements ApplicationRunner {
         }
 
         // 六角架構：Adapter 直接呼叫 Port（不經 IncomingMessageEvent）
+        log.debug("[PROCESS-INPUT] before handleInput: text='{}', isChat={}", text, isChat);
         inputPort.handleInput(text,
                 InputMetadata.tui(sessionWriter.getSessionId()),
                 new InputPort.ResponseCallback() {
                     @Override public void onSuccess(String result) {
+                        log.info("[CALLBACK-SUCCESS] isChat={}, resultLen={}, resultPreview='{}'",
+                                isChat, result != null ? result.length() : 0,
+                                result != null ? result.substring(0, Math.min(200, result.length()))
+                                        .replace("\n", "\\n") : "(null)");
                         if (isChat) {
                             contentView.removeLastLine();
                             contentView.appendAiReply(result);
@@ -333,6 +338,7 @@ public class TuiAdapter implements ApplicationRunner {
                         eventLoop.setDirty();
                     }
                     @Override public void onError(String message) {
+                        log.info("[CALLBACK-ERROR] isChat={}, message='{}'", isChat, message);
                         if (isChat) contentView.removeLastLine();
                         contentView.appendError(message);
                         eventLoop.setDirty();
