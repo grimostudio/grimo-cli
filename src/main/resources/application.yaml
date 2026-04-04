@@ -23,3 +23,98 @@ management:
       exposure:
         include: health,info,modulith
 
+grimo:
+  # === CLI 模型清單（各 CLI 支援的所有模型） ===
+  # 不過濾 — CLI 能用的都列出來，使用者自行選擇
+  # 來源：
+  #   Claude — https://platform.claude.com/docs/en/docs/about-claude/models/overview
+  #   Gemini — https://ai.google.dev/gemini-api/docs/models
+  #            https://geminicli.com/docs/cli/model/
+  #   Codex  — https://developers.openai.com/codex/models
+  models:
+    claude:
+      - id: claude-opus-4-6
+        swe-bench: "81.4%"
+        gpqa: "88.5%"
+        pricing: "$5/$25"
+        context: "1M"
+      - id: claude-sonnet-4-6
+        swe-bench: "79.6%"
+        gpqa: "74.1%"
+        pricing: "$3/$15"
+        context: "1M"
+      - id: claude-haiku-4-5
+        swe-bench: "73.3%"
+        pricing: "$1/$5"
+        context: "200K"
+      - id: claude-sonnet-4-5
+        pricing: "$3/$15"
+        context: "200K"
+      - id: claude-opus-4-5
+        pricing: "$5/$25"
+        context: "200K"
+
+    gemini:
+      - id: gemini-2.5-pro
+        swe-bench: "63.2%"
+        gpqa: "83.0%"
+        pricing: "$1.25/$10"
+        context: "1M"
+      - id: gemini-2.5-flash
+        swe-bench: "60.4%"
+        gpqa: "82.8%"
+        pricing: "$0.30/$2.50"
+        context: "1M"
+      - id: gemini-2.5-flash-lite
+        pricing: "$0.10/$0.40"
+        context: "1M"
+      - id: gemini-3-pro-preview
+        pricing: "$2/$12"
+        context: "1M"
+      - id: gemini-3-flash-preview
+        pricing: "$0.50/$3"
+        context: "1M"
+
+    codex:
+      - id: gpt-5.4
+        pricing: "$2.50/$15"
+        context: "1M"
+      - id: gpt-5.4-mini
+        pricing: "$0.75/$4.50"
+        context: "400K"
+      - id: gpt-5.3-codex
+        pricing: "—"
+        context: "—"
+      - id: gpt-5-codex
+        pricing: "—"
+        context: "—"
+
+  # === Agent 預設模型 ===
+  defaults:
+    claude: claude-sonnet-4-6
+    gemini: gemini-2.5-pro
+    codex: gpt-5.4
+
+  # === Tier → Model 推薦對應（TierRouter 消費） ===
+  tier-models:
+    lite:
+      - agent: gemini
+        model: gemini-2.5-flash-lite
+      - agent: claude
+        model: claude-haiku-4-5
+      - agent: codex
+        model: gpt-5.4-mini
+    std:
+      - agent: claude
+        model: claude-sonnet-4-6
+      - agent: gemini
+        model: gemini-2.5-flash
+      - agent: codex
+        model: gpt-5.4-mini
+    pro:
+      - agent: claude
+        model: claude-opus-4-6
+      - agent: gemini
+        model: gemini-2.5-pro
+      - agent: codex
+        model: gpt-5.4
