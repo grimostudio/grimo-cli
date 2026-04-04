@@ -3,6 +3,7 @@ package io.github.samzhu.grimo.agent;
 import io.github.samzhu.grimo.agent.detect.AgentModelFactory;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoProperties;
 import org.springaicommunity.agents.claude.ClaudeAgentModel;
 import org.springaicommunity.agents.claude.ClaudeAgentOptions;
 import org.springaicommunity.agents.codex.CodexAgentModel;
@@ -43,12 +44,12 @@ public class AgentConfiguration {
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(10);
 
     @Bean
-    public AgentModelFactory agentModelFactory(AgentModelRegistry registry, GrimoConfig config) {
+    public AgentModelFactory agentModelFactory(AgentModelRegistry registry, GrimoConfig config, GrimoProperties grimoProperties) {
         var specs = List.of(
                 // Claude Code CLI
                 new AgentModelFactory.AgentSpec("claude", "cli", "Claude Code CLI", workingDirectory -> {
                     String model = config.getAgentOption("claude", "model");
-                    if (model == null) model = "claude-sonnet-4-6";
+                    if (model == null) model = grimoProperties.getDefaults().getOrDefault("claude", "claude-sonnet-4-6");
 
                     ClaudeAgentOptions options = ClaudeAgentOptions.builder()
                             .model(model)
@@ -67,7 +68,7 @@ public class AgentConfiguration {
                 // Gemini CLI
                 new AgentModelFactory.AgentSpec("gemini", "cli", "Gemini CLI", workingDirectory -> {
                     String model = config.getAgentOption("gemini", "model");
-                    if (model == null) model = "gemini-2.5-pro";
+                    if (model == null) model = grimoProperties.getDefaults().getOrDefault("gemini", "gemini-2.5-pro");
 
                     CLIOptions cliOptions = CLIOptions.builder()
                             .model(model)
@@ -92,7 +93,7 @@ public class AgentConfiguration {
                 // Codex CLI
                 new AgentModelFactory.AgentSpec("codex", "cli", "Codex CLI", workingDirectory -> {
                     String model = config.getAgentOption("codex", "model");
-                    if (model == null) model = "o4-mini";
+                    if (model == null) model = grimoProperties.getDefaults().getOrDefault("codex", "gpt-5.4");
 
                     ExecuteOptions executeOptions = ExecuteOptions.builder()
                             .model(model)
