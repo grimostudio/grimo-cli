@@ -61,16 +61,24 @@ public class ContentView implements Renderable {
 
     /**
      * 附加 AI 回覆：⏺ 前綴 + 一般文字。
+     * 設計說明：split("\n", -1) 確保每個 AttributedString 不含 \n，
+     * 保證 Screen.render() 行數計算與 terminal 實際渲染行數一致，
+     * 游標永遠停在 ❯ prompt 行。
      */
     public synchronized void appendAiReply(String text) {
-        var sb = new AttributedStringBuilder();
-        sb.styled(BRAND_STYLE, "⏺ ");
-        sb.append(text);
-        lines.add(sb.toAttributedString());
+        String[] parts = text.split("\n", -1);
+        for (int i = 0; i < parts.length; i++) {
+            var sb = new AttributedStringBuilder();
+            if (i == 0) sb.styled(BRAND_STYLE, "⏺ ");
+            else sb.append("  ");
+            sb.append(parts[i]);
+            var line = sb.toAttributedString();
+            lines.add(line);
+            incrementalCacheUpdate(line);
+        }
         lines.add(AttributedString.EMPTY);
-        scrollToBottomIfAutoFollow();
-        incrementalCacheUpdate(sb.toAttributedString());
         incrementalCacheUpdate(AttributedString.EMPTY);
+        scrollToBottomIfAutoFollow();
     }
 
     /**
