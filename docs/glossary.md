@@ -101,14 +101,14 @@
 | 名詞 | 英文 | 說明 |
 |------|------|------|
 | **Sub-agent** | Sub-agent | Grimo 派遣的獨立 CLI agent 實例。擁有獨立 context，不共享主對話歷史。接收明確的 goal，完成後回傳摘要結果。程式碼中使用 `SubAgent`（CamelCase），metadata key 使用 `subagents`（無連字號）。 |
-| **Tier** | Tier | Skill 執行的能力等級。三級：`lite`（快速便宜）、`std`（日常主力）、`pro`（深度推理）。每級對應一個 agent+model fallback list。 |
+| **Tier** | Tier | 任務執行的能力等級。三級：`lite`（快速便宜）、`std`（日常主力）、`pro`（深度推理）。每級對應一個 agent+model fallback list，定義於 `application.yaml` `grimo.tier-models`，使用者可在 `config.yaml` `tier-models` 覆寫。 |
 | **Grimo Skill** | Grimo Skill | 放在 `~/.grimo/skills/` 的 SKILL.md，格式對齊 Agent Skills 開放標準（[agentskills.io](https://agentskills.io/specification)）。定義 Grimo 的調度指令（派誰、怎麼分工）。Grimo 擴充欄位放在 `metadata` map 裡（`grimo.tier`、`grimo.subagents`、`grimo.execution`）。第三方 Skill 直接安裝不會解析失敗。 |
 | **Agent Skill** | Agent Skill | 各 CLI agent 自己的 skill（如 `.claude/skills/`、`.gemini/agents/`）。由 agent 自己讀取和執行，Grimo 不介入。 |
 | **Portable MCP** | Portable MCP | Spring AI Community Agent Client 的 MCP 轉換機制。在 `config.yaml` 統一定義 MCP server（stdio/sse/http），SDK 自動轉成各 CLI agent 的原生格式（Claude: `--mcp-config` JSON、Gemini: settings.json、Codex: 原生格式）。Grimo 不需處理轉換邏輯。 |
 | **McpServerCatalog** | MCP Server Catalog | 所有 MCP server 定義的 immutable 集合。由 `McpCatalogBuilder` 從 `config.yaml` 建構，傳入 `AgentClient.Builder.mcpServerCatalog()` 後由 SDK 處理分發。 |
 | **WorktreeProvisioner** | Worktree Provisioner | 派遣 agent 前建立獨立 git worktree + 將 Grimo 管理的 Skill symlink 到 `.agents/skills/`（跨 agent 標準路徑），讓 CLI agent 原生發現。完成後清理 worktree、保留有變更的分支。位於 `shared.sandbox` package。 |
 | **Sandbox** | Sandbox | Agent 執行環境。Local 模式直接使用工作目錄（symlink skill）；Docker/E2B 模式使用隔離容器（Phase B/C）。由 `SandboxDetector` 偵測可用後端，`WorktreeProvisioner` 負責環境配置。 |
-| **TierRouter** | Tier Router | 解析 tier 來源（6 級優先順序：關鍵字 > session /tier > skill-overrides > skill metadata > 自動分析 > 預設 std），查 fallback list（每級多組 agent+model，依序 isAvailable()），回傳 `TierSelection(agentId, model, tier, source)`。 |
+| **TierRouter** | Tier Router | 解析 tier 來源（6 級優先順序），查 fallback list（per-tier：user config `tier-models` > built-in `grimo.tier-models`），回傳 `TierSelection(agentId, model, tier, source)`。 |
 | **TierOptionsFactory** | Tier Options Factory | 根據 agentId 建構對應的 per-request `AgentOptions` 子型別（ClaudeAgentOptions / GeminiAgentOptions / CodexAgentOptions），含 tier 選定的 model。在 `AgentClient.run(goalText, agentOptions)` 傳入以覆寫 defaultOptions。 |
 | **TierKeywordDetector** | Tier Keyword Detector | 從使用者輸入偵測 tier 關鍵字（如「仔細想」→ pro）。只影響該輪，不改 session 設定。多 tier 同時匹配取最高（PRO > STD > LITE）。 |
 | **SkillAnalyzer** | Skill Analyzer | 安裝 Skill 時用 lite tier agent 自動分析 Skill body 複雜度，判定 tier 並寫入 metadata。已標 grimo.tier 的 Skill 跳過分析。 |
