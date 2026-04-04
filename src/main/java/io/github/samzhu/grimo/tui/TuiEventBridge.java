@@ -2,6 +2,7 @@ package io.github.samzhu.grimo.tui;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoProperties;
 import io.github.samzhu.grimo.project.ProjectContext;
 import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
 import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;
@@ -31,6 +32,7 @@ import org.springframework.stereotype.Component;
 public class TuiEventBridge {
 
     private final GrimoConfig grimoConfig;
+    private final GrimoProperties grimoProperties;
     private final AgentModelRegistry agentModelRegistry;
     private final SkillRegistry skillRegistry;
     private final TaskSchedulerService taskSchedulerService;
@@ -45,11 +47,13 @@ public class TuiEventBridge {
     private volatile String originalStatusText;
 
     public TuiEventBridge(GrimoConfig grimoConfig,
+                          GrimoProperties grimoProperties,
                           AgentModelRegistry agentModelRegistry,
                           SkillRegistry skillRegistry,
                           TaskSchedulerService taskSchedulerService,
                           ProjectContext projectContext) {
         this.grimoConfig = grimoConfig;
+        this.grimoProperties = grimoProperties;
         this.agentModelRegistry = agentModelRegistry;
         this.skillRegistry = skillRegistry;
         this.taskSchedulerService = taskSchedulerService;
@@ -176,7 +180,7 @@ public class TuiEventBridge {
         if (agentId == null) agentId = "no agent";
         String model = grimoConfig.getAgentOption(agentId, "model");
         if (model == null) model = grimoConfig.getDefaultModel();
-        if (model == null) model = "unknown"; // TODO Task 6: migrate to grimoProperties.getDefaults()
+        if (model == null) model = grimoProperties.getDefaults().getOrDefault(agentId, "unknown");
 
         String projectPath = projectContext.displayPath();
         long agentCount = agentModelRegistry.listAll().values().stream()

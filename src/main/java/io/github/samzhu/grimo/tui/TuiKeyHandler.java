@@ -1,6 +1,5 @@
 package io.github.samzhu.grimo.tui;
 
-import io.github.samzhu.grimo.agent.AgentCommands;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.shared.session.SessionWriter;

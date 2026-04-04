@@ -4,6 +4,7 @@ import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.command.InputMetadata;
 import io.github.samzhu.grimo.command.InputPort;
 import io.github.samzhu.grimo.config.GrimoConfig;
+import io.github.samzhu.grimo.config.GrimoProperties;
 import io.github.samzhu.grimo.home.GrimoHome;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.project.ProjectContext;
@@ -74,6 +75,7 @@ public class TuiAdapter implements ApplicationRunner {
     private final TuiEventBridge tuiEventBridge;
     private final ChatDispatcher chatDispatcher;
     private final InputPort inputPort;
+    private final GrimoProperties grimoProperties;
 
     /** Status bar 元件（run 時初始化，需在 agent thread 中更新） */
     private StatusView statusView;
@@ -105,6 +107,7 @@ public class TuiAdapter implements ApplicationRunner {
                            ProjectContext projectContext,
                            SessionWriter sessionWriter,
                            GrimoConfig grimoConfig,
+                           GrimoProperties grimoProperties,
                            AgentModelRegistry agentModelRegistry,
                            SkillRegistry skillRegistry,
                            TaskSchedulerService taskSchedulerService,
@@ -120,6 +123,7 @@ public class TuiAdapter implements ApplicationRunner {
         this.projectContext = projectContext;
         this.sessionWriter = sessionWriter;
         this.grimoConfig = grimoConfig;
+        this.grimoProperties = grimoProperties;
         this.agentModelRegistry = agentModelRegistry;
         this.skillRegistry = skillRegistry;
         this.taskSchedulerService = taskSchedulerService;
@@ -144,7 +148,7 @@ public class TuiAdapter implements ApplicationRunner {
         String agentId = resolveAgentId();
         String model = grimoConfig.getAgentOption(agentId, "model");
         if (model == null) model = grimoConfig.getDefaultModel();
-        if (model == null) model = "unknown"; // TODO Task 6: migrate to grimoProperties.getDefaults()
+        if (model == null) model = grimoProperties.getDefaults().getOrDefault(agentId, "unknown");
         String projectPath = projectContext.displayPath();
         long agentCount = agentModelRegistry.listAll().values().stream()
                 .filter(m -> m.isAvailable()).count();
@@ -255,8 +259,8 @@ public class TuiAdapter implements ApplicationRunner {
 
     private List<ListSelect.Item<String>> buildModelItems(String agentId) {
         var items = new java.util.ArrayList<ListSelect.Item<String>>();
-        // TODO Task 6: migrate to grimoProperties.getDefaults() for recommended model
-        String recommended = null; // placeholder until Task 6 injects GrimoProperties
+        // 設計說明：預設模型由 GrimoProperties.getDefaults() 提供（application.yaml grimo.defaults.*）
+        String recommended = grimoProperties.getDefaults().get(agentId);
         if (recommended != null) {
             items.add(new ListSelect.Item<>(recommended, "推薦", agentId + " " + recommended));
         }
