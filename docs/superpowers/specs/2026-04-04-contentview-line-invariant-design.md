@@ -6,7 +6,11 @@
 
 ## Problem
 
-Glossary defines Input Area as "**永遠不移動**" (never moves). Currently this invariant is violated when agent response text contains embedded `\n` characters.
+The input cursor must always stay on the `❯` prompt line — regardless of what the agent returns (multi-line text, error, null, anything). Users type on that line; if the cursor is displaced to a separator or another row, the TUI is broken.
+
+Glossary: Input Area — "**永遠不移動**" (never moves).
+
+Currently, when agent response text contains embedded `\n`, the cursor is displaced from the `❯` line onto the separator line below it.
 
 ### Root Cause
 
@@ -18,7 +22,7 @@ lines.add("⏺ 1,473\nHi.")  ← 1 AttributedString, contains \n
 
 - `render()` uses `columnLength()` to measure width — `\n` has zero column width — counts as 1 line
 - JLine `Display.update()` sends string to terminal — terminal interprets `\n` as line break — renders 2 visual lines
-- Content area occupies 1 extra row → Input area shifts down → cursor lands on separator
+- Content area occupies 1 extra visual row → `Screen.render()` cursor formula `contentHeight + 1` no longer points to the `❯` line — it points to the separator below
 - JLine diff algorithm thinks only 1 line changed → old "thinking..." text persists as rendering artifact
 
 ### Affected Methods
@@ -61,7 +65,7 @@ Log evidence:
 
 > Every `AttributedString` in `ContentView.lines` MUST NOT contain `\n`. Each entry corresponds to exactly one terminal visual line.
 
-This is the prerequisite for `Screen.render()` layout calculation to be correct. When this invariant holds, `contentHeight` from `Layout.vertical()` matches terminal reality, and Input area never moves.
+This invariant guarantees that `Screen.render()` layout calculation matches terminal reality. When it holds, `contentHeight` from `Layout.vertical()` is accurate, cursor formula `contentHeight + 1` always points to the `❯` prompt line, and the input cursor is never displaced.
 
 ### Changes
 
