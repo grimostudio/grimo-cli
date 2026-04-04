@@ -6,6 +6,9 @@ import org.springaicommunity.agents.gemini.GeminiAgentOptions;
 import org.springaicommunity.agents.model.AgentOptions;
 import org.springaicommunity.agents.codexsdk.types.ApprovalPolicy;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.Duration;
 import java.util.List;
 
@@ -25,6 +28,7 @@ import java.util.List;
  */
 public class TierOptionsFactory {
 
+    private static final Logger log = LoggerFactory.getLogger(TierOptionsFactory.class);
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(10);
 
     /**
@@ -88,6 +92,9 @@ public class TierOptionsFactory {
             builder.fullAuto(true);
         }
 
-        return builder.build();
+        var options = builder.build();
+        log.info("[TIER-OPTIONS] codex: model={}, mode={}, fullAuto={}, approvalPolicy={}",
+                model, mode, options.isFullAuto(), options.getApprovalPolicy());
+        return options;
     }
 }

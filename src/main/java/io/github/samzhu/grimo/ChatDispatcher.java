@@ -391,21 +391,40 @@ public class ChatDispatcher {
                 tierSelection.agentId(), tierSelection.model(),
                 TierOptionsFactory.ExecutionMode.PLAN);
 
+        log.info("[DISPATCH-OPTIONS] agent={}, model={}, mode=PLAN, optionsClass={}, options={}",
+                tierSelection.agentId(), tierSelection.model(),
+                tierOptions.getClass().getSimpleName(), tierOptions);
+
         // 設計說明：直接用 CWD，Plan Mode 下 agent 的 disallowedTools 限制修改
-        var client = AgentClient.builder(agentModelRegistry.get(tierSelection.agentId()))
+        var agentModel = agentModelRegistry.get(tierSelection.agentId());
+        log.debug("[DISPATCH-AGENT] agentModel={}, available={}, defaultOptions={}",
+                agentModel.getClass().getSimpleName(), agentModel.isAvailable(),
+                agentModel);
+
+        var client = AgentClient.builder(agentModel)
                 .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
                 .defaultMcpServers(mcpCatalogBuilder.getServerNames())
                 .defaultWorkingDirectory(projectDir)
                 .build();
+
+        log.info("[DISPATCH-RUN] calling client.run(), agent={}, model={}, goalLen={}",
+                tierSelection.agentId(), tierSelection.model(), userInput.length());
+
         var response = client.run(userInput, tierOptions);
 
         long duration = System.currentTimeMillis() - startTime;
-        if (response.isSuccessful()) {
-            log.info("Agent response received: success=true, duration={}ms, resultLength={}",
-                    duration, response.getResult() != null ? response.getResult().length() : 0);
-        } else {
-            log.warn("Agent response received: success=false, duration={}ms, result={}",
-                    duration, response.getResult());
+        log.info("[DISPATCH-RESULT] agent={}, model={}, success={}, duration={}ms, resultLen={}, " +
+                        "responseClass={}, metadata={}",
+                tierSelection.agentId(), tierSelection.model(),
+                response.isSuccessful(), duration,
+                response.getResult() != null ? response.getResult().length() : 0,
+                response.getClass().getSimpleName(),
+                response.getMetadata());
+
+        if (!response.isSuccessful()) {
+            log.warn("[DISPATCH-FAIL] agent={}, model={}, duration={}ms, result='{}'",
+                    tierSelection.agentId(), tierSelection.model(), duration,
+                    response.getResult() != null ? response.getResult().substring(0, Math.min(200, response.getResult().length())) : "(null)");
         }
         return response.getResult();
     }
