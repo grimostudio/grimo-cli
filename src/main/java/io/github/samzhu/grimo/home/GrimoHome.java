@@ -100,29 +100,19 @@ public class GrimoHome {
             #    api-key: ${E2B_API_KEY}
             #    template: base
 
-            # Skill 三級對應表（每級多選項，按優先順序 fallback）
-            skill-tiers:
-              lite:
-                - agent: gemini
-                  model: gemini-2.5-flash
-                - agent: claude
-                  model: claude-haiku-4-5
-                - agent: codex
-                  model: o4-mini
-              std:
-                - agent: claude
-                  model: claude-sonnet-4-6
-                - agent: gemini
-                  model: gemini-2.5-pro
-                - agent: codex
-                  model: o4-mini
-              pro:
-                - agent: claude
-                  model: claude-opus-4-6
-                - agent: gemini
-                  model: gemini-2.5-pro
-                - agent: codex
-                  model: o3
+            # Tier 對應表
+            # 預設由內建 application.yaml 提供（零配置即可用）
+            # 如需客製，取消註解並調整（per-tier 覆寫，未設定的 tier 用內建值）：
+            #tier-models:
+            #  lite:
+            #    - agent: gemini
+            #      model: gemini-2.5-flash-lite
+            #  std:
+            #    - agent: claude
+            #      model: claude-sonnet-4-6
+            #  pro:
+            #    - agent: claude
+            #      model: claude-opus-4-6
 
             # Tier 關鍵字觸發（per-turn）
             tier-keywords:

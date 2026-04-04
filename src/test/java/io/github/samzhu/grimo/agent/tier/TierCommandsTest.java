@@ -25,7 +25,7 @@ class TierCommandsTest {
     void setUp() throws IOException {
         var configFile = tempDir.resolve("config.yaml");
         Files.writeString(configFile, """
-            skill-tiers:
+            tier-models:
               lite:
                 - agent: gemini
                   model: gemini-2.5-flash

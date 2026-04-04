@@ -52,7 +52,7 @@ class TierIntegrationTest {
                 model: claude-sonnet-4
               gemini:
                 model: gemini-2.5-flash
-            skill-tiers:
+            tier-models:
               lite:
                 - agent: gemini
                   model: gemini-2.5-flash
@@ -282,7 +282,7 @@ class TierIntegrationTest {
         assertThat(selection.source()).isEqualTo("skill-override");
     }
 
-    // --- 場景 12：config 未設定 skill-tiers 時 fallback 到 conversation default ---
+    // --- 場景 12：config 未設定 tier-models 時 fallback 到 conversation default ---
 
     @Test
     void fallsBackToConversationDefaultWhenNoTierConfig() throws IOException {
