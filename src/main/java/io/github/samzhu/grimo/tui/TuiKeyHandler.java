@@ -2,6 +2,7 @@ package io.github.samzhu.grimo.tui;
 
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
+import io.github.samzhu.grimo.shared.session.SessionManager;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
 import io.github.samzhu.grimo.tui.core.Renderable;
 import io.github.samzhu.grimo.tui.overlay.McpPanel;
@@ -81,6 +82,7 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
 
     private final GrimoConfig grimoConfig;
     private final McpCatalogBuilder mcpCatalogBuilder;
+    private final SessionManager sessionManager;
     private final SessionWriter sessionWriter;
 
     // --- 回呼（解耦 processInput 等業務邏輯）---
@@ -128,7 +130,7 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
             Clipboard clipboard,
             GrimoConfig grimoConfig,
             McpCatalogBuilder mcpCatalogBuilder,
-            SessionWriter sessionWriter,
+            SessionManager sessionManager,
             InputCallback inputCallback,
             List<String> history,
             int historyIndex,
@@ -145,7 +147,8 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
         this.clipboard = clipboard;
         this.grimoConfig = grimoConfig;
         this.mcpCatalogBuilder = mcpCatalogBuilder;
-        this.sessionWriter = sessionWriter;
+        this.sessionManager = sessionManager;
+        this.sessionWriter = sessionManager.getWriter();
         this.inputCallback = inputCallback;
         this.history = history;
         this.historyIndex = historyIndex;

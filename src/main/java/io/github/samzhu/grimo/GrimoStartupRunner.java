@@ -10,7 +10,8 @@ import io.github.samzhu.grimo.channel.ChannelRegistry;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.shared.sandbox.SandboxDetector;
-import io.github.samzhu.grimo.shared.session.SessionWriter;
+import io.github.samzhu.grimo.shared.session.SessionManager;
+import io.github.samzhu.grimo.config.GrimoProperties;
 import io.github.samzhu.grimo.home.GrimoHome;
 import io.github.samzhu.grimo.project.ProjectContext;
 import io.github.samzhu.grimo.skill.loader.SkillLoader;
@@ -68,8 +69,16 @@ public class GrimoStartupRunner {
     }
 
     @Bean
-    SessionWriter sessionWriter(ProjectContext projectContext) {
-        return new SessionWriter(projectContext.dataDir());
+    SessionManager sessionManager(ProjectContext projectContext,
+                                  GrimoConfig grimoConfig,
+                                  GrimoProperties grimoProperties,
+                                  ApplicationEventPublisher eventPublisher) {
+        String defaultAgent = grimoConfig.getDefaultAgent();
+        String defaultModel = grimoConfig.getDefaultModel();
+        if (defaultModel == null && defaultAgent != null) {
+            defaultModel = grimoProperties.getDefaults().getOrDefault(defaultAgent, null);
+        }
+        return new SessionManager(projectContext.dataDir(), eventPublisher, defaultAgent, defaultModel);
     }
 
     @Bean

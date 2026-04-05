@@ -10,7 +10,7 @@ import io.github.samzhu.grimo.agent.tier.TierSelection;
 import io.github.samzhu.grimo.command.InputPort;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
-import io.github.samzhu.grimo.shared.session.SessionWriter;
+import io.github.samzhu.grimo.shared.session.SessionManager;
 import io.github.samzhu.grimo.tui.TuiEventBridge;
 import io.github.samzhu.grimo.tui.TuiKeyHandler;
 import io.github.samzhu.grimo.tui.screen.EventLoop;
@@ -48,7 +48,7 @@ public class ChatDispatcher {
     private final TierOptionsFactory tierOptionsFactory;
     private final McpCatalogBuilder mcpCatalogBuilder;
     private final AtomicReference<Tier> sessionTier;
-    private final SessionWriter sessionWriter;
+    private final SessionManager sessionManager;
     private final TuiEventBridge tuiEventBridge;
     private final GrimoConfig grimoConfig;
 
@@ -68,7 +68,7 @@ public class ChatDispatcher {
                           TierOptionsFactory tierOptionsFactory,
                           McpCatalogBuilder mcpCatalogBuilder,
                           AtomicReference<Tier> sessionTier,
-                          SessionWriter sessionWriter,
+                          SessionManager sessionManager,
                           TuiEventBridge tuiEventBridge,
                           GrimoConfig grimoConfig) {
         this.agentModelRegistry = agentModelRegistry;
@@ -78,7 +78,7 @@ public class ChatDispatcher {
         this.tierOptionsFactory = tierOptionsFactory;
         this.mcpCatalogBuilder = mcpCatalogBuilder;
         this.sessionTier = sessionTier;
-        this.sessionWriter = sessionWriter;
+        this.sessionManager = sessionManager;
         this.tuiEventBridge = tuiEventBridge;
         this.grimoConfig = grimoConfig;
     }
@@ -146,7 +146,7 @@ public class ChatDispatcher {
                     if (result != null && !result.isBlank()) {
                         contentView.appendAiReply(result);
                     }
-                    sessionWriter.writeAssistantMessage(result);
+                    sessionManager.getWriter().writeAssistantMessage(result);
                 } catch (Exception e) {
                     log.error("Agent call failed: error={}", e.getMessage(), e);
                     String errorMsg = formatAgentError(e);
@@ -257,7 +257,7 @@ public class ChatDispatcher {
                         .build();
                 var response = client.run(text, options);
 
-                sessionWriter.writeUserMessage(text);
+                sessionManager.getWriter().writeUserMessage(text);
                 handleResponse(callback, agentId, configModel, text, startTime, response);
             } catch (Exception e) {
                 handleError(callback, agentId, null, text, startTime, e);
@@ -343,7 +343,7 @@ public class ChatDispatcher {
             return;
         }
 
-        sessionWriter.writeAssistantMessage(result);
+        sessionManager.getWriter().writeAssistantMessage(result);
         callback.onSuccess(result);
     }
 

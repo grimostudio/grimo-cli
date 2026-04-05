@@ -4,9 +4,11 @@ import io.github.samzhu.grimo.shared.event.DevModeEnteredEvent;
 import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.context.ApplicationEventPublisher;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class SessionEventListenerTest {
 
@@ -17,9 +19,11 @@ class SessionEventListenerTest {
     void onDevModeEnteredShouldWriteDispatchEntry() throws Exception {
         var dataDir = tempDir.resolve("project");
         Files.createDirectories(dataDir);
-        var writer = new SessionWriter(dataDir);
-        writer.writeSystemMessage("/test", "1.0", "test");
-        var listener = new SessionEventListener(writer);
+        var publisher = mock(ApplicationEventPublisher.class);
+        var sessionManager = new SessionManager(dataDir, publisher, "claude", "claude-sonnet-4-6");
+        sessionManager.startNewSession("main", "/test", "1.0");
+        var writer = sessionManager.getWriter();
+        var listener = new SessionEventListener(sessionManager);
 
         listener.on(new DevModeEnteredEvent(
             "task1", "claude", "claude-sonnet-4-6", "std",
@@ -34,9 +38,11 @@ class SessionEventListenerTest {
     void onDevModeCompletedShouldWriteMetaJson() throws Exception {
         var dataDir = tempDir.resolve("project");
         Files.createDirectories(dataDir);
-        var writer = new SessionWriter(dataDir);
-        writer.writeSystemMessage("/test", "1.0", "test");
-        var listener = new SessionEventListener(writer);
+        var publisher = mock(ApplicationEventPublisher.class);
+        var sessionManager = new SessionManager(dataDir, publisher, "claude", "claude-sonnet-4-6");
+        sessionManager.startNewSession("main", "/test", "1.0");
+        var writer = sessionManager.getWriter();
+        var listener = new SessionEventListener(sessionManager);
 
         listener.on(new DevModeCompletedEvent(
             "task1", "claude", "claude-sonnet-4-6", "std",

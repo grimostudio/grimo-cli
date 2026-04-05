@@ -10,7 +10,7 @@ import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
 import io.github.samzhu.grimo.project.ProjectContext;
 import io.github.samzhu.grimo.shared.sandbox.GitHelper;
 import io.github.samzhu.grimo.shared.sandbox.WorktreeProvisioner;
-import io.github.samzhu.grimo.shared.session.SessionWriter;
+import io.github.samzhu.grimo.shared.session.SessionManager;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import io.github.samzhu.grimo.tui.TuiEventBridge;
@@ -94,7 +94,7 @@ public class TuiAdapter implements ApplicationRunner {
     private McpPanel mcpPanel;
     private Screen screen;
     private EventLoop eventLoop;
-    private final SessionWriter sessionWriter;
+    private final SessionManager sessionManager;
     private TextSelection textSelection;
     private AutoScroller autoScroller;
     private Clipboard clipboard;
@@ -105,7 +105,7 @@ public class TuiAdapter implements ApplicationRunner {
     public TuiAdapter(Terminal terminal,
                            GrimoHome grimoHome,
                            ProjectContext projectContext,
-                           SessionWriter sessionWriter,
+                           SessionManager sessionManager,
                            GrimoConfig grimoConfig,
                            GrimoProperties grimoProperties,
                            AgentModelRegistry agentModelRegistry,
@@ -121,7 +121,7 @@ public class TuiAdapter implements ApplicationRunner {
         this.terminal = terminal;
         this.grimoHome = grimoHome;
         this.projectContext = projectContext;
-        this.sessionWriter = sessionWriter;
+        this.sessionManager = sessionManager;
         this.grimoConfig = grimoConfig;
         this.grimoProperties = grimoProperties;
         this.agentModelRegistry = agentModelRegistry;
@@ -181,8 +181,9 @@ public class TuiAdapter implements ApplicationRunner {
                 slashMenu, mcpPanel, textSelection);
 
         // === Session 對話存檔 ===
-        sessionWriter.writeSystemMessage(
-            projectContext.path().toString(), version, "Grimo TUI session");
+        // 設計說明：startNewSession 產生新 session ID、初始化 JSONL、寫入 system message、更新 index
+        String gitBranch = gitHelper.getCurrentBranch(projectContext.path());
+        sessionManager.startNewSession(gitBranch, projectContext.path().toString(), version);
 
         // === Phase 5: 啟動 TUI 事件迴圈（阻塞） ===
         log.debug("Grimo TUI setup complete, starting raw JLine event loop.");
@@ -194,7 +195,7 @@ public class TuiAdapter implements ApplicationRunner {
         tuiKeyHandler = new TuiKeyHandler(
                 terminal, screen, contentView, inputView, statusView,
                 slashMenu, mcpPanel, textSelection, clipboard,
-                grimoConfig, mcpCatalogBuilder, sessionWriter,
+                grimoConfig, mcpCatalogBuilder, sessionManager,
                 this::processInput,
                 history, 0, "",
                 agentState);
@@ -321,8 +322,9 @@ public class TuiAdapter implements ApplicationRunner {
 
         // 六角架構：Adapter 直接呼叫 Port（不經 IncomingMessageEvent）
         log.debug("[PROCESS-INPUT] before handleInput: text='{}', isChat={}", text, isChat);
+        var sessionInfo = sessionManager.getCurrentInfo();
         inputPort.handleInput(text,
-                InputMetadata.tui(sessionWriter.getSessionId()),
+                InputMetadata.tui(sessionInfo != null ? sessionInfo.sessionId() : null),
                 new InputPort.ResponseCallback() {
                     @Override public void onSuccess(String result) {
                         log.info("[CALLBACK-SUCCESS] isChat={}, resultLen={}, resultPreview='{}'",

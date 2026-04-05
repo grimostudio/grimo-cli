@@ -96,6 +96,18 @@ public class GitHelper {
     }
 
     /**
+     * 取得當前 git branch 名稱。
+     * 非 git repo 或發生錯誤時回傳 null。
+     */
+    public String getCurrentBranch(Path repoDir) {
+        try {
+            return exec(repoDir, "git", "rev-parse", "--abbrev-ref", "HEAD").trim();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * 計算 baseSha 到分支的新增 commit 數量。
      */
     public int getCommitCount(Path repoDir, String baseSha, String branchName) {
