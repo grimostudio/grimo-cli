@@ -8,10 +8,15 @@ import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
 import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;
 import io.github.samzhu.grimo.shared.event.DevModeEnteredEvent;
 import io.github.samzhu.grimo.shared.event.McpCatalogChangedEvent;
+import io.github.samzhu.grimo.shared.event.SessionSwitchedEvent;
+import io.github.samzhu.grimo.shared.session.SessionManager;
+import io.github.samzhu.grimo.shared.session.SessionMessage;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
 import io.github.samzhu.grimo.task.scheduler.TaskSchedulerService;
 import io.github.samzhu.grimo.tui.view.ContentView;
 import io.github.samzhu.grimo.tui.view.StatusView;
+import java.util.List;
+
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
@@ -37,6 +42,7 @@ public class TuiEventBridge {
     private final SkillRegistry skillRegistry;
     private final TaskSchedulerService taskSchedulerService;
     private final ProjectContext projectContext;
+    private final SessionManager sessionManager;
 
     /** TUI 元件（run 時由 TuiAdapter.bind() 設定） */
     private volatile StatusView statusView;
@@ -51,13 +57,15 @@ public class TuiEventBridge {
                           AgentModelRegistry agentModelRegistry,
                           SkillRegistry skillRegistry,
                           TaskSchedulerService taskSchedulerService,
-                          ProjectContext projectContext) {
+                          ProjectContext projectContext,
+                          SessionManager sessionManager) {
         this.grimoConfig = grimoConfig;
         this.grimoProperties = grimoProperties;
         this.agentModelRegistry = agentModelRegistry;
         this.skillRegistry = skillRegistry;
         this.taskSchedulerService = taskSchedulerService;
         this.projectContext = projectContext;
+        this.sessionManager = sessionManager;
     }
 
     /**
@@ -172,6 +180,44 @@ public class TuiEventBridge {
     }
 
     /**
+     * Session 切換時清空 contentView 並 replay 歷史訊息。
+     * 設計說明：SessionManager.resumeSession() publish event → 這裡 replay + 刷新 status bar
+     */
+    @EventListener
+    void on(SessionSwitchedEvent event) {
+        if (contentView == null) return;
+        contentView.clear();
+        replayMessages(event.messages(), contentView);
+        refreshStatusBar();
+        setDirty.run();
+    }
+
+    /**
+     * 將 session 歷史訊息 replay 到 contentView。
+     * 共用方法：startup --continue/--resume 和 TUI 內 /session-resume 都呼叫此方法。
+     */
+    public static void replayMessages(List<SessionMessage> messages, ContentView contentView) {
+        for (var msg : messages) {
+            switch (msg.type()) {
+                case "user" -> contentView.appendUserInput(msg.content());
+                case "assistant" -> contentView.appendAiReply(msg.content());
+                case "command" -> contentView.appendCommandOutput(msg.content());
+                case "dispatch-entered" -> {
+                    if (msg.content() != null)
+                        contentView.appendLine(new AttributedString("\u2699 Dev dispatch: " + msg.content(),
+                                AttributedStyle.DEFAULT.foreground(245)));
+                }
+                case "dispatch-completed" -> {
+                    if (msg.content() != null)
+                        contentView.appendLine(new AttributedString("\u2713 Dispatch done: " + msg.content(),
+                                AttributedStyle.DEFAULT.foreground(245)));
+                }
+                // system → skip
+            }
+        }
+    }
+
+    /**
      * 從 config 重新讀取 agent/model，更新 status bar。
      * /agent-use 等指令觸發 event 後自動呼叫，確保即時反映切換結果。
      */
@@ -189,7 +235,15 @@ public class TuiEventBridge {
         int mcpCount = grimoConfig.getMcpServers().size();
         int taskCount = taskSchedulerService.getScheduledTaskIds().size();
 
-        String newStatus = agentId + " · " + model + " │ " + projectPath
+        // Prepend session ID if available
+        String sessionPrefix = "";
+        if (sessionManager != null && sessionManager.getCurrentInfo() != null) {
+            var info = sessionManager.getCurrentInfo();
+            sessionPrefix = "[" + info.sessionId()
+                    + (info.resumed() ? " \u21a9" : "") + "] ";
+        }
+
+        String newStatus = sessionPrefix + agentId + " · " + model + " │ " + projectPath
                 + " │ " + (int) agentCount + " agent · " + skillCount + " skill · "
                 + mcpCount + " mcp · " + taskCount + " task";
         this.originalStatusText = newStatus;

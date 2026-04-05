@@ -6,6 +6,7 @@ import io.github.samzhu.grimo.shared.session.SessionManager;
 import io.github.samzhu.grimo.shared.session.SessionWriter;
 import io.github.samzhu.grimo.tui.core.Renderable;
 import io.github.samzhu.grimo.tui.overlay.McpPanel;
+import io.github.samzhu.grimo.tui.overlay.SessionPickerOverlay;
 import io.github.samzhu.grimo.tui.overlay.SlashMenu;
 import io.github.samzhu.grimo.tui.screen.EventLoop;
 import io.github.samzhu.grimo.tui.screen.Screen;
@@ -490,6 +491,23 @@ public class TuiKeyHandler implements EventLoop.KeyHandler {
                             // 透過統一管線執行：callback → processInput → InputPort → InputHandler
                             inputCallback.onTextSubmit("/agent-use " + selected.value());
                         }
+                    }
+                }
+                case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> {
+                    screen.clearSelectOverlay();
+                    activeSelectOverlay = null;
+                }
+            }
+        } else if (activeSelectOverlay instanceof SessionPickerOverlay sessionPicker) {
+            switch (operation) {
+                case EventLoop.OP_UP -> sessionPicker.moveUp();
+                case EventLoop.OP_DOWN -> sessionPicker.moveDown();
+                case EventLoop.OP_ENTER -> {
+                    var selected = sessionPicker.getSelectedEntry();
+                    screen.clearSelectOverlay();
+                    activeSelectOverlay = null;
+                    if (selected != null) {
+                        sessionManager.resumeSession(selected.sessionId());
                     }
                 }
                 case EventLoop.OP_ESC, EventLoop.OP_CTRL_C -> {

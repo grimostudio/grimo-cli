@@ -24,8 +24,10 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
+import io.github.samzhu.grimo.shared.session.SessionIndex;
 import io.github.samzhu.grimo.tui.TuiKeyHandler;
 import io.github.samzhu.grimo.tui.overlay.McpPanel;
+import io.github.samzhu.grimo.tui.overlay.SessionPickerOverlay;
 import io.github.samzhu.grimo.tui.overlay.SlashMenu;
 import io.github.samzhu.grimo.tui.screen.EventLoop;
 import io.github.samzhu.grimo.tui.screen.Screen;
@@ -39,6 +41,8 @@ import io.github.samzhu.grimo.tui.widget.Banner;
 import io.github.samzhu.grimo.tui.widget.GroupedSelect;
 import io.github.samzhu.grimo.tui.widget.ListSelect;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -180,10 +184,48 @@ public class TuiAdapter implements ApplicationRunner {
         screen = new Screen(terminal, contentView, inputView, statusView,
                 slashMenu, mcpPanel, textSelection);
 
-        // === Session 對話存檔 ===
-        // 設計說明：startNewSession 產生新 session ID、初始化 JSONL、寫入 system message、更新 index
+        // === Session startup mode ===
+        // 設計說明：--resume 優先於 --continue；default 建立新 session。
+        // startNewSession 產生新 session ID、初始化 JSONL、寫入 system message、更新 index。
         String gitBranch = gitHelper.getCurrentBranch(projectContext.path());
-        sessionManager.startNewSession(gitBranch, projectContext.path().toString(), version);
+        String cwd = projectContext.path().toString();
+
+        boolean hasResume = args.containsOption("resume");
+        boolean hasContinue = args.containsOption("continue");
+
+        if (hasResume) {
+            var resumeValues = args.getOptionValues("resume");
+            if (resumeValues != null && !resumeValues.isEmpty() && !resumeValues.getFirst().isEmpty()) {
+                // --resume <id>
+                String id = resumeValues.getFirst();
+                try {
+                    sessionManager.resumeSession(id);
+                } catch (IllegalArgumentException e) {
+                    System.err.println("Session not found: " + id);
+                    System.exit(1);
+                }
+            } else {
+                // --resume (no id) → terminal picker before TUI
+                var sessions = sessionManager.listSessions();
+                if (sessions.isEmpty()) {
+                    sessionManager.startNewSession(gitBranch, cwd, version);
+                } else {
+                    var selected = showTerminalSessionPicker(sessions);
+                    if (selected != null) {
+                        sessionManager.resumeSession(selected.sessionId());
+                    } else {
+                        sessionManager.startNewSession(gitBranch, cwd, version);
+                    }
+                }
+            }
+        } else if (hasContinue) {
+            boolean resumed = sessionManager.continueLastSession();
+            if (!resumed) {
+                sessionManager.startNewSession(gitBranch, cwd, version);
+            }
+        } else {
+            sessionManager.startNewSession(gitBranch, cwd, version);
+        }
 
         // === Phase 5: 啟動 TUI 事件迴圈（阻塞） ===
         log.debug("Grimo TUI setup complete, starting raw JLine event loop.");
@@ -226,6 +268,14 @@ public class TuiAdapter implements ApplicationRunner {
         // 繫結 TUI 元件到 ChatDispatcher（AI 對話 dispatch 需要直接更新 TUI）
         chatDispatcher.bindTui(contentView, statusView, eventLoop, agentState);
 
+        // === Startup session replay ===
+        // 設計說明：resume/continue 啟動時，contentView 已建構完成，將歷史訊息 replay 到 TUI
+        if (sessionManager.isResumed()) {
+            var messages = sessionManager.getWriter().readAllMessages(
+                    sessionManager.getWriter().getSessionFile());
+            TuiEventBridge.replayMessages(messages, contentView);
+        }
+
         eventLoop.run();
 
         // 事件迴圈結束（/exit），終止 Spring Boot JVM
@@ -256,6 +306,61 @@ public class TuiAdapter implements ApplicationRunner {
         tuiKeyHandler.setActiveSelectOverlay(select);
         screen.setSelectOverlay(select);
         eventLoop.setDirty();
+    }
+
+    /**
+     * 顯示 session picker overlay（SessionPickerOverlay）。
+     * /session-resume 無參數時觸發。
+     * 設計說明：排除當前 session，列出可 resume 的歷史 session 供選擇。
+     */
+    private void showSessionPicker() {
+        var entries = sessionManager.listSessions();
+        // Exclude current session from picker
+        var currentId = sessionManager.getCurrentInfo() != null
+                ? sessionManager.getCurrentInfo().sessionId() : null;
+        var filtered = entries.stream()
+                .filter(e -> !e.sessionId().equals(currentId))
+                .toList();
+
+        var picker = new SessionPickerOverlay(filtered);
+        tuiKeyHandler.setActiveSelectOverlay(picker);
+        screen.setSelectOverlay(picker);
+        eventLoop.setDirty();
+    }
+
+    /**
+     * 啟動前（TUI 尚未建構）的 terminal session picker：以簡易數字列表讓使用者選擇。
+     * --resume 無 ID 時觸發。
+     */
+    private SessionIndex.Entry showTerminalSessionPicker(List<SessionIndex.Entry> sessions) {
+        System.out.println("? Select a session to resume:");
+        for (int i = 0; i < sessions.size(); i++) {
+            var e = sessions.get(i);
+            String timeAgo = formatTimeAgo(e.lastActiveAt());
+            String msg = e.firstUserMessage() != null ? e.firstUserMessage() : "";
+            if (msg.length() > 50) msg = msg.substring(0, 50) + "...";
+            System.out.printf("  %s%d) %s  %s  %d msgs  %s%n",
+                    i == 0 ? "> " : "  ", i + 1, e.sessionId(), timeAgo, e.messageCount(), msg);
+        }
+        System.out.print("Enter number (or press Enter to cancel): ");
+        try {
+            var reader = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+            String line = reader.readLine();
+            if (line != null && !line.isBlank()) {
+                int idx = Integer.parseInt(line.trim()) - 1;
+                if (idx >= 0 && idx < sessions.size()) return sessions.get(idx);
+            }
+        } catch (Exception e) { /* ignore */ }
+        return null;
+    }
+
+    private String formatTimeAgo(Instant time) {
+        if (time == null) return "";
+        var d = Duration.between(time, Instant.now());
+        if (d.toDays() > 0) return d.toDays() + "d ago";
+        if (d.toHours() > 0) return d.toHours() + "h ago";
+        if (d.toMinutes() > 0) return d.toMinutes() + "m ago";
+        return "now";
     }
 
     private List<ListSelect.Item<String>> buildModelItems(String agentId) {
@@ -307,6 +412,7 @@ public class TuiAdapter implements ApplicationRunner {
         if (text.equals("/exit")) { eventLoop.stop(); return; }
         if (text.equals("/agent-use")) { showAgentPicker(); return; }
         if (text.equals("/mcp")) { tuiKeyHandler.openMcpManager(); return; }
+        if (text.equals("/session-resume")) { showSessionPicker(); return; }
 
         // 設計說明：appendUserInput + writeUserMessage 已在 TuiKeyHandler.handleNormalKey() 中處理
         // （ENTER 按下時先 appendUserInput → clear input → 才呼叫 onTextSubmit → 到這裡）
