@@ -65,6 +65,17 @@ Single Gradle module. Module boundaries enforced by **Spring Modulith** package 
 | `shared/` | Domain events, session persistence, sandbox |
 | `tui/` | Terminal UI — `TuiAdapter`（TUI 入口，建構元件、啟動 event loop）、`TuiKeyHandler`（鍵盤/滑鼠路由）、`TuiEventBridge`（domain event → TUI 更新）、core (Renderable, Layout, DisplayWidth), views, overlays, widgets, selection, screen |
 
+### 指令命名慣例
+
+指令名稱用 **hyphen 連接**（`/noun-verb`），不用空格子指令。唯一例外是 `/mcp`（歷史因素，對齊 Claude Code `claude mcp add` 語法）。
+
+```
+✅ /agent-use, /agent-list, /skill-list, /task-create, /session-resume
+❌ /agent use, /session resume（空格子指令）
+```
+
+無參數時若需互動選擇，開 overlay（如 `/agent-use`、`/session-resume`）。
+
 ### Key Design Decisions
 
 - **Library over Starter**: LLM providers, MCP servers, and channels are managed as plain Java objects at runtime (not Spring beans), enabling dynamic add/remove via CLI commands.
