@@ -90,4 +90,59 @@ class SessionWriterTest {
         assertThat(lines.get(1)).contains("parentUuid");
         assertThat(lines.get(2)).contains("parentUuid");
     }
+
+    @Test
+    void initShouldSwitchTargetFile() throws Exception {
+        var dataDir = tempDir.resolve("project-data");
+        Files.createDirectories(dataDir);
+        var writer = new SessionWriter(dataDir);
+
+        writer.init("test1234", dataDir.resolve("test1234.jsonl"));
+        writer.writeSystemMessage("/test", "1.0", "test");
+
+        assertThat(writer.getSessionId()).isEqualTo("test1234");
+        assertThat(writer.getSessionFile()).isEqualTo(dataDir.resolve("test1234.jsonl"));
+        assertThat(writer.getSessionFile()).exists();
+    }
+
+    @Test
+    void readAllMessagesShouldParseJsonl() throws Exception {
+        var dataDir = tempDir.resolve("project-data");
+        Files.createDirectories(dataDir);
+        var writer = new SessionWriter(dataDir);
+        writer.init("read-test", dataDir.resolve("read-test.jsonl"));
+        writer.writeSystemMessage("/test", "1.0", "test");
+        writer.writeUserMessage("hello");
+        writer.writeAssistantMessage("world");
+
+        var messages = writer.readAllMessages(writer.getSessionFile());
+
+        assertThat(messages).hasSize(3);
+        assertThat(messages.get(0).type()).isEqualTo("system");
+        assertThat(messages.get(1).type()).isEqualTo("user");
+        assertThat(messages.get(1).content()).isEqualTo("hello");
+        assertThat(messages.get(2).type()).isEqualTo("assistant");
+        assertThat(messages.get(2).content()).isEqualTo("world");
+    }
+
+    @Test
+    void callbackShouldBeInvokedOnWrite() throws Exception {
+        var dataDir = tempDir.resolve("project-data");
+        Files.createDirectories(dataDir);
+        var writer = new SessionWriter(dataDir);
+        writer.init("cb-test", dataDir.resolve("cb-test.jsonl"));
+
+        var types = new java.util.ArrayList<String>();
+        var contents = new java.util.ArrayList<String>();
+        writer.setWriteCallback((type, content) -> {
+            types.add(type);
+            contents.add(content);
+        });
+
+        writer.writeUserMessage("test input");
+        writer.writeAssistantMessage("test reply");
+
+        assertThat(types).containsExactly("user", "assistant");
+        assertThat(contents.get(0)).isEqualTo("test input");
+    }
 }

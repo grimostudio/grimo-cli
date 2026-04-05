@@ -2,12 +2,15 @@ package io.github.samzhu.grimo.shared.session;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -23,11 +26,26 @@ import java.util.UUID;
  */
 public class SessionWriter {
 
-    private final ObjectMapper mapper = new ObjectMapper();
-    private final String sessionId;
+    /**
+     * 寫入回調介面，供 SessionManager 即時更新 sessions-index。
+     *
+     * 設計說明：
+     * - 每次訊息寫入後觸發，type 對應訊息類型（user/assistant/system/command 等）
+     * - SessionManager 透過 callback 更新 index 中的 lastActiveAt 與 messageCount
+     * - 避免 SessionWriter 直接依賴 SessionManager（保持低耦合）
+     */
+    @FunctionalInterface
+    public interface WriteCallback {
+        void onWrite(String type, String content);
+    }
+
+    private final ObjectMapper mapper = new ObjectMapper()
+            .registerModule(new JavaTimeModule());
+    private String sessionId;
     private final Path dataDir;
-    private final Path sessionFile;
+    private Path sessionFile;
     private String lastUuid;
+    private WriteCallback writeCallback;
 
     /**
      * 建構子：session 檔案直接放在 project data 根目錄。
@@ -39,6 +57,77 @@ public class SessionWriter {
         this.sessionId = UUID.randomUUID().toString().substring(0, 8);
         this.dataDir = dataDir;
         this.sessionFile = dataDir.resolve(sessionId + ".jsonl");
+    }
+
+    /**
+     * 重新初始化 writer，切換到指定的 sessionId 與檔案路徑。
+     * 用於 resume 已有 session 或 continue 新 session 時切換目標檔案。
+     *
+     * @param sessionId   新的 session 識別碼
+     * @param sessionFile 新的 JSONL 檔案路徑
+     */
+    public void init(String sessionId, Path sessionFile) {
+        this.sessionId = sessionId;
+        this.sessionFile = sessionFile;
+        this.lastUuid = null;
+    }
+
+    /**
+     * 設定 lastUuid，用於 resume 時從 JSONL 末尾恢復 parent chain。
+     *
+     * @param lastUuid 最後一筆訊息的 uuid
+     */
+    public void setLastUuid(String lastUuid) {
+        this.lastUuid = lastUuid;
+    }
+
+    /**
+     * 設定寫入回調，每次寫入後觸發。
+     *
+     * @param callback 回調實作（type, content）
+     */
+    public void setWriteCallback(WriteCallback callback) {
+        this.writeCallback = callback;
+    }
+
+    /**
+     * 讀取 JSONL 檔案，解析為 SessionMessage 列表供 replay 用。
+     *
+     * 設計說明：
+     * - 逐行解析，跳過空行與格式錯誤的行（不中斷）
+     * - role 與 content 從巢狀 message 欄位提取
+     *
+     * @param file JSONL 檔案路徑
+     * @return 解析後的訊息列表（依寫入順序）
+     */
+    public List<SessionMessage> readAllMessages(Path file) {
+        var result = new ArrayList<SessionMessage>();
+        if (!Files.exists(file)) {
+            return result;
+        }
+        try {
+            for (String line : Files.readAllLines(file)) {
+                if (line.isBlank()) continue;
+                try {
+                    var node = mapper.readTree(line);
+                    String type = node.path("type").asText(null);
+                    String uuid = node.path("uuid").asText(null);
+                    String parentUuid = node.path("parentUuid").asText(null);
+                    String timestampStr = node.path("timestamp").asText(null);
+                    Instant timestamp = (timestampStr != null && !timestampStr.isEmpty())
+                            ? Instant.parse(timestampStr) : null;
+                    var messageNode = node.path("message");
+                    String role = messageNode.path("role").asText(null);
+                    String content = messageNode.path("content").asText(null);
+                    result.add(new SessionMessage(type, uuid, parentUuid, timestamp, role, content));
+                } catch (Exception ignored) {
+                    // 略過格式錯誤的行
+                }
+            }
+        } catch (IOException e) {
+            // 讀取失敗回傳已解析部分
+        }
+        return result;
     }
 
     /**
@@ -68,6 +157,7 @@ public class SessionWriter {
         node.set("message", message);
         appendLine(node);
         lastUuid = uuid;
+        invokeCallback("system", systemPrompt);
     }
 
     /**
@@ -82,6 +172,7 @@ public class SessionWriter {
         node.set("message", message);
         appendLine(node);
         lastUuid = uuid;
+        invokeCallback("user", content);
     }
 
     /**
@@ -96,6 +187,7 @@ public class SessionWriter {
         node.set("message", message);
         appendLine(node);
         lastUuid = uuid;
+        invokeCallback("assistant", content);
     }
 
     /**
@@ -111,6 +203,7 @@ public class SessionWriter {
         node.set("message", message);
         appendLine(node);
         lastUuid = uuid;
+        invokeCallback("command", output);
     }
 
     public String getSessionId() {
@@ -173,6 +266,12 @@ public class SessionWriter {
     }
 
     // === 內部方法 ===
+
+    private void invokeCallback(String type, String content) {
+        if (writeCallback != null) {
+            writeCallback.onWrite(type, content);
+        }
+    }
 
     private ObjectNode createBase(String type, String uuid, String parentUuid) {
         var node = mapper.createObjectNode();
