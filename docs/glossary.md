@@ -62,7 +62,10 @@
 |------|------|------|
 | **GrimoHome** | Grimo Home | `~/.grimo`，應用程式全域資料目錄，存放 config、skills、tasks、agents、logs。路徑固定，不可配置。位於獨立 top-level 模組 `home/`。 |
 | **ProjectContext** | Project Context | 啟動時的 CWD，代表目前操作的專案。專案資料存放在 `~/.grimo/projects/{encoded-cwd}/`。位於獨立 top-level 模組 `project/`。 |
-| **Session** | Session | 一次 TUI 啟動到結束的對話歷程。以 UUID 識別，存為 JSONL 檔案。可透過 `--resume` 恢復。 |
+| **SessionManager** | Session Manager | Session 生命週期管理者（`@Bean`，非 `@Component`）。建立/切換/列出 session，維護 `sessions-index.json`，提供 list/resume/info API。持有 `SessionWriter` 單一 instance，其他元件透過 `getWriter()` 取得。 |
+| **sessions-index.json** | Sessions Index | Per-project session 索引檔，位於 `~/.grimo/projects/{encoded-cwd}/sessions-index.json`。記錄所有 session 的 ID、時間、訊息數、首句、agent、branch。每次訊息寫入時即時更新（atomic write）。 |
+| **SessionPickerOverlay** | Session Picker Overlay | TUI overlay，互動式選擇歷史 session 進行 resume。跟隨 McpPanel/SlashMenu pattern（純資料 + `render()`）。由 `/session-resume` 或 `--resume` 觸發。 |
+| **Session** | Session | 一次 TUI 啟動到結束的對話歷程。以 UUID 識別，存為 JSONL 檔案。可透過 `--resume` 恢復、`--continue` 接續最近 session。 |
 | **Session 檔案** | Session File | `~/.grimo/projects/<encoded-cwd>/<session-uuid>.jsonl`。對齊 Claude Code 結構。每行一個 JSON 物件（含 uuid、parentUuid 支援對話樹），append-only。附屬資料目錄 `<session-uuid>/dispatches/` 存放 sub-agent 派遣紀錄。 |
 | **Dispatch 紀錄** | Dispatch Record | sub-agent 派遣的 metadata 和事件，歸屬於 session。主 session JSONL 含摘要事件（`dispatch-entered` / `dispatch-completed`），附屬目錄含 `{taskId}.meta.json`。 |
 | **滾動** | Scroll | Content 區支援滑鼠滾輪 / Mac 觸控板兩指滾動，瀏覽已消失的歷史對話。自動跟隨模式：在底部時新內容自動顯示，滾動中途不自動跳轉。 |
@@ -76,7 +79,8 @@
 | **DevModeRunner** | Dev Mode Runner | Dev Mode 生命週期管理。建 worktree → dispatch agent（DEV 全開）→ diff summary → 發布事件。由 /dev 指令或 skill 自動觸發。 |
 | **DevModeEnteredEvent** | Dev Mode Entered Event | Dev Mode 進入時發布。TUI 顯示 worktree 資訊。 |
 | **DevModeCompletedEvent** | Dev Mode Completed Event | Dev Mode 完成時發布。TUI 顯示 diff summary + merge 提示。 |
-| **SessionEventListener** | Session Event Listener | `@EventListener` 監聽 `DevModeEnteredEvent` / `DevModeCompletedEvent`，透過 `SessionWriter` 寫入 dispatch 紀錄。遵循 event-driven 設計，`agent/` 模組不直接依賴 `shared/session/`。 |
+| **SessionEventListener** | Session Event Listener | `@EventListener` 監聽 `DevModeEnteredEvent` / `DevModeCompletedEvent` / `AgentCallRecordedEvent`，透過 `SessionManager.getWriter()` 寫入紀錄。遵循 event-driven 設計。 |
+| **SessionSwitchedEvent** | Session Switched Event | Session 切換事件。resume 或 continue 時由 `SessionManager` 發布，`TuiEventBridge` 監聯後清空 contentView 並 replay 歷史訊息。 |
 
 | **AgentCallRecordedEvent** | Agent Call Recorded Event | GrimoSessionAdvisor 發布，SessionEventListener 監聽寫入 JSONL。解耦 advisor → SessionWriter 直接依賴。 |
 | **TuiEventBridge** | TUI Event Bridge | `@Component @EventListener`，橋接 domain events → TUI 更新（status bar、diff summary）。bind() 模式接收 runtime 建立的 TUI 元件。 |
