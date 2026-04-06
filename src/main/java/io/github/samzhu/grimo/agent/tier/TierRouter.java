@@ -7,24 +7,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.lang.Nullable;
 
-import java.util.List;
-import java.util.Map;
-
 /**
- * Tier 路由器：根據 6 級優先順序解析 Tier，再 walk fallback list 選定 agent+model。
+ * Tier 路由器：根據 sessionTier 或 user-default 解析 agent+model，再 walk fallback list。
  *
- * 設計說明 — 6 級優先順序（高→低）：
- * 1. 使用者本輪關鍵字（keywordTier）     → per-turn，不持久
- * 2. 使用者 /tier 指令（sessionTier）     → session 級，持續到下次切換
- * 3. skill-overrides（config）            → 兩種形式（tier 或直接 agent+model）
- * 4. Skill metadata（grimo.tier）         → Skill 作者定義
- * 5. 安裝時自動分析結果（已寫入 metadata） → 等同 #4
- * 6. 預設 std
+ * 設計說明（簡化後優先順序）：
+ * 1. 使用者 /tier 指令（sessionTier）     → session 級，持續到下次切換
+ * 2. 使用者 /agent-use 設定的 default agent → config bean 欄位
+ * 3. 預設 std → walk tier-models fallback list（from grimoProperties）
  *
  * Tier 確定後，walk tier-models.<tier> fallback list：
  * - 每個 entry 查 registry.get(agentId) → isAvailable()
  * - 第一個可用的就選定
- * - 全都不可用 → throw IllegalStateException
+ * - 全都不可用 → fallback 到 first available agent
  *
  * @see <a href="https://www.mindstudio.ai/blog/set-up-ai-model-router-llm-stack-c2610">MindStudio 3-Tier</a>
  */
@@ -43,54 +37,18 @@ public class TierRouter {
     }
 
     public TierSelection resolve(Context ctx) {
-        // --- Priority 3: skill-overrides（形式 B：直接指定 agent+model）---
-        if (ctx.skillName != null) {
-            var overrides = config.getSkillOverrides();
-            var override = overrides.get(ctx.skillName);
-            if (override != null && override.containsKey("agent") && override.containsKey("model")) {
-                String agentId = override.get("agent");
-                String model = override.get("model");
-                var agent = registry.get(agentId);
-                if (agent != null && agent.isAvailable()) {
-                    log.info("Tier resolved: skill-override-direct → {} / {}", agentId, model);
-                    return new TierSelection(agentId, model, Tier.STD, "skill-override-direct");
-                }
-            }
-        }
-
-        // --- Resolve tier level (priorities 1-6) ---
         Tier tier;
         String source;
 
-        if (ctx.keywordTier != null) {
-            tier = ctx.keywordTier;
-            source = "keyword";
-        } else if (ctx.sessionTier != null) {
+        if (ctx.sessionTier != null) {
             tier = ctx.sessionTier;
             source = "session";
-        } else if (ctx.skillName != null) {
-            var overrides = config.getSkillOverrides();
-            var override = overrides.get(ctx.skillName);
-            if (override != null && override.containsKey("tier")) {
-                tier = Tier.fromString(override.get("tier"));
-                source = "skill-override";
-            } else if (ctx.skillTier != null) {
-                tier = Tier.fromString(ctx.skillTier);
-                source = "skill-metadata";
-            } else {
-                tier = Tier.STD;
-                source = "default";
-            }
-        } else if (ctx.skillTier != null) {
-            tier = Tier.fromString(ctx.skillTier);
-            source = "skill-metadata";
         } else {
             String explicitDefault = config.getDefaultAgent();
             if (explicitDefault != null) {
                 var agent = registry.get(explicitDefault);
                 if (agent != null && agent.isAvailable()) {
-                    String model = config.getAgentOption(explicitDefault, "model");
-                    if (model == null) model = config.getDefaultModel();
+                    String model = config.getDefaultModel();
                     if (model == null) model = grimoProperties.getDefaults()
                             .getOrDefault(explicitDefault, "unknown");
                     return new TierSelection(explicitDefault, model, Tier.STD, "user-default");
@@ -119,8 +77,7 @@ public class TierRouter {
         if (explicitDefault != null) {
             var agent = registry.get(explicitDefault);
             if (agent != null && agent.isAvailable()) {
-                String model = config.getAgentOption(explicitDefault, "model");
-                if (model == null) model = config.getDefaultModel();
+                String model = config.getDefaultModel();
                 if (model == null) model = grimoProperties.getDefaults()
                         .getOrDefault(explicitDefault, "unknown");
                 return new TierSelection(explicitDefault, model, Tier.STD, "user-default");
@@ -132,25 +89,13 @@ public class TierRouter {
     }
 
     private TierSelection walkFallbackList(Tier tier, String source) {
-        // per-tier fallback：user config > built-in
-        var configTiers = config.getTierModels();
-        List<Map<String, String>> fallbackList = configTiers.get(tier.value());
+        var builtIn = grimoProperties.getTierModels();
+        var entries = builtIn.get(tier.value());
 
-        if (fallbackList == null || fallbackList.isEmpty()) {
-            // 該 tier 在 user config 沒設定 → fallback 到 built-in (application.yaml)
-            var builtIn = grimoProperties.getTierModels();
-            var entries = builtIn.get(tier.value());
-            if (entries != null) {
-                fallbackList = entries.stream()
-                    .map(e -> Map.of("agent", e.agent(), "model", e.model()))
-                    .toList();
-            }
-        }
-
-        if (fallbackList != null && !fallbackList.isEmpty()) {
-            for (var entry : fallbackList) {
-                String agentId = entry.get("agent");
-                String model = entry.get("model");
+        if (entries != null && !entries.isEmpty()) {
+            for (var entry : entries) {
+                String agentId = entry.agent();
+                String model = entry.model();
                 var agent = registry.get(agentId);
                 if (agent != null && agent.isAvailable()) {
                     log.info("Tier routing: {} → {} / {} (source: {})", tier, agentId, model, source);
@@ -158,27 +103,9 @@ public class TierRouter {
                 }
                 log.debug("Tier fallback: {} / {} not available, trying next", agentId, model);
             }
-            throw new IllegalStateException(
-                    "沒有可用的 agent 符合 %s 等級。請確認至少一個 CLI agent 已安裝。".formatted(tier.value()));
         }
 
-        // tier-models 未設定 → fallback to conversation default
-        return fallbackToConversationDefault(tier, source);
-    }
-
-    private TierSelection fallbackToConversationDefault(Tier tier, String source) {
-        String defaultAgent = config.getDefaultAgent();
-        if (defaultAgent != null) {
-            var agent = registry.get(defaultAgent);
-            if (agent != null && agent.isAvailable()) {
-                String model = config.getAgentOption(defaultAgent, "model");
-                if (model == null) model = config.getDefaultModel();
-                if (model == null) model = "unknown";
-                log.info("Tier routing: no tier config, using conversation default: {} / {}", defaultAgent, model);
-                return new TierSelection(defaultAgent, model, tier, source);
-            }
-        }
-
+        // No agent available for this tier
         var available = registry.listAvailable();
         if (available.isEmpty()) {
             throw new IllegalStateException("No agents available. Install a CLI agent (claude, gemini, or codex).");
@@ -191,30 +118,17 @@ public class TierRouter {
      * TierRouter 的輸入 context。使用 builder pattern 建構。
      */
     public static class Context {
-        @Nullable final Tier keywordTier;
         @Nullable final Tier sessionTier;
-        @Nullable final String skillName;
-        @Nullable final String skillTier;
 
         private Context(Builder builder) {
-            this.keywordTier = builder.keywordTier;
             this.sessionTier = builder.sessionTier;
-            this.skillName = builder.skillName;
-            this.skillTier = builder.skillTier;
         }
 
         public static Builder builder() { return new Builder(); }
 
         public static class Builder {
-            private Tier keywordTier;
             private Tier sessionTier;
-            private String skillName;
-            private String skillTier;
-
-            public Builder keywordTier(Tier tier) { this.keywordTier = tier; return this; }
             public Builder sessionTier(Tier tier) { this.sessionTier = tier; return this; }
-            public Builder skillName(String name) { this.skillName = name; return this; }
-            public Builder skillTier(String tier) { this.skillTier = tier; return this; }
             public Context build() { return new Context(this); }
         }
     }
