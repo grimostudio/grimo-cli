@@ -1,6 +1,7 @@
 package io.github.samzhu.grimo.tui;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
+import io.github.samzhu.grimo.agent.tier.TierRouter;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.config.GrimoProperties;
 import io.github.samzhu.grimo.project.ProjectContext;
@@ -43,6 +44,7 @@ public class TuiEventBridge {
     private final TaskSchedulerService taskSchedulerService;
     private final ProjectContext projectContext;
     private final SessionManager sessionManager;
+    private final TierRouter tierRouter;
 
     /** TUI 元件（run 時由 TuiAdapter.bind() 設定） */
     private volatile StatusView statusView;
@@ -58,7 +60,8 @@ public class TuiEventBridge {
                           SkillRegistry skillRegistry,
                           TaskSchedulerService taskSchedulerService,
                           ProjectContext projectContext,
-                          SessionManager sessionManager) {
+                          SessionManager sessionManager,
+                          TierRouter tierRouter) {
         this.grimoConfig = grimoConfig;
         this.grimoProperties = grimoProperties;
         this.agentModelRegistry = agentModelRegistry;
@@ -66,6 +69,7 @@ public class TuiEventBridge {
         this.taskSchedulerService = taskSchedulerService;
         this.projectContext = projectContext;
         this.sessionManager = sessionManager;
+        this.tierRouter = tierRouter;
     }
 
     /**
@@ -222,11 +226,16 @@ public class TuiEventBridge {
      * /agent-use 等指令觸發 event 後自動呼叫，確保即時反映切換結果。
      */
     private void refreshStatusBar() {
-        String agentId = grimoConfig.getDefaultAgent();
-        if (agentId == null) agentId = "no agent";
-        String model = grimoConfig.getAgentOption(agentId, "model");
-        if (model == null) model = grimoConfig.getDefaultModel();
-        if (model == null) model = grimoProperties.getDefaults().getOrDefault(agentId, "unknown");
+        String agentId;
+        String model;
+        try {
+            var selection = tierRouter.resolveDefault();
+            agentId = selection.agentId();
+            model = selection.model();
+        } catch (IllegalStateException e) {
+            agentId = "no agent";
+            model = "unknown";
+        }
 
         String projectPath = projectContext.displayPath();
         long agentCount = agentModelRegistry.listAll().values().stream()

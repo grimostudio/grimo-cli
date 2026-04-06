@@ -1,6 +1,7 @@
 package io.github.samzhu.grimo;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
+import io.github.samzhu.grimo.agent.tier.TierRouter;
 import io.github.samzhu.grimo.command.InputMetadata;
 import io.github.samzhu.grimo.command.InputPort;
 import io.github.samzhu.grimo.config.GrimoConfig;
@@ -80,6 +81,7 @@ public class TuiAdapter implements ApplicationRunner {
     private final ChatDispatcher chatDispatcher;
     private final InputPort inputPort;
     private final GrimoProperties grimoProperties;
+    private final TierRouter tierRouter;
 
     /** Status bar 元件（run 時初始化，需在 agent thread 中更新） */
     private StatusView statusView;
@@ -121,7 +123,8 @@ public class TuiAdapter implements ApplicationRunner {
                            GitHelper gitHelper,
                            TuiEventBridge tuiEventBridge,
                            ChatDispatcher chatDispatcher,
-                           InputPort inputPort) {
+                           InputPort inputPort,
+                           TierRouter tierRouter) {
         this.terminal = terminal;
         this.grimoHome = grimoHome;
         this.projectContext = projectContext;
@@ -138,6 +141,7 @@ public class TuiAdapter implements ApplicationRunner {
         this.tuiEventBridge = tuiEventBridge;
         this.chatDispatcher = chatDispatcher;
         this.inputPort = inputPort;
+        this.tierRouter = tierRouter;
     }
 
     @Override
@@ -149,10 +153,16 @@ public class TuiAdapter implements ApplicationRunner {
         // === 準備環境資訊 ===
         String version = getClass().getPackage().getImplementationVersion();
         if (version == null) version = "dev";
-        String agentId = resolveAgentId();
-        String model = grimoConfig.getAgentOption(agentId, "model");
-        if (model == null) model = grimoConfig.getDefaultModel();
-        if (model == null) model = grimoProperties.getDefaults().getOrDefault(agentId, "unknown");
+        String agentId;
+        String model;
+        try {
+            var selection = tierRouter.resolveDefault();
+            agentId = selection.agentId();
+            model = selection.model();
+        } catch (IllegalStateException e) {
+            agentId = "no agent";
+            model = "unknown";
+        }
         String projectPath = projectContext.displayPath();
         long agentCount = agentModelRegistry.listAll().values().stream()
                 .filter(m -> m.isAvailable()).count();
@@ -452,33 +462,6 @@ public class TuiAdapter implements ApplicationRunner {
                         eventLoop.setDirty();
                     }
                 });
-    }
-
-    /**
-     * 解析預設 agent：先看 config，沒有則從 AgentModelRegistry 按優先順序自動選擇。
-     *
-     * 設計說明：
-     * - 優先順序：claude → codex → gemini（claude 生態最成熟）
-     * - 使用者可用 /agent-use 覆寫，寫入 config 後下次啟動沿用
-     * - 啟動初始化已移至 GrimoStartupRunner.startupInitRunner，registry 在此已有資料
-     */
-    private static final List<String> AGENT_PRIORITY = List.of("claude", "codex", "gemini");
-
-    private String resolveAgentId() {
-        String agentId = grimoConfig.getDefaultAgent();
-        if (agentId != null) return agentId;
-
-        var availableIds = agentModelRegistry.listAll().entrySet().stream()
-                .filter(e -> e.getValue().isAvailable())
-                .map(java.util.Map.Entry::getKey)
-                .toList();
-
-        // 按優先順序找第一個可用的
-        for (String preferred : AGENT_PRIORITY) {
-            if (availableIds.contains(preferred)) return preferred;
-        }
-        // 都不在優先清單裡，fallback 到第一個可用的
-        return availableIds.isEmpty() ? "no agent" : availableIds.getFirst();
     }
 
 }

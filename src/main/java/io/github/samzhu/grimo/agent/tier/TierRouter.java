@@ -85,12 +85,50 @@ public class TierRouter {
             tier = Tier.fromString(ctx.skillTier);
             source = "skill-metadata";
         } else {
+            String explicitDefault = config.getDefaultAgent();
+            if (explicitDefault != null) {
+                var agent = registry.get(explicitDefault);
+                if (agent != null && agent.isAvailable()) {
+                    String model = config.getAgentOption(explicitDefault, "model");
+                    if (model == null) model = config.getDefaultModel();
+                    if (model == null) model = grimoProperties.getDefaults()
+                            .getOrDefault(explicitDefault, "unknown");
+                    return new TierSelection(explicitDefault, model, Tier.STD, "user-default");
+                }
+                throw new IllegalStateException(
+                    "%s is not available. Run '/agent-use' to switch agent.".formatted(explicitDefault));
+            }
             tier = Tier.STD;
             source = "default";
         }
 
         log.debug("Tier resolved: {} (source: {})", tier, source);
         return walkFallbackList(tier, source);
+    }
+
+    /**
+     * 解析預設 agent+model：供 status bar 和啟動時使用。
+     *
+     * 設計說明：
+     * - 使用者有明確設定（/agent-use）→ 檢查 isAvailable()，不可用則 throw
+     * - 無明確設定 → 走 tier-models.std fallback list，選第一個可用
+     * - 確保 status bar 顯示與實際 dispatch 一致
+     */
+    public TierSelection resolveDefault() {
+        String explicitDefault = config.getDefaultAgent();
+        if (explicitDefault != null) {
+            var agent = registry.get(explicitDefault);
+            if (agent != null && agent.isAvailable()) {
+                String model = config.getAgentOption(explicitDefault, "model");
+                if (model == null) model = config.getDefaultModel();
+                if (model == null) model = grimoProperties.getDefaults()
+                        .getOrDefault(explicitDefault, "unknown");
+                return new TierSelection(explicitDefault, model, Tier.STD, "user-default");
+            }
+            throw new IllegalStateException(
+                "%s is not available. Run '/agent-use' to switch agent.".formatted(explicitDefault));
+        }
+        return resolve(Context.builder().build());
     }
 
     private TierSelection walkFallbackList(Tier tier, String source) {

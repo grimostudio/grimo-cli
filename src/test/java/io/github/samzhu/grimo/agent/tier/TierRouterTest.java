@@ -157,4 +157,57 @@ class TierRouterTest {
         assertThat(selection.agentId()).isEqualTo("claude");
         assertThat(selection.model()).isEqualTo("claude-opus-4");
     }
+
+    @Test
+    void resolveDefaultWithoutConfigWalksTierFallback() {
+        // No default agent in config; gemini registered as available → picks first available from tier-models.std
+        registerAgent("gemini");
+        when(config.getDefaultAgent()).thenReturn(null);
+        // std fallback list has claude first (not available), gemini second
+        when(config.getTierModels()).thenReturn(Map.of(
+                "std", List.of(
+                        Map.of("agent", "claude", "model", "claude-sonnet-4"),
+                        Map.of("agent", "gemini", "model", "gemini-2.5-flash"))
+        ));
+
+        var selection = router.resolveDefault();
+        assertThat(selection.agentId()).isEqualTo("gemini");
+        assertThat(selection.model()).isEqualTo("gemini-2.5-flash");
+    }
+
+    @Test
+    void resolveDefaultWithConfigAndAvailableAgent() {
+        // Config default = "claude", claude registered + available → returns claude
+        registerAgent("claude");
+        when(config.getDefaultAgent()).thenReturn("claude");
+        when(config.getAgentOption("claude", "model")).thenReturn("claude-sonnet-4");
+
+        var selection = router.resolveDefault();
+        assertThat(selection.agentId()).isEqualTo("claude");
+        assertThat(selection.model()).isEqualTo("claude-sonnet-4");
+        assertThat(selection.source()).isEqualTo("user-default");
+    }
+
+    @Test
+    void resolveDefaultWithConfigAndUnavailableAgentShouldThrow() {
+        // Config default = "claude", claude NOT registered/available → throws
+        when(config.getDefaultAgent()).thenReturn("claude");
+        // claude not registered in registry
+
+        assertThatThrownBy(() -> router.resolveDefault())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("claude");
+    }
+
+    @Test
+    void resolveWithEmptyContextAndUnavailableDefaultShouldThrow() {
+        // Config default = "claude", claude NOT available → resolve(empty context) also throws
+        when(config.getDefaultAgent()).thenReturn("claude");
+        // claude not registered in registry
+
+        var ctx = TierRouter.Context.builder().build();
+        assertThatThrownBy(() -> router.resolve(ctx))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("claude");
+    }
 }
