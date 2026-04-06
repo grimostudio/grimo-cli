@@ -9,6 +9,7 @@ import io.github.samzhu.grimo.agent.tier.TierSelection;
 import io.github.samzhu.grimo.command.InputPort;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.mcp.McpCatalogBuilder;
+import io.github.samzhu.grimo.shared.event.*;
 import io.github.samzhu.grimo.shared.session.SessionManager;
 import io.github.samzhu.grimo.tui.TuiEventBridge;
 import io.github.samzhu.grimo.tui.TuiKeyHandler;
@@ -20,6 +21,7 @@ import org.jline.utils.AttributedStyle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springaicommunity.agents.client.AgentClient;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.atomic.AtomicReference;
@@ -49,6 +51,7 @@ public class ChatDispatcher {
     private final SessionManager sessionManager;
     private final TuiEventBridge tuiEventBridge;
     private final GrimoConfig grimoConfig;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** TUI 元件（run 時由 TuiAdapter.bindTui() 設定） */
     private volatile ContentView contentView;
@@ -67,7 +70,8 @@ public class ChatDispatcher {
                           AtomicReference<Tier> sessionTier,
                           SessionManager sessionManager,
                           TuiEventBridge tuiEventBridge,
-                          GrimoConfig grimoConfig) {
+                          GrimoConfig grimoConfig,
+                          ApplicationEventPublisher eventPublisher) {
         this.agentModelRegistry = agentModelRegistry;
         this.agentRouter = agentRouter;
         this.tierRouter = tierRouter;
@@ -77,6 +81,7 @@ public class ChatDispatcher {
         this.sessionManager = sessionManager;
         this.tuiEventBridge = tuiEventBridge;
         this.grimoConfig = grimoConfig;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -119,32 +124,55 @@ public class ChatDispatcher {
             return;
         }
 
+        // 👀 Queued
+        eventPublisher.publishEvent(new DispatchQueuedEvent(userInput));
+
         try {
             // --- Tier 路由：決定用哪個 agent + model ---
             var tierSelection = resolveTier(userInput);
             currentTierSelection = tierSelection;
 
             agentState.agentRunning = true;
-            contentView.appendLine(new AttributedString("\u23f3 thinking...",
-                    AttributedStyle.DEFAULT.foreground(245)));
+            // REMOVED: manual appendLine("thinking...") — ReactionIndicator handles this via events
             eventLoop.setDirty();
 
             // 設計說明：主對話不顯示 tier（tier 是給 skill dispatch 用的）。
             // 使用者選的 agent+model 已經顯示在正常 status bar，不需要額外的 tier 標示。
 
             agentState.agentThread = Thread.startVirtualThread(() -> {
+                long startMs = System.currentTimeMillis();
                 try {
-                    // 移除 "thinking..." 暫時狀態行
-                    contentView.removeLastLine();
+                    // 🤔 Thinking
+                    eventPublisher.publishEvent(new DispatchThinkingStartedEvent(
+                        tierSelection.agentId(), tierSelection.model()));
 
+                    // REMOVED: contentView.removeLastLine() — no manual thinking line to remove
                     String result = doDispatch(userInput, tierSelection);
+                    long duration = System.currentTimeMillis() - startMs;
+
+                    // ✨ Response received
+                    eventPublisher.publishEvent(new DispatchResponseReceivedEvent(
+                        tierSelection.agentId(), tierSelection.model(), duration));
 
                     if (result != null && !result.isBlank()) {
                         contentView.appendAiReply(result);
                     }
                     sessionManager.getWriter().writeAssistantMessage(result);
+
+                    // 👍 Completed
+                    eventPublisher.publishEvent(new DispatchCompletedEvent(
+                        tierSelection.agentId(), tierSelection.model(), duration,
+                        result != null ? result.length() : 0));
+
                 } catch (Exception e) {
+                    long duration = System.currentTimeMillis() - startMs;
                     log.error("Agent call failed: error={}", e.getMessage(), e);
+
+                    // 😱 Failed
+                    eventPublisher.publishEvent(new DispatchFailedEvent(
+                        tierSelection.agentId(), tierSelection.model(),
+                        e.getMessage(), duration));
+
                     String errorMsg = formatAgentError(e);
                     contentView.appendError(errorMsg);
                 } finally {
@@ -156,6 +184,9 @@ public class ChatDispatcher {
                 }
             });
         } catch (IllegalStateException e) {
+            // 😱 Routing failed
+            eventPublisher.publishEvent(new DispatchFailedEvent(
+                null, null, e.getMessage(), 0));
             log.warn("Agent routing failed: {}", e.getMessage());
             contentView.appendError(e.getMessage());
         }
