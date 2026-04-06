@@ -46,6 +46,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 自建 TUI Runner：使用 JLine Display + BindingReader 建構完整 TUI 介面。
@@ -82,6 +83,7 @@ public class TuiAdapter implements ApplicationRunner {
     private final InputPort inputPort;
     private final GrimoProperties grimoProperties;
     private final TierRouter tierRouter;
+    private final AtomicReference<String> startupFallbackMessage;
 
     /** Status bar 元件（run 時初始化，需在 agent thread 中更新） */
     private StatusView statusView;
@@ -124,7 +126,8 @@ public class TuiAdapter implements ApplicationRunner {
                            TuiEventBridge tuiEventBridge,
                            ChatDispatcher chatDispatcher,
                            InputPort inputPort,
-                           TierRouter tierRouter) {
+                           TierRouter tierRouter,
+                           AtomicReference<String> startupFallbackMessage) {
         this.terminal = terminal;
         this.grimoHome = grimoHome;
         this.projectContext = projectContext;
@@ -142,6 +145,7 @@ public class TuiAdapter implements ApplicationRunner {
         this.chatDispatcher = chatDispatcher;
         this.inputPort = inputPort;
         this.tierRouter = tierRouter;
+        this.startupFallbackMessage = startupFallbackMessage;
     }
 
     @Override
@@ -177,6 +181,13 @@ public class TuiAdapter implements ApplicationRunner {
                 (int) agentCount, skillCount, mcpCount, taskCount,
                 terminal.getWidth());
         contentView.setBannerText(bannerText);
+
+        // 顯示啟動時的 agent fallback 提示訊息（若 default agent 不可用時自動切換）
+        String fallbackMsg = startupFallbackMessage.get();
+        if (fallbackMsg != null) {
+            contentView.appendLine(new org.jline.utils.AttributedString(fallbackMsg,
+                    org.jline.utils.AttributedStyle.DEFAULT.foreground(3))); // yellow
+        }
 
         inputView = new InputView();
 

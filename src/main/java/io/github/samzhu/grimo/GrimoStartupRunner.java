@@ -33,6 +33,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.shell.core.command.CommandRegistry;
 
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Bean 定義配置類別：定義所有運行時管理物件的 @Bean，並執行啟動初始化邏輯。
@@ -157,6 +158,15 @@ public class GrimoStartupRunner {
         return new ChannelEventListener(channelRegistry);
     }
 
+    /**
+     * 啟動時若 default agent 不可用，自動切換後寫入的提示訊息。
+     * TuiAdapter 啟動後讀取並顯示給使用者。
+     */
+    @Bean
+    AtomicReference<String> startupFallbackMessage() {
+        return new AtomicReference<>(null);
+    }
+
     @Bean
     io.github.samzhu.grimo.tui.widget.Banner banner() {
         return new io.github.samzhu.grimo.tui.widget.Banner();
@@ -206,6 +216,8 @@ public class GrimoStartupRunner {
                                         TaskSchedulerService taskSchedulerService,
                                         SandboxDetector sandboxDetector,
                                         GrimoConfig grimoConfig,
+                                        GrimoProperties grimoProperties,
+                                        AtomicReference<String> startupFallbackMessage,
                                         ApplicationEventPublisher eventPublisher) {
         return args -> {
             // Step 1: Home & Project 初始化
@@ -222,6 +234,37 @@ public class GrimoStartupRunner {
             agentModelRegistry.listAll().forEach((agentId, model) -> {
                 eventPublisher.publishEvent(new AgentDetectedEvent(agentId, model.isAvailable()));
             });
+
+            // Step 2.5: 檢查 default agent 是否可用，不可用時自動 fallback
+            // 設計說明：config.yaml 可能記錄了使用者上次設定的 agent，但目前環境未安裝。
+            // 此步驟自動切換到 tier-models.std 中第一個可用的 agent，並在 TUI 顯示提示訊息。
+            String defaultAgent = grimoConfig.getDefaultAgent();
+            if (defaultAgent != null) {
+                var agentModel = agentModelRegistry.get(defaultAgent);
+                if (agentModel == null || !agentModel.isAvailable()) {
+                    var stdEntries = grimoProperties.getTierModels().get("std");
+                    String newAgent = null, newModel = null;
+                    if (stdEntries != null) {
+                        for (var entry : stdEntries) {
+                            var candidate = agentModelRegistry.get(entry.agent());
+                            if (candidate != null && candidate.isAvailable()) {
+                                newAgent = entry.agent();
+                                newModel = entry.model();
+                                break;
+                            }
+                        }
+                    }
+                    if (newAgent != null) {
+                        grimoConfig.setDefaultAgent(newAgent);
+                        grimoConfig.setDefaultModel(newModel);
+                        String msg = "⚠ " + defaultAgent + " not installed, using " + newAgent + " · " + newModel;
+                        log.warn(msg);
+                        startupFallbackMessage.set(msg);
+                    } else {
+                        log.error("No agents available. Install a CLI agent (claude, gemini, or codex).");
+                    }
+                }
+            }
 
             // Step 3: Skill 載入
             try {
