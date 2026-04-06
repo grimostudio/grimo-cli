@@ -186,6 +186,10 @@ public class SessionManager {
     }
 
     private SessionIndex loadOrRebuildIndex() {
+        // dataDir 可能在建構時尚未建立（@Bean 在 startupInitRunner 之前執行）
+        if (!Files.exists(dataDir)) {
+            return new SessionIndex(SessionIndex.CURRENT_VERSION, List.of());
+        }
         Path indexFile = dataDir.resolve(INDEX_FILE);
         if (Files.exists(indexFile)) {
             try {

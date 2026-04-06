@@ -48,8 +48,8 @@ public class AgentConfiguration {
         var specs = List.of(
                 // Claude Code CLI
                 new AgentModelFactory.AgentSpec("claude", "cli", "Claude Code CLI", workingDirectory -> {
-                    String model = config.getDefaultModel();
-                    if (model == null) model = grimoProperties.getDefaults().getOrDefault("claude", "claude-sonnet-4-6");
+                    // Agent spec 用 per-agent 內建預設（非全域 getDefaultModel()，那是當前選定 agent 的 model）
+                    String model = grimoProperties.getDefaults().getOrDefault("claude", "claude-sonnet-4-6");
 
                     ClaudeAgentOptions options = ClaudeAgentOptions.builder()
                             .model(model)
@@ -67,8 +67,7 @@ public class AgentConfiguration {
 
                 // Gemini CLI
                 new AgentModelFactory.AgentSpec("gemini", "cli", "Gemini CLI", workingDirectory -> {
-                    String model = config.getDefaultModel();
-                    if (model == null) model = grimoProperties.getDefaults().getOrDefault("gemini", "gemini-2.5-pro");
+                    String model = grimoProperties.getDefaults().getOrDefault("gemini", "gemini-2.5-pro");
 
                     CLIOptions cliOptions = CLIOptions.builder()
                             .model(model)
@@ -92,8 +91,7 @@ public class AgentConfiguration {
 
                 // Codex CLI
                 new AgentModelFactory.AgentSpec("codex", "cli", "Codex CLI", workingDirectory -> {
-                    String model = config.getDefaultModel();
-                    if (model == null) model = grimoProperties.getDefaults().getOrDefault("codex", "gpt-5.4");
+                    String model = grimoProperties.getDefaults().getOrDefault("codex", "gpt-5.4");
 
                     ExecuteOptions executeOptions = ExecuteOptions.builder()
                             .model(model)
