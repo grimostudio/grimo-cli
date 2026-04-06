@@ -6,6 +6,8 @@ import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 
+import io.github.samzhu.grimo.tui.widget.ReactionIndicator;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,6 +32,13 @@ public class ContentView implements Renderable {
     private final List<AttributedString> lines = new ArrayList<>();
     private int scrollOffset = 0;
     private boolean autoFollow = true;
+
+    /** Floating reaction indicator（不在 buffer 裡，render 時動態加入） */
+    private volatile ReactionIndicator reactionIndicator;
+
+    public void setReactionIndicator(ReactionIndicator indicator) {
+        this.reactionIndicator = indicator;
+    }
 
     /** 完整 wrapped line cache（所有歷史行 wrap 後的結果） */
     private List<BufferLine> wrappedCache = new ArrayList<>();
@@ -338,6 +347,14 @@ public class ContentView implements Renderable {
                 wrappedVisible.add(line);
             } else {
                 wrappedVisible.addAll(line.columnSplitLength(cols));
+            }
+        }
+
+        // Inject floating reaction line (not in persistent buffer)
+        if (reactionIndicator != null && reactionIndicator.isActive()) {
+            var reactionLine = reactionIndicator.render(cols);
+            if (reactionLine != null) {
+                wrappedVisible.add(reactionLine);
             }
         }
 
