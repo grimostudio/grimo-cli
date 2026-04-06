@@ -3,7 +3,6 @@ package io.github.samzhu.grimo;
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
 import io.github.samzhu.grimo.agent.router.AgentRouter;
 import io.github.samzhu.grimo.agent.tier.Tier;
-import io.github.samzhu.grimo.agent.tier.TierKeywordDetector;
 import io.github.samzhu.grimo.agent.tier.TierOptionsFactory;
 import io.github.samzhu.grimo.agent.tier.TierRouter;
 import io.github.samzhu.grimo.agent.tier.TierSelection;
@@ -44,7 +43,6 @@ public class ChatDispatcher {
     private final AgentModelRegistry agentModelRegistry;
     private final AgentRouter agentRouter;
     private final TierRouter tierRouter;
-    private final TierKeywordDetector tierKeywordDetector;
     private final TierOptionsFactory tierOptionsFactory;
     private final McpCatalogBuilder mcpCatalogBuilder;
     private final AtomicReference<Tier> sessionTier;
@@ -64,7 +62,6 @@ public class ChatDispatcher {
     public ChatDispatcher(AgentModelRegistry agentModelRegistry,
                           AgentRouter agentRouter,
                           TierRouter tierRouter,
-                          TierKeywordDetector tierKeywordDetector,
                           TierOptionsFactory tierOptionsFactory,
                           McpCatalogBuilder mcpCatalogBuilder,
                           AtomicReference<Tier> sessionTier,
@@ -74,7 +71,6 @@ public class ChatDispatcher {
         this.agentModelRegistry = agentModelRegistry;
         this.agentRouter = agentRouter;
         this.tierRouter = tierRouter;
-        this.tierKeywordDetector = tierKeywordDetector;
         this.tierOptionsFactory = tierOptionsFactory;
         this.mcpCatalogBuilder = mcpCatalogBuilder;
         this.sessionTier = sessionTier;
@@ -496,9 +492,7 @@ public class ChatDispatcher {
      * @throws IllegalStateException Agent が見つからない場合
      */
     private TierSelection resolveTier(String userInput) {
-        var keywordTier = tierKeywordDetector.detect(userInput).orElse(null);
         var tierCtx = TierRouter.Context.builder()
-                .keywordTier(keywordTier)
                 .sessionTier(sessionTier.get())
                 .build();
         var tierSelection = tierRouter.resolve(tierCtx);

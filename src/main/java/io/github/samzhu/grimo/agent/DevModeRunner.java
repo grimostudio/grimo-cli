@@ -1,7 +1,6 @@
 package io.github.samzhu.grimo.agent;
 
 import io.github.samzhu.grimo.agent.registry.AgentModelRegistry;
-import io.github.samzhu.grimo.agent.tier.TierKeywordDetector;
 import io.github.samzhu.grimo.agent.tier.TierOptionsFactory;
 import io.github.samzhu.grimo.agent.tier.TierRouter;
 import io.github.samzhu.grimo.agent.tier.Tier;
@@ -41,7 +40,6 @@ public class DevModeRunner {
     private final GitHelper gitHelper;
     private final AgentModelRegistry agentModelRegistry;
     private final TierRouter tierRouter;
-    private final TierKeywordDetector tierKeywordDetector;
     private final TierOptionsFactory tierOptionsFactory;
     private final McpCatalogBuilder mcpCatalogBuilder;
     private final SkillRegistry skillRegistry;
@@ -52,7 +50,6 @@ public class DevModeRunner {
                          GitHelper gitHelper,
                          AgentModelRegistry agentModelRegistry,
                          TierRouter tierRouter,
-                         TierKeywordDetector tierKeywordDetector,
                          TierOptionsFactory tierOptionsFactory,
                          McpCatalogBuilder mcpCatalogBuilder,
                          SkillRegistry skillRegistry,
@@ -62,7 +59,6 @@ public class DevModeRunner {
         this.gitHelper = gitHelper;
         this.agentModelRegistry = agentModelRegistry;
         this.tierRouter = tierRouter;
-        this.tierKeywordDetector = tierKeywordDetector;
         this.tierOptionsFactory = tierOptionsFactory;
         this.mcpCatalogBuilder = mcpCatalogBuilder;
         this.skillRegistry = skillRegistry;
@@ -78,9 +74,7 @@ public class DevModeRunner {
         String taskId = UUID.randomUUID().toString().substring(0, 8);
 
         // Tier routing
-        var keywordTier = tierKeywordDetector.detect(goal).orElse(null);
         var tierCtx = TierRouter.Context.builder()
-                .keywordTier(keywordTier)
                 .sessionTier(sessionTier.get())
                 .build();
         var tierSelection = tierRouter.resolve(tierCtx);
