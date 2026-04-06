@@ -15,8 +15,7 @@ import java.util.Map;
  *
  * 設計說明：
  * - 合併原本的 /agent-use 和 /agent-model 為單一指令
- * - 懶人原則：只指定 agent → 自動帶推薦模型或記憶的模型
- * - Per-agent 模型記憶：切到 opus 後換 gemini 再換回 claude，記住 opus
+ * - 懶人原則：只指定 agent → 自動帶推薦模型（from GrimoProperties）
  * - 推薦預設模型從 GrimoProperties（application.yaml grimo.defaults）讀取，不再硬編碼
  * - 模型 alias 解析由各 CLI 自行處理（passthrough），Grimo 不再維護 alias 表
  *
@@ -61,8 +60,7 @@ public class AgentCommands {
             String id = entry.getKey();
             String indicator = id.equals(defaultAgent) ? "> " : "  ";
             String status = entry.getValue().isAvailable() ? "ready" : "not available";
-            String model = config.getAgentOption(id, "model");
-            if (model == null) model = grimoProperties.getDefaults().getOrDefault(id, "");
+            String model = grimoProperties.getDefaults().getOrDefault(id, "");
             sb.append(String.format("%s%-10s %-14s %s%n", indicator, id, status, model));
         }
         return sb.toString().stripTrailing();
@@ -92,17 +90,12 @@ public class AgentCommands {
             return "Agent not found: " + agentId + ". Run '/agent-list' to see available agents.";
         }
 
-        // 解析 model：有 hint 就 passthrough（CLI 自行解析 alias），否則讀記憶或 properties 預設
+        // model: user hint or built-in default
         String model;
         if (modelHint != null && !modelHint.isBlank()) {
-            model = modelHint;  // passthrough — CLI 自行解析 alias
-            config.setAgentOption(agentId, "model", model);
+            model = modelHint;
         } else {
-            // 讀記憶，沒有就用 GrimoProperties 推薦預設
-            model = config.getAgentOption(agentId, "model");
-            if (model == null) {
-                model = grimoProperties.getDefaults().getOrDefault(agentId, "unknown");
-            }
+            model = grimoProperties.getDefaults().getOrDefault(agentId, "unknown");
         }
 
         config.setDefaultAgent(agentId);

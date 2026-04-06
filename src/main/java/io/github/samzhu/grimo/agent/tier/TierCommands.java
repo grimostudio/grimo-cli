@@ -1,10 +1,8 @@
 package io.github.samzhu.grimo.agent.tier;
 
-import io.github.samzhu.grimo.config.GrimoConfig;
 import org.springframework.shell.core.command.annotation.Command;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -13,7 +11,6 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * 設計說明：
  * - /tier：查看或切換 session tier（持續到下次切換）
- * - /skill-tier：覆寫特定 skill 的 tier（寫入 config 永久保存）
  * - session tier 存在 AtomicReference 中，由 TierConfiguration 建立並注入
  */
 @Component
@@ -21,11 +18,9 @@ public class TierCommands {
 
     private static final Set<String> VALID_TIERS = Set.of("lite", "std", "pro");
 
-    private final GrimoConfig config;
     private final AtomicReference<Tier> sessionTier;
 
-    public TierCommands(GrimoConfig config, AtomicReference<Tier> sessionTier) {
-        this.config = config;
+    public TierCommands(AtomicReference<Tier> sessionTier) {
         this.sessionTier = sessionTier;
     }
 
@@ -52,28 +47,5 @@ public class TierCommands {
         Tier newTier = Tier.fromString(level);
         sessionTier.set(newTier);
         return newTier.icon() + " Session tier set to: " + newTier.value();
-    }
-
-    /**
-     * 覆寫特定 skill 的 tier（永久寫入 config.yaml）。
-     * /skill-tier deep-research pro
-     *
-     * @param rawArgs 原始參數字串，格式：<skillName> <tier>
-     */
-    @Command(name = "skill-tier", description = "Override tier for a specific skill")
-    public String skillTier(String rawArgs) {
-        if (rawArgs == null || rawArgs.isBlank()) {
-            return "Usage: /skill-tier <skill-name> <tier>\nExample: /skill-tier deep-research pro";
-        }
-        String[] parts = rawArgs.trim().split("\\s+", 2);
-        if (parts.length < 2) {
-            return "Usage: /skill-tier <skill-name> <tier>\nExample: /skill-tier deep-research pro";
-        }
-        String skillName = parts[0];
-        String tierLevel = parts[1];
-        Tier tier = Tier.fromString(tierLevel);
-        config.setSkillOverride(skillName, Map.of("tier", tier.value()));
-        return "Skill '" + skillName + "' tier override set to: " + tier.value()
-                + " (saved to config.yaml)";
     }
 }

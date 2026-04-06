@@ -70,8 +70,6 @@ public class BuiltinCommandRegistrar {
         // Tier commands
         dispatcher.register("tier", "View or set the session tier", "builtin",
                 tierCommands::tier);
-        dispatcher.register("skill-tier", "Override tier for a specific skill", "builtin",
-                tierCommands::skillTier);
 
         // Skill commands
         dispatcher.register("skill-list", "List all loaded skills", "builtin",

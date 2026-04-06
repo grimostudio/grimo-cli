@@ -58,7 +58,7 @@ public class SkillAnalyzer {
      */
     public AnalysisResult analyze(String skillBody) {
         try {
-            var ctx = TierRouter.Context.builder().skillTier("lite").build();
+            var ctx = TierRouter.Context.builder().sessionTier(Tier.LITE).build();
             TierSelection selection = tierRouter.resolve(ctx);
 
             AgentModel agentModel = registry.get(selection.agentId());

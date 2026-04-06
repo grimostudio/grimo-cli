@@ -45,7 +45,6 @@ class AgentCommandsTest {
     void listShouldShowDefaultModelFromProperties() {
         registerAgent("claude");
         when(config.getDefaultAgent()).thenReturn("claude");
-        when(config.getAgentOption("claude", "model")).thenReturn(null);
         String result = commands.list();
         assertThat(result).contains("claude-sonnet-4-6");
     }
@@ -60,7 +59,6 @@ class AgentCommandsTest {
     @Test
     void useShouldFallbackToPropertiesDefault() {
         registerAgent("codex");
-        when(config.getAgentOption("codex", "model")).thenReturn(null);
         String result = commands.use("codex");
         assertThat(result).contains("gpt-5.4");
     }

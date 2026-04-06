@@ -237,7 +237,7 @@ public class ChatDispatcher {
                     handleError(callback, agentId, null, text, startTime, "Agent not found in registry");
                     return;
                 }
-                var configModel = grimoConfig.getAgentOption(agentId, "model");
+                var configModel = grimoConfig.getDefaultModel();
                 // @mention 直接指定 agent 也走 PLAN mode
                 var options = tierOptionsFactory.build(agentId, configModel,
                         TierOptionsFactory.ExecutionMode.PLAN);
