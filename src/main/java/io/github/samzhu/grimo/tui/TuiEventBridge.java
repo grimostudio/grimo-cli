@@ -5,11 +5,8 @@ import io.github.samzhu.grimo.agent.tier.TierRouter;
 import io.github.samzhu.grimo.config.GrimoConfig;
 import io.github.samzhu.grimo.config.GrimoProperties;
 import io.github.samzhu.grimo.project.ProjectContext;
-import io.github.samzhu.grimo.shared.event.AgentSwitchedEvent;
-import io.github.samzhu.grimo.shared.event.DevModeCompletedEvent;
-import io.github.samzhu.grimo.shared.event.DevModeEnteredEvent;
-import io.github.samzhu.grimo.shared.event.McpCatalogChangedEvent;
-import io.github.samzhu.grimo.shared.event.SessionSwitchedEvent;
+import io.github.samzhu.grimo.shared.event.*;
+import io.github.samzhu.grimo.tui.widget.ReactionIndicator;
 import io.github.samzhu.grimo.shared.session.SessionManager;
 import io.github.samzhu.grimo.shared.session.SessionMessage;
 import io.github.samzhu.grimo.skill.registry.SkillRegistry;
@@ -50,6 +47,7 @@ public class TuiEventBridge {
     private volatile StatusView statusView;
     private volatile ContentView contentView;
     private volatile Runnable setDirty;
+    private volatile ReactionIndicator reactionIndicator;
 
     /** originalStatusText 同步：bind 後初始值由呼叫方傳入，refreshStatusBar 每次重建並更新 */
     private volatile String originalStatusText;
@@ -84,11 +82,13 @@ public class TuiEventBridge {
     public void bind(StatusView statusView,
                      ContentView contentView,
                      Runnable setDirty,
-                     String originalStatusText) {
+                     String originalStatusText,
+                     ReactionIndicator reactionIndicator) {
         this.statusView = statusView;
         this.contentView = contentView;
         this.setDirty = setDirty;
         this.originalStatusText = originalStatusText;
+        this.reactionIndicator = reactionIndicator;
     }
 
     /**
@@ -219,6 +219,78 @@ public class TuiEventBridge {
                 // system → skip
             }
         }
+    }
+
+    // --- Dispatch Lifecycle Event Listeners ---
+    // 設計說明：每個 DispatchLifecycleEvent 子型別對應一個 @EventListener，
+    // 驅動 ReactionIndicator 狀態切換，實現 OpenClaw-style emoji reaction feedback。
+
+    @EventListener
+    void on(DispatchQueuedEvent event) {
+        if (reactionIndicator == null) return;
+        reactionIndicator.setState(ReactionIndicator.State.QUEUED, "Received...");
+        setDirty.run();
+    }
+
+    @EventListener
+    void on(DispatchThinkingStartedEvent event) {
+        if (reactionIndicator == null) return;
+        reactionIndicator.startThinkingAnimation();
+        setDirty.run();
+    }
+
+    @EventListener
+    void on(DispatchToolCalledEvent event) {
+        if (reactionIndicator == null) return;
+        reactionIndicator.setState(ReactionIndicator.State.TOOL,
+            event.toolName() != null ? "Using " + event.toolName() + "..." : "Using tools...");
+        setDirty.run();
+    }
+
+    @EventListener
+    void on(DispatchCodingEvent event) {
+        if (reactionIndicator == null) return;
+        String display = event.filePath() != null
+            ? "Editing " + shortenPath(event.filePath()) + "..." : "Writing code...";
+        reactionIndicator.setState(ReactionIndicator.State.CODING, display);
+        setDirty.run();
+    }
+
+    @EventListener
+    void on(DispatchWebSearchEvent event) {
+        if (reactionIndicator == null) return;
+        reactionIndicator.setState(ReactionIndicator.State.WEB,
+            event.query() != null ? "Searching: " + event.query() : "Browsing the web...");
+        setDirty.run();
+    }
+
+    @EventListener
+    void on(DispatchResponseReceivedEvent event) {
+        if (reactionIndicator == null) return;
+        reactionIndicator.setState(ReactionIndicator.State.RESPONDING, "Receiving...");
+        setDirty.run();
+    }
+
+    @EventListener
+    void on(DispatchCompletedEvent event) {
+        if (reactionIndicator == null) return;
+        reactionIndicator.stop();
+        setDirty.run();
+    }
+
+    @EventListener
+    void on(DispatchFailedEvent event) {
+        if (reactionIndicator == null) return;
+        reactionIndicator.stop();
+        setDirty.run();
+    }
+
+    // --- Helper ---
+
+    private String shortenPath(String path) {
+        if (path == null) return "";
+        int lastSlash = path.lastIndexOf('/');
+        return lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
     }
 
     /**

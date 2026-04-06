@@ -86,6 +86,10 @@
 | **AgentCallRecordedEvent** | Agent Call Recorded Event | GrimoSessionAdvisor 發布，SessionEventListener 監聽寫入 JSONL。解耦 advisor → SessionWriter 直接依賴。 |
 | **TuiEventBridge** | TUI Event Bridge | `@Component @EventListener`，橋接 domain events → TUI 更新（status bar、diff summary）。bind() 模式接收 runtime 建立的 TUI 元件。 |
 
+| **ReactionIndicator** | Reaction Indicator | TUI widget，將 agent 執行狀態映射為 emoji reaction（👀🤔🔥👨‍💻⚡✨👍😱）。ContentView render 時動態加入的浮動行，不在 buffer 裡。參考 OpenClaw Reaction Lifecycle 設計。 |
+| **DispatchLifecycleEvent** | Dispatch Lifecycle Event | sealed interface，AI dispatch 生命週期事件群組。子 event：Queued、ThinkingStarted、ToolCalled、Coding、WebSearch、ResponseReceived、Completed、Failed。反映 orchestration state（系統正在做什麼），不是 message content。 |
+| **Reaction Lifecycle** | Reaction Lifecycle | 設計模式（源自 OpenClaw）：系統在執行任務的不同階段主動切換 emoji reaction，表達執行狀態。低延遲回饋通道，不是裝飾。 |
+
 已有的 events：`IncomingMessageEvent`（統一輸入 port）、`OutgoingMessageEvent`（統一輸出 port）、`TaskExecutionEvent`
 
 ## 技術元件對應

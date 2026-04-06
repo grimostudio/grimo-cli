@@ -41,6 +41,7 @@ import io.github.samzhu.grimo.tui.view.StatusView;
 import io.github.samzhu.grimo.tui.widget.Banner;
 import io.github.samzhu.grimo.tui.widget.GroupedSelect;
 import io.github.samzhu.grimo.tui.widget.ListSelect;
+import io.github.samzhu.grimo.tui.widget.ReactionIndicator;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -283,8 +284,16 @@ public class TuiAdapter implements ApplicationRunner {
         // StatusView 的暫時訊息消失後需要觸發重繪
         statusView.setDirtyCallback(() -> eventLoop.setDirty());
 
+        // Reaction Indicator（OpenClaw-style emoji state feedback）
+        // 設計說明：ReactionIndicator 是 ContentView render 時動態加入的浮動行，
+        // 由 TuiEventBridge 的 DispatchLifecycleEvent listeners 驅動狀態切換。
+        var reactionIndicator = new ReactionIndicator(() -> {
+            if (eventLoop != null) eventLoop.setDirty();
+        });
+        contentView.setReactionIndicator(reactionIndicator);
+
         // 繫結 TUI 元件到 TuiEventBridge（domain events → TUI 更新）
-        tuiEventBridge.bind(statusView, contentView, () -> eventLoop.setDirty(), statusText);
+        tuiEventBridge.bind(statusView, contentView, () -> eventLoop.setDirty(), statusText, reactionIndicator);
 
         // 繫結 TUI 元件到 ChatDispatcher（AI 對話 dispatch 需要直接更新 TUI）
         chatDispatcher.bindTui(contentView, statusView, eventLoop, agentState);
@@ -439,13 +448,9 @@ public class TuiAdapter implements ApplicationRunner {
         // （ENTER 按下時先 appendUserInput → clear input → 才呼叫 onTextSubmit → 到這裡）
         // 不重複呼叫，避免 "hi" 出現兩次。
 
-        // 非指令輸入 → 顯示 thinking 提示（TUI-specific — LINE/Discord adapter 會用不同的 loading 機制）
+        // 設計說明：thinking indicator 已移至 ReactionIndicator（由 DispatchLifecycleEvent 驅動），
+        // 不再需要手動 appendLine("thinking...") + removeLastLine()。
         boolean isChat = !text.startsWith("/");
-        if (isChat) {
-            contentView.appendLine(new org.jline.utils.AttributedString("\u23f3 thinking...",
-                    org.jline.utils.AttributedStyle.DEFAULT.foreground(245)));
-            eventLoop.setDirty();
-        }
 
         // 六角架構：Adapter 直接呼叫 Port（不經 IncomingMessageEvent）
         log.debug("[PROCESS-INPUT] before handleInput: text='{}', isChat={}", text, isChat);
@@ -459,7 +464,7 @@ public class TuiAdapter implements ApplicationRunner {
                                 result != null ? result.substring(0, Math.min(200, result.length()))
                                         .replace("\n", "\\n") : "(null)");
                         if (isChat) {
-                            contentView.removeLastLine();
+                            // REMOVED: contentView.removeLastLine() — ReactionIndicator replaces manual thinking line
                             contentView.appendAiReply(result);
                         } else {
                             contentView.appendCommandOutput(result);
@@ -468,7 +473,7 @@ public class TuiAdapter implements ApplicationRunner {
                     }
                     @Override public void onError(String message) {
                         log.info("[CALLBACK-ERROR] isChat={}, message='{}'", isChat, message);
-                        if (isChat) contentView.removeLastLine();
+                        // REMOVED: contentView.removeLastLine() — ReactionIndicator replaces manual thinking line
                         contentView.appendError(message);
                         eventLoop.setDirty();
                     }
