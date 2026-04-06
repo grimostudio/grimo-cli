@@ -33,12 +33,12 @@ public class GrimoHome {
     }
 
     /**
-     * 初始化全域目錄結構：建立所有必要子目錄，並在 config.yaml 不存在時寫入預設範例。
+     * 初始化全域目錄結構：建立所有必要子目錄。
      *
      * 設計說明：
      * - conversations 目錄已棄用，不再建立
      * - projects 目錄供 ProjectContext 使用，儲存 per-project 的對話與元資料
-     * - 已存在的 config.yaml 不會被覆蓋，保留使用者自訂內容
+     * - config.yaml 由 GrimoConfig 建構子負責建立預設內容（不在此處理）
      */
     public void initialize() {
         createDir(tasksDir());
@@ -46,89 +46,7 @@ public class GrimoHome {
         createDir(agentsDir());
         createDir(logsDir());
         createDir(projectsDir());
-        createDefaultConfig();
     }
-
-    private void createDefaultConfig() {
-        Path config = configFile();
-        if (Files.exists(config)) {
-            return;
-        }
-        try {
-            Files.writeString(config, DEFAULT_CONFIG);
-        } catch (IOException e) {
-            // config 建立失敗不中斷啟動，使用者可以手動建立
-        }
-    }
-
-    private static final String DEFAULT_CONFIG = """
-            # Grimo CLI 設定檔
-            # 文件位置：~/.grimo/config.yaml
-
-            # Agent 設定
-            #agents:
-            #  default: claude          # 預設使用的 agent（claude / gemini / codex）
-            #  model: claude-sonnet-4-6 # 預設模型
-
-            # Per-agent 設定
-            #agent-options:
-            #  claude:
-            #    model: claude-sonnet-4-6
-            #  gemini:
-            #    model: gemini-2.5-pro
-            #  codex:
-            #    model: o4-mini
-
-            # MCP Server 定義（Portable MCP，自動轉成各 CLI 原生格式）
-            # 支援 type: stdio / sse / http
-            #mcp:
-            #  filesystem:
-            #    type: stdio
-            #    command: npx
-            #    args: [-y, "@modelcontextprotocol/server-filesystem", /tmp]
-            #  deepwiki:
-            #    type: sse
-            #    url: https://mcp.deepwiki.com/sse
-
-            # Sandbox 設定（agent 執行環境）
-            # skill 和 MCP 會自動配置到 sandbox 中讓 CLI agent 使用
-            #sandbox:
-            #  mode: local              # local | docker | e2b（預設 local）
-            #  docker:
-            #    image: ghcr.io/spring-ai-community/agents-runtime:latest
-            #  e2b:
-            #    api-key: ${E2B_API_KEY}
-            #    template: base
-
-            # Tier 對應表
-            # 預設由內建 application.yaml 提供（零配置即可用）
-            # 如需客製，取消註解並調整（per-tier 覆寫，未設定的 tier 用內建值）：
-            #tier-models:
-            #  lite:
-            #    - agent: gemini
-            #      model: gemini-2.5-flash-lite
-            #  std:
-            #    - agent: claude
-            #      model: claude-sonnet-4-6
-            #  pro:
-            #    - agent: claude
-            #      model: claude-opus-4-6
-
-            # Tier 關鍵字觸發（per-turn）
-            tier-keywords:
-              pro:
-                - 仔細想
-                - 深入分析
-                - 好好想
-                - think hard
-                - think deeply
-              lite:
-                - 快速
-                - 簡單說
-                - 大概看一下
-                - quickly
-                - briefly
-            """;
 
     /**
      * 檢查全域目錄是否已初始化（至少 tasks 和 skills 目錄存在）。

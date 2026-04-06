@@ -3,7 +3,6 @@ package io.github.samzhu.grimo.home;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -23,7 +22,7 @@ class GrimoHomeTest {
         assertThat(tempDir.resolve("agents")).isDirectory();
         assertThat(tempDir.resolve("logs")).isDirectory();
         assertThat(tempDir.resolve("projects")).isDirectory();
-        assertThat(tempDir.resolve("config.yaml")).isRegularFile();
+        // Note: config.yaml is now created by GrimoConfig constructor, not by GrimoHome.initialize()
     }
 
     @Test
@@ -34,11 +33,11 @@ class GrimoHomeTest {
     }
 
     @Test
-    void initializeShouldNotOverwriteExistingConfig() throws Exception {
+    void initializeShouldNotCreateConfigFile() {
+        // GrimoHome.initialize() no longer creates config.yaml — GrimoConfig handles its own defaults
         var home = new GrimoHome(tempDir);
-        Files.writeString(tempDir.resolve("config.yaml"), "custom: true\n");
         home.initialize();
-        assertThat(tempDir.resolve("config.yaml")).content().contains("custom: true");
+        assertThat(tempDir.resolve("config.yaml")).doesNotExist();
     }
 
     @Test
