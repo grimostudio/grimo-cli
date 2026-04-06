@@ -60,7 +60,8 @@
 
 | 名詞 | 英文 | 說明 |
 |------|------|------|
-| **GrimoHome** | Grimo Home | `~/.grimo`，應用程式全域資料目錄，存放 config、skills、tasks、agents、logs。路徑固定，不可配置。位於獨立 top-level 模組 `home/`。 |
+| **GrimoHome** | Grimo Home | `~/.grimo`，應用程式全域資料目錄，存放 config、skills、tasks、agents、logs。路徑固定，不可配置。位於獨立 top-level 模組 `home/`。`initialize()` 只建目錄結構；config.yaml 由 GrimoConfig 建構子負責建立。 |
+| **GrimoConfig** | Grimo Config | `~/.grimo/config.yaml` 的 config bean。建構子負責建立預設 config.yaml（若不存在）並將所有欄位載入為 bean fields。getter 讀欄位（不讀檔），setter 更新欄位並即時寫檔（write-through）。欄位：`defaultAgent`、`defaultModel`、`mcpServers`、`sandboxMode`。不再包含 `tierKeywords`、`skillOverrides`、`agentOptions`（已移除）。 |
 | **ProjectContext** | Project Context | 啟動時的 CWD，代表目前操作的專案。專案資料存放在 `~/.grimo/projects/{encoded-cwd}/`。位於獨立 top-level 模組 `project/`。 |
 | **SessionManager** | Session Manager | Session 生命週期管理者（`@Bean`，非 `@Component`）。建立/切換/列出 session，維護 `sessions-index.json`，提供 list/resume/info API。持有 `SessionWriter` 單一 instance，其他元件透過 `getWriter()` 取得。 |
 | **sessions-index.json** | Sessions Index | Per-project session 索引檔，位於 `~/.grimo/projects/{encoded-cwd}/sessions-index.json`。記錄所有 session 的 ID、時間、訊息數、首句、agent、branch。每次訊息寫入時即時更新（atomic write）。 |
@@ -112,9 +113,8 @@
 | **McpServerCatalog** | MCP Server Catalog | 所有 MCP server 定義的 immutable 集合。由 `McpCatalogBuilder` 從 `config.yaml` 建構，傳入 `AgentClient.Builder.mcpServerCatalog()` 後由 SDK 處理分發。 |
 | **WorktreeProvisioner** | Worktree Provisioner | 派遣 agent 前建立獨立 git worktree + 將 Grimo 管理的 Skill symlink 到 `.agents/skills/`（跨 agent 標準路徑），讓 CLI agent 原生發現。完成後清理 worktree、保留有變更的分支。位於 `shared.sandbox` package。 |
 | **Sandbox** | Sandbox | Agent 執行環境。Local 模式直接使用工作目錄（symlink skill）；Docker/E2B 模式使用隔離容器（Phase B/C）。由 `SandboxDetector` 偵測可用後端，`WorktreeProvisioner` 負責環境配置。 |
-| **TierRouter** | Tier Router | 解析 tier 來源（6 級優先順序），查 fallback list（per-tier：user config `tier-models` > built-in `grimo.tier-models`），回傳 `TierSelection(agentId, model, tier, source)`。 |
+| **TierRouter** | Tier Router | 解析 tier 來源（sessionTier → user-default → STD fallback），查 fallback list（built-in `grimo.tier-models`），回傳 `TierSelection(agentId, model, tier, source)`。 |
 | **TierOptionsFactory** | Tier Options Factory | 根據 agentId 建構對應的 per-request `AgentOptions` 子型別（ClaudeAgentOptions / GeminiAgentOptions / CodexAgentOptions），含 tier 選定的 model。在 `AgentClient.run(goalText, agentOptions)` 傳入以覆寫 defaultOptions。 |
-| **TierKeywordDetector** | Tier Keyword Detector | 從使用者輸入偵測 tier 關鍵字（如「仔細想」→ pro）。只影響該輪，不改 session 設定。多 tier 同時匹配取最高（PRO > STD > LITE）。 |
 | **SkillAnalyzer** | Skill Analyzer | 安裝 Skill 時用 lite tier agent 自動分析 Skill body 複雜度，判定 tier 並寫入 metadata。已標 grimo.tier 的 Skill 跳過分析。 |
 | **Plan Mode** | Plan Mode | 主對話預設模式。Agent 可讀程式碼、寫 docs，但禁止修改 src/。Claude 用 disallowedTools，Codex 用 ApprovalPolicy.SMART。 |
 | **Dev Mode** | Dev Mode | 開發模式。Agent 全開（yolo=true），搭配 worktree 隔離。由 skill metadata.grimo.execution=isolated 自動觸發，或使用者 /dev 指令。 |
@@ -142,10 +142,9 @@
 | 指令註冊 | `BuiltinCommandRegistrar` | 啟動時將所有 builtin 指令註冊到 CommandDispatcher（@PostConstruct）。 |
 | 動態指令 | `DynamicCommandRegistrar` | 監聽 `AgentDetectedEvent` / `SkillInstalledEvent`，自動在 CommandDispatcher 註冊 /agentId、@agentId、/skillName 指令。 |
 | Skill 執行 | `SkillExecutor` | Skill 指令執行。讀 SKILL.md metadata → execution mode 判斷：`isolated` → DevModeRunner（worktree + 全開）、`inline` → ChatDispatcher。Grimo 的 orchestrator 角色。 |
-| Tier 路由 | `TierRouter` | 6 級優先順序 → fallback list → `AgentModel.isAvailable()` |
+| Tier 路由 | `TierRouter` | sessionTier → user-default → STD fallback → `AgentModel.isAvailable()` |
 | Tier 選項 | `TierOptionsFactory` | `AgentClient.run(goal, agentOptions)` per-request model 覆寫 |
-| Tier 偵測 | `TierKeywordDetector` | config.yaml `tier-keywords` 字串比對 |
-| Tier 指令 | `TierCommands` | Spring Shell @Command: `/tier`, `/skill-tier` |
+| Tier 指令 | `TierCommands` | Spring Shell @Command: `/tier` |
 | Skill 分析 | `SkillAnalyzer` | AgentClient + lite tier → JSON 回應解析 |
 | Worktree 隔離 | `WorktreeProvisioner` + `GitHelper` | `git worktree add/remove` via ProcessBuilder |
 
