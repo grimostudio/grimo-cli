@@ -77,7 +77,7 @@
 |------|------|------|
 | **AgentSwitchedEvent** | Agent Switched Event | `/agent-use` 執行後由 AgentCommands 發布。TUI 的 @EventListener 接收後自動刷新 status bar。 |
 | **McpCatalogChangedEvent** | MCP Catalog Changed Event | MCP server 新增/移除後發布。TUI 自動更新 mcp count。 |
-| **DevModeRunner** | Dev Mode Runner | Dev Mode 生命週期管理。建 worktree → dispatch agent（DEV 全開）→ diff summary → 發布事件。由 /dev 指令或 skill 自動觸發。 |
+| **DevModeRunner** | Dev Mode Runner | Dev Mode 生命週期管理。建 worktree → dispatch Sub-agent（DEV 全開）→ diff summary → 發布事件。**只在使用者明確切入 Dev Mode 時被使用** — Grimo / Main-agent 不會主動開 Dev Mode。觸發來源：使用者打 `/dev` 指令，或使用者執行的 skill 帶 `metadata.grimo.execution=isolated`。 |
 | **DevModeEnteredEvent** | Dev Mode Entered Event | Dev Mode 進入時發布。TUI 顯示 worktree 資訊。 |
 | **DevModeCompletedEvent** | Dev Mode Completed Event | Dev Mode 完成時發布。TUI 顯示 diff summary + merge 提示。 |
 | **SessionEventListener** | Session Event Listener | `@EventListener` 監聽 `DevModeEnteredEvent` / `DevModeCompletedEvent` / `AgentCallRecordedEvent`，透過 `SessionManager.getWriter()` 寫入紀錄。遵循 event-driven 設計。 |
@@ -109,8 +109,9 @@
 
 | 名詞 | 英文 | 說明 |
 |------|------|------|
-| **Main-agent** | Main-agent | Grimo 主對話派遣的 CLI agent 實例（claude / gemini / codex）。由 `ChatDispatcher` 的三個主對話 entry 啟動：`dispatch(String)`（TUI）、`dispatch(String, callback)`（LINE/Discord）、`dispatchTo(agentId, text, callback)`（`@agent` / `/agent`）。直接面對使用者，**注入 long-term memory**，使用自己的 native `Read` / `Edit` / `Write` tool 管理 memory 檔案。Main-agent 是**角色**（跨多次 dispatch 持續），不是單一 process — 每次 dispatch 都是一個 fresh CLI subprocess。對偶於 Sub-agent。 |
-| **Sub-agent** | Sub-agent | Grimo 派遣的獨立 CLI agent 實例，由 `SkillExecutor`（inline 或 isolated 模式）/ `DevModeRunner` 啟動。Fire-and-forget worker — **不**注入 long-term memory、**不**共享主對話歷史。接收明確的 goal，完成後回傳摘要結果給 Main-agent，使用者跟 Main-agent 溝通結果（即使 sub-agent 做不好也是跟 Main-agent 講）。程式碼中使用 `SubAgent`（CamelCase），metadata key 使用 `subagents`（無連字號）。對偶於 Main-agent。 |
+| **Dispatch** | Dispatch | 派 agent 處理一次任務的完整動作。流程：tier 路由 → 建 `AgentClient` subprocess → 傳 goal text → 同步等回應 → 拿結果文字。動詞用「dispatch」，名詞用「一次 dispatch」。Main-agent 由 `ChatDispatcher` 的三個 entry 派出，Sub-agent 則由 Main-agent 在處理過程中決定派出（執行細節由 Grimo Java 側 `SkillExecutor` / `DevModeRunner` 代為 spawn）。 |
+| **Main-agent** | Main-agent | 跟使用者對話的 CLI agent 實例（claude / gemini / codex 之一）。擁有長期記憶（USER.md / GLOBAL.md / PROJECT.md），維持對話歷程，**接收使用者指示或開發計劃後，決定何時派 Sub-agent 處理子任務**。由 `ChatDispatcher` 啟動，使用 native `Read` / `Edit` / `Write` tool 管理 memory 檔案。Main-agent 是**角色**（跨多次 dispatch 持續），不是單一 process — 每次 dispatch 都是 fresh CLI subprocess。 |
+| **Sub-agent** | Sub-agent | Main-agent 為了完成子任務派出去的隔離 worker。執行特定工作（跑 skill、隔離 worktree 開發、lite tier 分析）後回傳結果給 Main-agent，**不**注入長期記憶、**不**共享主對話歷史。Main-agent 收到結果後在主對話跟使用者報告。即使 Sub-agent 出問題，使用者也是跟 Main-agent 講，由 Main-agent 重派或修正。**Grimo 不會主動 spawn Sub-agent** — 一定來自 Main-agent 的決策或使用者明確指令（例如 `/dev` 由使用者主動切入 Dev Mode）。實作上 Sub-agent 的 spawn 動作由 Grimo Java 側元件 `SkillExecutor` / `DevModeRunner` 代表 Main-agent 執行。程式碼中使用 `SubAgent`（CamelCase），metadata key 使用 `subagents`（無連字號）。 |
 | **Tier** | Tier | 任務執行的能力等級。三級：`lite`（快速便宜）、`std`（日常主力）、`pro`（深度推理）。每級對應一個 agent+model fallback list，定義於 `application.yaml` `grimo.tier-models`，使用者可在 `config.yaml` `tier-models` 覆寫。 |
 | **Grimo Skill** | Grimo Skill | 放在 `~/.grimo/skills/` 的 SKILL.md，格式對齊 Agent Skills 開放標準（[agentskills.io](https://agentskills.io/specification)）。定義 Grimo 的調度指令（派誰、怎麼分工）。Grimo 擴充欄位放在 `metadata` map 裡（`grimo.tier`、`grimo.subagents`、`grimo.execution`）。第三方 Skill 直接安裝不會解析失敗。 |
 | **Agent Skill** | Agent Skill | 各 CLI agent 自己的 skill（如 `.claude/skills/`、`.gemini/agents/`）。由 agent 自己讀取和執行，Grimo 不介入。 |
@@ -122,7 +123,7 @@
 | **TierOptionsFactory** | Tier Options Factory | 根據 agentId 建構對應的 per-request `AgentOptions` 子型別（ClaudeAgentOptions / GeminiAgentOptions / CodexAgentOptions），含 tier 選定的 model。在 `AgentClient.run(goalText, agentOptions)` 傳入以覆寫 defaultOptions。 |
 | **SkillAnalyzer** | Skill Analyzer | 安裝 Skill 時用 lite tier agent 自動分析 Skill body 複雜度，判定 tier 並寫入 metadata。已標 grimo.tier 的 Skill 跳過分析。 |
 | **Plan Mode** | Plan Mode | 主對話預設模式。Agent 可讀程式碼、寫 docs，但禁止修改 src/。Claude 用 disallowedTools，Codex 用 ApprovalPolicy.SMART。 |
-| **Dev Mode** | Dev Mode | 開發模式。Agent 全開（yolo=true），搭配 worktree 隔離。由 skill metadata.grimo.execution=isolated 自動觸發，或使用者 /dev 指令。 |
+| **Dev Mode** | Dev Mode | 開發模式。Sub-agent 全開（yolo=true）+ 隔離 worktree。**由使用者主動切入** — Grimo 跟 Main-agent 都不會自動開 Dev Mode。使用者可以打 `/dev` 指令直接進入，或執行帶有 `metadata.grimo.execution=isolated` 的 skill（這個 metadata 仍然代表「使用者明知這個 skill 是隔離模式才執行」）。Dev Mode 跟主對話 Plan Mode 是互斥的兩種使用情境。 |
 | **ExecutionMode** | Execution Mode | `TierOptionsFactory.ExecutionMode` enum: PLAN（限制）/ DEV（全開）。決定 agent 的工具權限等級。 |
 | **Worktree** | Worktree | 每次 agent 派遣時建立的獨立 git worktree。Agent 在 worktree 中工作，完成後使用者決定是否 merge。非 git 目錄 fallback 到 CWD（現有行為）。 |
 | **WorktreeInfo** | Worktree Info | `WorktreeInfo(workDir, branchName, baseSha, provisionedSkills, isWorktree)` record。記錄 worktree 的工作目錄、分支名稱、建立時的 HEAD SHA、已配置 skill。 |

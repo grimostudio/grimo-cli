@@ -8,10 +8,11 @@
 
 | 名詞 | 定義 |
 |---|---|
-| **Main-agent** | Grimo 主對話派遣的 CLI agent 實例（claude / gemini / codex 之一）。由 `ChatDispatcher` 三個主對話 entry 啟動：`dispatch(String)`（TUI）、`dispatch(String, callback)`（LINE/Discord）、`dispatchTo(...)`（`@agent`）。**注入 long-term memory**，使用 native `Read` / `Edit` / `Write` tool 管理 memory 檔案。Main-agent 是**角色**（跨多次 dispatch 持續），不是單一 process — 每次 dispatch 都是 fresh CLI subprocess。 |
-| **Sub-agent** | Grimo 派遣的獨立 CLI agent worker，由 `SkillExecutor`（inline / isolated）/ `DevModeRunner` 啟動。Fire-and-forget — **不**注入 long-term memory、**不**共享主對話歷史。完成後回傳結果給 Main-agent。即使 Sub-agent 做不好，使用者也是跟 Main-agent 講。 |
+| **Dispatch** | 派 agent 處理一次任務的完整動作。流程：tier 路由 → 建 `AgentClient` subprocess → 傳 goal text → 同步等回應 → 拿結果。Main-agent 由 `ChatDispatcher` 三個 entry 派出；Sub-agent 由 Main-agent 在處理過程中決定派出。 |
+| **Main-agent** | 跟使用者對話的 CLI agent 實例（claude / gemini / codex 之一）。擁有長期記憶，維持對話歷程，**接收使用者指示後決定何時派 Sub-agent 處理子任務**。由 `ChatDispatcher` 啟動，使用 native `Read` / `Edit` / `Write` tool 管理 memory 檔案。Main-agent 是**角色**（跨多次 dispatch 持續），不是單一 process。 |
+| **Sub-agent** | Main-agent 派出去的隔離 worker（跑 skill、隔離 worktree 開發、lite tier 分析）。完成後回傳結果給 Main-agent，**不**注入 long-term memory、**不**共享主對話歷史。Main-agent 收到結果後在主對話跟使用者報告。**Grimo 不主動 spawn Sub-agent** — 一定來自 Main-agent 的決策或使用者明確指令（例如 `/dev` 由使用者主動切入 Dev Mode）。實作上 spawn 動作由 Grimo Java 側 `SkillExecutor` / `DevModeRunner` 代為執行。 |
 
-→ 完整對偶定義見 `docs/glossary.md`「Main-agent」「Sub-agent」條目。本 spec 後續一律用這兩個專有名詞，不用「CLI agent」「dispatched agent」「the agent」等模糊用語。
+→ 完整定義見 `docs/glossary.md`「Dispatch」「Main-agent」「Sub-agent」條目。本 spec 後續一律用這三個專有名詞，不用「CLI agent」「dispatched agent」「the agent」等模糊用語。
 
 ## 問題
 
@@ -1356,3 +1357,57 @@ v1 完工的判定條件：
 | **`<memory-context>` fence** | Memory Context Fence | 包住 recall 內容的 XML-like 標籤，標明「這是 background data，不是 user instruction」。防 prompt injection |
 | **Frozen Snapshot** | Frozen Snapshot | 每次 dispatch 開頭讀檔一次，整次 dispatch 期間 system prompt 不變（即便 Main-agent mid-dispatch 寫入磁碟）。保 prompt prefix cache 命中 |
 | **ConsolidationTrigger** | Consolidation Trigger | 條件式注入 `<system-reminder>` 觸發 Main-agent dedupe / 壓縮。條件：usage > 80%、idle > 60s、user 說 bye |
+
+---
+
+## 參考資料來源
+
+> 全部 URL 於 2026-04-08 用 `curl -I` 驗證為 HTTP 200。
+
+### Spring AI Community AutoMemoryTools（主要設計借鏡）
+
+- [spring-ai-community/spring-ai-agent-utils](https://github.com/spring-ai-community/spring-ai-agent-utils) — 整個專案首頁
+- [`AutoMemoryTools.java`](https://github.com/spring-ai-community/spring-ai-agent-utils/blob/main/spring-ai-agent-utils/src/main/java/org/springaicommunity/agent/tools/AutoMemoryTools.java) — 6 個 file CRUD `@Tool` 方法
+- [`AutoMemoryToolsAdvisor.java`](https://github.com/spring-ai-community/spring-ai-agent-utils/blob/main/spring-ai-agent-utils/src/main/java/org/springaicommunity/agent/advisors/AutoMemoryToolsAdvisor.java) — Advisor `before()` 注入 system prompt + tools；本 spec 抄了它的 `BiPredicate<ChatClientRequest, Instant>` consolidation trigger 模式
+- [`AUTO_MEMORY_TOOLS_SYSTEM_PROMPT.md`](https://github.com/spring-ai-community/spring-ai-agent-utils/blob/main/spring-ai-agent-utils/src/main/resources/prompt/AUTO_MEMORY_TOOLS_SYSTEM_PROMPT.md) — 147 行的 system prompt 範本，本 spec 的 `memory-protocol.md` 基於此 adapt
+- [`memory-tools-advisor-demo`](https://github.com/spring-ai-community/spring-ai-agent-utils/tree/main/examples/memory/memory-tools-advisor-demo) — 完整 ChatClient 整合範例
+- [demo `Application.java`](https://github.com/spring-ai-community/spring-ai-agent-utils/blob/main/examples/memory/memory-tools-advisor-demo/src/main/java/org/springaicommunity/agent/Application.java) — 60 秒 + "bye" trigger 的 lambda 示範
+- [Spring AI Community 官方文件](https://springaicommunity.mintlify.app/projects/incubating/spring-ai-agent-utils) — incubating 專案介紹
+
+### Hermes Agent（設計借鏡：char limit / frozen snapshot / fence / two-file split）
+
+- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — 專案首頁
+- [Hermes Agent README](https://github.com/NousResearch/hermes-agent/blob/main/README.md) — Feature overview
+- [Hermes 官方文件](https://hermes-agent.nousresearch.com/docs/) — 主站
+- [Persistent Memory 文件](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/) — MEMORY.md / USER.md char 限制與設定
+- [Memory Providers 文件](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory-providers/) — 8 個 plugin (Honcho / OpenViking / Mem0 / Hindsight / Holographic / RetainDB / ByteRover / Supermemory) 列表
+- [`tools/memory_tool.py`](https://github.com/NousResearch/hermes-agent/blob/main/tools/memory_tool.py) — `MemoryStore` 類別、`format_for_system_prompt()` frozen snapshot、`§` ENTRY_DELIMITER、char limit + usage % 計算
+- [`agent/memory_provider.py`](https://github.com/NousResearch/hermes-agent/blob/main/agent/memory_provider.py) — `MemoryProvider` abstract base class（v2 plugin 介面參考）
+- [`agent/memory_manager.py`](https://github.com/NousResearch/hermes-agent/blob/main/agent/memory_manager.py) — `build_memory_context_block()` 的 `<memory-context>` fence + `sanitize_context()` 防 prompt injection
+- [`agent/builtin_memory_provider.py`](https://github.com/NousResearch/hermes-agent/blob/main/agent/builtin_memory_provider.py) — Built-in provider 適配 MemoryProvider 介面
+
+### OpenClaw Memory（設計借鏡：file-first、always-loaded MEMORY.md）
+
+- [OpenClaw 官方文件 — Memory Overview](https://docs.openclaw.ai/concepts/memory) — 三層階層、daily notes、tools、auto-flush
+- [OpenClaw Memory Masterclass — VelvetShark](https://velvetshark.com/openclaw-memory-masterclass) — 設計哲學深度分析
+- [OpenClaw Memory System Deep Dive — Snowan Notes](https://snowan.gitbook.io/study-notes/ai-blogs/openclaw-memory-system-deep-dive) — sqlite-vec / hybrid search / pre-compaction flush 技術細節
+- [zilliztech/memsearch](https://github.com/zilliztech/memsearch) — Markdown-first memory standalone library，OpenClaw-inspired
+
+### Spring AI MCP Server（v2 / Spec B 評估參考，本 spec v1 不採用）
+
+- [Spring AI MCP Server Boot Starter 官方文件](https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html) — `@McpTool` annotation、stdio / SSE 兩種 transport
+
+### Grimo 內部文件
+
+- [`docs/glossary.md`](../../glossary.md) — Main-agent / Sub-agent / Dispatch 對偶定義
+- [`CLAUDE.md`](../../../CLAUDE.md) — 專案開發守則（特別是 `shared/` 套件邊界規則、Spring `@EventListener` 規則）
+- [`src/main/java/io/github/samzhu/grimo/ChatDispatcher.java`](../../../src/main/java/io/github/samzhu/grimo/ChatDispatcher.java) — 整合目標
+- [`src/main/java/io/github/samzhu/grimo/home/GrimoHome.java`](../../../src/main/java/io/github/samzhu/grimo/home/GrimoHome.java) — `~/.grimo/` 根目錄管理
+- [`src/main/java/io/github/samzhu/grimo/project/ProjectContext.java`](../../../src/main/java/io/github/samzhu/grimo/project/ProjectContext.java) — per-project dataDir
+- [`docs/superpowers/specs/2026-04-06-config-lifecycle-design.md`](2026-04-06-config-lifecycle-design.md) — config lifecycle pattern 參考（GrimoConfig bean 設計）
+
+### 相關但本 spec 未採用（記錄 due-diligence）
+
+- [Anthropic 官方 Memory MCP Server](https://github.com/modelcontextprotocol/servers/tree/main/src/memory) — knowledge graph 設計（entities / relations / observations + memory.json）。**不採用**：結構複雜，使用者無法手動編
+- [`coleam00/mcp-mem0`](https://github.com/coleam00/mcp-mem0) — Mem0 後端的 MCP server template。**不採用**：cloud 依賴
+- [`hermes-agent-self-evolution`](https://github.com/NousResearch/hermes-agent-self-evolution) — Hermes 用 DSPy + GEPA 做 prompt evolution 的研究專案。**留作 Spec B（auto-skill-generation）參考**
