@@ -1423,13 +1423,26 @@ public enum MemoryFile {
 
 把 memory 注入跟 emit-block 解析包成一個 `AgentCallAdvisor`，**取代**之前在 `ChatDispatcher` 三個 entry 各自手動 prepend / extract 的程式碼。
 
+> **SDK API 真實面**（已從 [agent-client repo source](https://github.com/spring-ai-community/agent-client/tree/main/agent-client-core/src/main/java/org/springaicommunity/agents/client) 驗證）：
+> - `AgentClientRequest` 是 `record(Goal goal, Path workingDirectory, AgentOptions options, Map<String,Object> context)`
+> - `AgentClientResponse` 是 `record(AgentResponse agentResponse, Map<String,Object> context)`
+> - `Goal` 是 `class(String content, Path workingDirectory, AgentOptions options)` with public ctors and getters
+> - **沒有** `mutate()` 或 builder 方法 — 直接用 `new` 構造新 record / class instance
+> - `AgentResponse` 是 model 層 class，含 `(List<AgentGeneration>, AgentResponseMetadata)` 構造子
+> - `AgentGeneration` 含 `(String text, AgentGenerationMetadata metadata)` 構造子
+
 ```java
 package io.github.samzhu.grimo.memory.advisor;
 
-import org.springaicommunity.agents.client.advisor.api.AgentCallAdvisor;
-import org.springaicommunity.agents.client.advisor.api.AgentCallAdvisorChain;
+import java.util.List;
+
 import org.springaicommunity.agents.client.AgentClientRequest;
 import org.springaicommunity.agents.client.AgentClientResponse;
+import org.springaicommunity.agents.client.Goal;
+import org.springaicommunity.agents.client.advisor.api.AgentCallAdvisor;
+import org.springaicommunity.agents.client.advisor.api.AgentCallAdvisorChain;
+import org.springaicommunity.agents.model.AgentGeneration;
+import org.springaicommunity.agents.model.AgentResponse;
 
 @Component
 public class MainAgentMemoryAdvisor implements AgentCallAdvisor {
@@ -1454,51 +1467,90 @@ public class MainAgentMemoryAdvisor implements AgentCallAdvisor {
 
     @Override
     public int getOrder() {
-        // 設計說明：晚於 GrimoSessionAdvisor 執行 before-hook，
-        // 確保 session JSONL 寫入的是 raw user input 而非 prefixed goal。
-        // GrimoSessionAdvisor 預設 order = HIGHEST_PRECEDENCE + 300，
-        // memory advisor 用 + 400 確保 session 先看到 request。
+        // 設計說明：較大 order = before-hook 較晚執行 = 較早 after-hook 執行
+        // 我們希望 session advisor 的 before-hook 先看到 raw user input。
+        // 假設 GrimoSessionAdvisor 用 DEFAULT_AGENT_PRECEDENCE_ORDER + 300，
+        // memory advisor 用 + 400 → memory 的 before 在 session 之後跑 →
+        // session 進到 nextCall 時看到的還是 raw request。
+        // 這個 order 在實作階段需要對照實際 GrimoSessionAdvisor 設定再做最終調整。
         return AgentCallAdvisor.DEFAULT_AGENT_PRECEDENCE_ORDER + 400;
     }
 
     @Override
     public AgentClientResponse adviseCall(AgentClientRequest request,
                                           AgentCallAdvisorChain chain) {
-        // === BEFORE: load snapshot + prepend memory protocol ===
-        MemorySnapshot snapshot = memoryStore.loadSnapshot();
-        String prefixedGoal = promptBuilder.build(snapshot, request.goal());
-        AgentClientRequest newRequest = request.mutate()
-                .goal(prefixedGoal)
-                .build();
+        try {
+            // === BEFORE: load snapshot + prepend memory protocol ===
+            MemorySnapshot snapshot = memoryStore.loadSnapshot();
+            String rawGoal = request.goal().getContent();
+            String prefixedGoal = promptBuilder.build(snapshot, rawGoal);
 
-        log.debug("[MEMORY-ADVISOR] prefixed goal: orig={} chars, prefixed={} chars",
-                request.goal().length(), prefixedGoal.length());
+            // 構造新 Goal（保留原 wd / options）
+            Goal newGoal = new Goal(
+                prefixedGoal,
+                request.goal().getWorkingDirectory(),
+                request.goal().getOptions()
+            );
+            // 構造新 AgentClientRequest（記得保留 context map 以維持 advisor 間通訊）
+            AgentClientRequest newRequest = new AgentClientRequest(
+                newGoal,
+                request.workingDirectory(),
+                request.options(),
+                request.context()
+            );
 
-        // === CALL ===
-        AgentClientResponse response = chain.nextCall(newRequest);
+            log.debug("[MEMORY-ADVISOR] prefixed goal: orig={} chars, prefixed={} chars",
+                    rawGoal.length(), prefixedGoal.length());
 
-        // === AFTER: extract <grimo-memory> blocks, write, return stripped ===
-        String rawResult = response.getResult();
-        var writeResult = memoryWriter.extractAndWrite(rawResult);
-        if (writeResult.hasWrites()) {
-            log.info("[MEMORY-ADVISOR] {} block(s) written this turn", writeResult.ops().size());
+            // === CALL ===
+            AgentClientResponse response = chain.nextCall(newRequest);
+
+            // === AFTER: extract <grimo-memory> blocks, write, return stripped ===
+            String rawResult = response.getResult();
+            var writeResult = memoryWriter.extractAndWrite(rawResult);
+            if (writeResult.hasWrites()) {
+                log.info("[MEMORY-ADVISOR] {} block(s) written this turn", writeResult.ops().size());
+            }
+
+            // 構造新 AgentResponse 包住 stripped visibleText
+            // 保留原 generation 的 metadata（finishReason 等），只換 text
+            AgentGeneration origGen = response.getAgentResponse().getResult();
+            AgentGeneration newGen = (origGen != null)
+                ? new AgentGeneration(writeResult.visibleText(), origGen.getMetadata())
+                : new AgentGeneration(writeResult.visibleText());
+            AgentResponse newAgentResponse = new AgentResponse(
+                List.of(newGen),
+                response.getAgentResponse().getMetadata()
+            );
+
+            // 回傳新 AgentClientResponse — 下游（contentView/callback/sessionWriter）
+            // 透過 .getResult() 看到的就是 stripped visibleText
+            return new AgentClientResponse(newAgentResponse, response.context());
+
+        } catch (Exception e) {
+            // Memory 機制不能阻斷 dispatch — 任何例外都 log 後讓 chain 直接執行
+            log.warn("[MEMORY-ADVISOR] error, falling through to raw chain.nextCall: {}", e.getMessage());
+            return chain.nextCall(request);
         }
-
-        // 回傳 stripped visibleText，下游（contentView/callback/sessionWriter）看不到 block
-        return response.mutate()
-                .result(writeResult.visibleText())
-                .build();
     }
 }
 ```
 
 **設計重點**：
 1. **單一進入點封裝整個 cross-cutting concern**：load → prepend → call → extract → strip
-2. **`getOrder()` 排在 `GrimoSessionAdvisor` 之後**（更高 order = before-hook 後執行 = session 先看到 raw goal），確保 session JSONL 寫的是原始 user input
-3. **不依賴 `ChatDispatcher`**：advisor 是純 SDK 介面，可以掛在任何 `AgentClient` builder 上
-4. **Sub-agent 自動排除**：advisor 只 inject 到 `ChatDispatcher` 的 client builder，sub-agent 元件（SkillExecutor、DevModeRunner、SkillAnalyzer）建自己的 client 時**不**註冊這個 advisor → **編譯期保證不會誤吃**
+2. **沒有 `mutate()` API** — SDK 用 record + class，每次「修改」都是構造新 instance（保留其他欄位）
+3. **保留 context map** — 構造新 request / response 時要把 `request.context()` 跟 `response.context()` 帶過去，否則 advisor 鏈間共享狀態會丟失
+4. **`getOrder()` 排在 `GrimoSessionAdvisor` 之後** — session 寫入的是 raw user input，不是 prefixed goal
+5. **try/catch 包整個 advisor body** — memory 失敗時 fallback 到 `chain.nextCall(request)` raw pass-through，**永遠不阻斷 dispatch**
+6. **不依賴 `ChatDispatcher`** — advisor 是純 SDK 介面，可以掛在任何 `AgentClient` builder 上
+7. **Sub-agent 自動排除**：advisor 只 inject 到 `ChatDispatcher` 的 client builder，sub-agent 元件（SkillExecutor、DevModeRunner、SkillAnalyzer）建自己的 client 時**不**註冊這個 advisor → **編譯期保證不會誤吃**
 
-**參考**：[Spring AI Community Agent Client Advisors](https://spring-ai-community.github.io/agent-client/api/advisors.html)
+**參考**：
+- [Spring AI Community Agent Client Advisors](https://spring-ai-community.github.io/agent-client/api/advisors.html)
+- [`AgentClientRequest.java`](https://github.com/spring-ai-community/agent-client/blob/main/agent-client-core/src/main/java/org/springaicommunity/agents/client/AgentClientRequest.java) — record source
+- [`AgentClientResponse.java`](https://github.com/spring-ai-community/agent-client/blob/main/agent-client-core/src/main/java/org/springaicommunity/agents/client/AgentClientResponse.java) — record source
+- [`Goal.java`](https://github.com/spring-ai-community/agent-client/blob/main/agent-client-core/src/main/java/org/springaicommunity/agents/client/Goal.java) — class source
+- [`JudgeAdvisor.java`](https://github.com/spring-ai-community/agent-client/blob/main/advisors/agent-advisor-judge/src/main/java/org/springaicommunity/agents/advisors/judge/JudgeAdvisor.java) — 真實的 advisor 範例
 
 ### 8. Resource: `memory-protocol.md`
 
