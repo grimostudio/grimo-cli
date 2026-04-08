@@ -243,11 +243,11 @@ UTF-8。檔案結尾保留尾隨 newline。
 ### 首次建立
 
 ```
-~/.grimo/memory/                          ← GrimoHome.initialize() 時建立目錄
-├── USER.md                               ← GrimoMemory bean 在第一次 access 時建立空檔
+~/.grimo/memory/                          ← GrimoMemory.ensureExists() lazy 建立（首次 dispatch 時）
+├── USER.md                               ← 同上
 └── GLOBAL.md                             ← 同上
 
-~/.grimo/projects/{encoded-cwd}/memory/   ← ProjectContext.initialize() 後 GrimoMemory lazy 建立
+~/.grimo/projects/{encoded-cwd}/memory/   ← GrimoMemory.ensureExists() lazy 建立
 └── PROJECT.md                            ← 同上
 ```
 
@@ -905,12 +905,6 @@ public class ChatDispatcher {
 ### 在三個 entry 加上「memory 是 background data」的 sanity 檢查
 
 由於 entry 收到的是 `userInput`，prefix 是 Grimo 自己組的，這裡不需要驗證 — `MemoryPromptBuilder.sanitizeForFence()` 已經處理 fence escape。
-
-### Log / Event payload 注意事項
-
-- `DispatchQueuedEvent` 帶的是 **原始 userInput**（給 ReactionIndicator 顯示），不是 prefixed goalText
-- `[DISPATCH-RUN] goalLen=...` log 帶 prefixed goalText 長度，方便 debug token 用量
-- Session JSONL 寫入的是 **原始 userInput**，不是 prefixed goalText（不要污染對話歷史）
 
 ### Log / Event payload 注意事項
 
