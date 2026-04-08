@@ -2184,6 +2184,7 @@ v1 完工的判定條件：
 - [AgentClient API](https://spring-ai-community.github.io/agent-client/api/agentclient.html) — `AgentClient.builder().defaultAdvisor(...)` 註冊 advisor
 - [Advisors API](https://spring-ai-community.github.io/agent-client/api/advisors.html) — `AgentCallAdvisor` 介面定義、`adviseCall(request, chain)` around-style 攔截、order / chain 機制。本 spec 的 `MainAgentMemoryAdvisor` 對齊這個 pattern
 - [Context Engineering](https://spring-ai-community.github.io/agent-client/api/context-engineering.html) — `VendirContextAdvisor` 範例（檔案層級 context），跟本 spec 的 prompt 注入是不同層級
+- [**AgentClient vs ChatClient**](https://spring-ai-community.github.io/agent-client/api/agentclient-vs-chatclient.html) — 官方對照文件。明確聲明：`AgentCallAdvisor` 只在 goal/response 邊界攔截，**不能**攔截 subprocess 內部的個別 tool call。**這正是「為什麼選 emit-block 而不是 ToolCallAdvisor」的官方依據** — Grimo 的 AgentClient 跟 ChatClient 的 `ToolCallAdvisor` 不在同一個 API 世界，無論架構怎麼設計都無法在 Grimo 用 `ToolCallAdvisor`
 
 ### Spring AI MCP Server（Future Extensions 評估參考，本 spec v1 不採用）
 
