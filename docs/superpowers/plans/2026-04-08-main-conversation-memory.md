@@ -1300,13 +1300,18 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 8: `MemoryWriter` foundation + APPEND op
+### Task 8: `MemoryAppender` (small helper for user commands)
+
+**v6 simplification**: replaces the v1 plan's Tasks 8/9/10 (MemoryWriter parser
++ APPEND + REWRITE + REPLACE). v6 doesn't parse Main-agent responses — Main-agent
+uses native Edit/Write directly. `MemoryAppender` exists only to support the
+`/memory-add` and `/memory-clear` user commands.
 
 **Files:**
-- Create: `src/main/java/io/github/samzhu/grimo/memory/MemoryWriter.java`
-- Test: `src/test/java/io/github/samzhu/grimo/memory/MemoryWriterTest.java`
+- Create: `src/main/java/io/github/samzhu/grimo/memory/MemoryAppender.java`
+- Test: `src/test/java/io/github/samzhu/grimo/memory/MemoryAppenderTest.java`
 
-- [ ] **Step 1: Write failing tests for APPEND + parser foundation**
+- [ ] **Step 1: Write the failing tests**
 
 ```java
 package io.github.samzhu.grimo.memory;
@@ -1322,602 +1327,142 @@ import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class MemoryWriterTest {
+class MemoryAppenderTest {
 
-    private MemoryWriter writer;
+    private MemoryAppender appender;
     private GrimoMemory mem;
 
     @BeforeEach
     void setUp(@TempDir Path tmp) {
         var home = new GrimoHome(tmp);
         home.initialize();
-        var ctx = new ProjectContext(home, tmp.resolve("workspace/proj"));
+        var ctx = new ProjectContext(home, tmp.resolve("workspace/p"));
         ctx.initialize();
-        this.mem = new GrimoMemory(home, ctx);
-        var store = new MemoryStore(mem, ctx);
-        this.writer = new MemoryWriter(mem, store);
+        mem = new GrimoMemory(home, ctx);
+        appender = new MemoryAppender(mem);
     }
 
     @Test
-    void noBlocksReturnsRawAndNoOps() {
-        var result = writer.extractAndWrite("Hello, just a normal response.");
-        assertThat(result.visibleText()).isEqualTo("Hello, just a normal response.");
-        assertThat(result.hasWrites()).isFalse();
-        assertThat(result.ops()).isEmpty();
+    void appendToEmptyFileWritesContentDirectly() throws Exception {
+        var result = appender.append(MemoryFile.USER, "First entry");
+
+        assertThat(result.ok()).isTrue();
+        String body = Files.readString(mem.userFile());
+        assertThat(body).contains("First entry");
+        assertThat(body).doesNotContain("---");
     }
 
     @Test
-    void singleAppendBlockIsWrittenAndStripped() throws Exception {
-        String response = """
-                Sure, I'll remember that.
-
-                <grimo-memory file="user" op="append">
-                Likes Java records over Lombok.
-                </grimo-memory>
-                """;
-        var result = writer.extractAndWrite(response);
-
-        assertThat(result.visibleText()).isEqualTo("Sure, I'll remember that.");
-        assertThat(result.ops()).hasSize(1);
-        assertThat(result.ops().get(0).file()).isEqualTo(MemoryFile.USER);
-        assertThat(result.ops().get(0).op()).isEqualTo(MemoryWriter.Op.APPEND);
-
-        String userBody = Files.readString(mem.userFile());
-        assertThat(userBody).contains("Likes Java records over Lombok.");
-    }
-
-    @Test
-    void multipleAppendBlocksAreAllWrittenAndAllStripped() throws Exception {
-        String response = """
-                Got it!
-
-                <grimo-memory file="user" op="append">
-                Prefers terse responses.
-                </grimo-memory>
-
-                <grimo-memory file="project" op="append">
-                Uses Spring Modulith.
-                </grimo-memory>
-                """;
-        var result = writer.extractAndWrite(response);
-
-        assertThat(result.visibleText()).isEqualTo("Got it!");
-        assertThat(result.ops()).hasSize(2);
-        assertThat(Files.readString(mem.userFile())).contains("Prefers terse responses.");
-        assertThat(Files.readString(mem.projectFile())).contains("Uses Spring Modulith.");
-    }
-
-    @Test
-    void appendBlockToFileWithExistingContentInsertsSeparator() throws Exception {
-        // First append
-        writer.extractAndWrite("""
-                <grimo-memory file="user" op="append">
-                First entry.
-                </grimo-memory>
-                """);
-        // Second append
-        writer.extractAndWrite("""
-                <grimo-memory file="user" op="append">
-                Second entry.
-                </grimo-memory>
-                """);
+    void appendToFileWithExistingContentInsertsSeparator() throws Exception {
+        appender.append(MemoryFile.USER, "First entry");
+        appender.append(MemoryFile.USER, "Second entry");
 
         String body = Files.readString(mem.userFile());
-        assertThat(body).contains("First entry.");
-        assertThat(body).contains("Second entry.");
+        assertThat(body).contains("First entry");
+        assertThat(body).contains("Second entry");
         assertThat(body).contains("\n\n---\n\n");
-        // Check the order
-        assertThat(body.indexOf("First entry."))
-                .isLessThan(body.indexOf("Second entry."));
+        assertThat(body.indexOf("First entry"))
+                .isLessThan(body.indexOf("Second entry"));
     }
 
     @Test
-    void invalidFileAttrIsRejectedAndNoFileCreated(@TempDir Path tmp) throws Exception {
-        // Attack vector: try to write to src/Main.java
-        String response = """
-                Innocent looking response.
+    void appendEmptyContentSkippedAndReturnsNotOk() {
+        var result = appender.append(MemoryFile.USER, "");
+        assertThat(result.ok()).isFalse();
 
-                <grimo-memory file="src/Main.java" op="append">
-                malicious code
-                </grimo-memory>
-                """;
-        var result = writer.extractAndWrite(response);
-
-        // Block stripped from visible (avoid leaking internal protocol)
-        assertThat(result.visibleText()).isEqualTo("Innocent looking response.");
-        // No write op recorded
-        assertThat(result.ops()).isEmpty();
-        // Verify NO file at src/Main.java was created in tmp or anywhere reasonable
-        assertThat(Files.exists(tmp.resolve("src/Main.java"))).isFalse();
+        var result2 = appender.append(MemoryFile.USER, "   \n\n  ");
+        assertThat(result2.ok()).isFalse();
     }
 
     @Test
-    void invalidOpAttrIsRejected() {
-        String response = """
-                <grimo-memory file="user" op="delete-all">
-                whatever
-                </grimo-memory>
-                """;
-        var result = writer.extractAndWrite(response);
-        assertThat(result.ops()).isEmpty();
-        assertThat(result.visibleText()).isEmpty();
-    }
+    void appendOverLimitStillWritesAndReturnsOver100Percent() throws Exception {
+        // USER limit = 1500
+        appender.append(MemoryFile.USER, "x".repeat(1400));
+        var result = appender.append(MemoryFile.USER, "y".repeat(500));
 
-    @Test
-    void emptyAppendBlockSkipped() {
-        String response = """
-                <grimo-memory file="user" op="append">
-
-                </grimo-memory>
-                """;
-        var result = writer.extractAndWrite(response);
-        assertThat(result.ops()).isEmpty();
-    }
-
-    @Test
-    void overlimitAppendStillWritesButLogsWarn() throws Exception {
-        // Write something close to USER limit (1500), then append more
-        String big = "x".repeat(1400);
-        writer.extractAndWrite("""
-                <grimo-memory file="user" op="append">
-                %s
-                </grimo-memory>
-                """.formatted(big));
-
-        var result = writer.extractAndWrite("""
-                <grimo-memory file="user" op="append">
-                %s
-                </grimo-memory>
-                """.formatted("y".repeat(500)));
-
-        // Still wrote (no truncation)
-        assertThat(result.ops()).hasSize(1);
+        assertThat(result.ok()).isTrue();
+        // Body length > 1500
         String body = Files.readString(mem.userFile());
+        // Body has header + content > 1500
         assertThat(body.length()).isGreaterThan(1500);
     }
+
+    @Test
+    void clearWipesContentButPreservesHeader() throws Exception {
+        appender.append(MemoryFile.USER, "Some content");
+        appender.clear(MemoryFile.USER);
+
+        String body = Files.readString(mem.userFile());
+        assertThat(body).startsWith("<!--");
+        assertThat(body).doesNotContain("Some content");
+    }
 }
 ```
 
 - [ ] **Step 2: Run, verify FAIL**
 
-- [ ] **Step 3: Implement `MemoryWriter.java` (APPEND only first)**
+Run: `./gradlew test --tests "io.github.samzhu.grimo.memory.MemoryAppenderTest"`
+Expected: FAIL — `MemoryAppender` class does not exist.
 
-Use the verbatim Java sample from spec §元件 #6 `MemoryWriter` (lines ~990–1370 of spec). Key parts:
+- [ ] **Step 3: Implement `MemoryAppender.java`**
 
-- `BLOCK_PATTERN`, `ATTR_PATTERN`, `OLD_PATTERN`, `NEW_PATTERN` regex constants
-- `extractAndWrite()` regex loop, strip whitespace cleanup
-- `processBlock()` enum dispatch — for Task 8, only handles `Op.APPEND` (`processReplace` and `processRewrite` are stubbed `return null`)
-- `processAppend()` (full implementation)
-- `atomicWrite()`, `renderHeaderComment()`, `stripHeaderComment()`, `parseAttrs()`
-- `Op` enum starts as `{ APPEND }` (only one value); we'll add REPLACE / REWRITE in Tasks 9–10
-- `WriteResult` and `WriteOp` records
+Use the verbatim Java sample from spec §元件 #7 `MemoryAppender` (around line 1130).
 
-**Note**: `Op` enum will need REPLACE / REWRITE in switch, but Tasks 9–10 handle those. For Task 8, the switch statement only has `APPEND`. To make it compile in this task, you can either:
-- (a) Use only `case APPEND -> processAppend(...)` and have a `default -> null` (Java requires exhaustiveness for switch expressions on enum, so `default` works)
-- (b) Add `REPLACE` and `REWRITE` to the enum but stub their case branches to `return null`
-
-I recommend (b) — keeps the enum complete from the start, avoids switch refactor in Tasks 9–10:
-
-```java
-public enum Op { APPEND, REPLACE, REWRITE }
-```
-
-```java
-return switch (op) {
-    case APPEND -> processAppend(target, content);
-    case REPLACE -> { log.warn("REPLACE not yet implemented"); yield null; }
-    case REWRITE -> { log.warn("REWRITE not yet implemented"); yield null; }
-};
-```
-
-Tasks 9 / 10 will replace the stub branches with real implementations.
+Key parts:
+- `@Component public class MemoryAppender`
+- Constructor: `public MemoryAppender(GrimoMemory grimoMemory)`
+- `append(MemoryFile target, String content) -> AppendResult`:
+  1. Strip + check empty → return not-ok if empty
+  2. `grimoMemory.ensureExists()`
+  3. Read existing content, strip header
+  4. Compose new body: empty existing → just trimmed; otherwise → existing + "\n\n---\n\n" + trimmed
+  5. atomicWrite header + new body + "\n"
+  6. Return AppendResult(true, newCharCount, charLimit)
+- `clear(MemoryFile target)`: ensureExists + atomicWrite header only
+- Private helpers: `atomicWrite`, `renderHeaderComment`, `stripHeaderComment`
+- Public record `AppendResult(boolean ok, int newCharCount, int charLimit)` with `usagePercent()` method
 
 - [ ] **Step 4: Run, verify PASS**
 
-Run: `./gradlew test --tests "io.github.samzhu.grimo.memory.MemoryWriterTest"`
-Expected: All Task 8 tests PASS. (No tests for REPLACE / REWRITE yet — those come in Task 9 / 10.)
+Run: `./gradlew test --tests "io.github.samzhu.grimo.memory.MemoryAppenderTest"`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/main/java/io/github/samzhu/grimo/memory/MemoryWriter.java \
-        src/test/java/io/github/samzhu/grimo/memory/MemoryWriterTest.java
-git commit -m "feat(memory): MemoryWriter foundation + APPEND op
+git add src/main/java/io/github/samzhu/grimo/memory/MemoryAppender.java \
+        src/test/java/io/github/samzhu/grimo/memory/MemoryAppenderTest.java
+git commit -m "$(cat <<'COMMIT'
+feat(memory): MemoryAppender helper for /memory-add and /memory-clear
 
-Java-side parser for <grimo-memory> blocks emitted by Main-agent.
-This commit lands:
+Small (~80 LOC) helper that supports user-explicit memory commands.
+Provides:
+- append(target, content): atomic temp+rename write, auto-inserts
+  \\n\\n---\\n\\n separator before existing content
+- clear(target): wipes file content but preserves default header
+- AppendResult record with ok flag + char count + usage percent
 
-- Block / attr / old / new regex constants
-- Op enum (APPEND/REPLACE/REWRITE - REPLACE and REWRITE stubbed)
-- WriteResult and WriteOp records
-- extractAndWrite() loop: parse blocks, dispatch by op, strip from visible
-- processAppend() with separator insertion
-- MemoryFile.valueOf() enum-based path sandbox (rejects src/, ../, etc.)
-- atomicWrite() via Files.move ATOMIC_MOVE
-- Default header comment render and strip helpers
+NOT used by MainAgentMemoryAdvisor or dispatch path. Main-agent
+writes memory directly via native Edit/Write tools (v6 design);
+this class only exists to back the user commands.
 
-Tests cover: no blocks, single append, multiple appends, append-with-existing
-(separator insertion), invalid file attr (attack vector), invalid op,
-empty block, over-limit append.
-
-Tasks 9 and 10 will implement REWRITE and REPLACE.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+COMMIT
+)"
 ```
 
 ---
 
-### Task 9: `MemoryWriter.processRewrite()`
+### Task 9: `MainAgentMemoryAdvisor` (v6 — only BEFORE-hook)
 
-**Files:**
-- Modify: `src/main/java/io/github/samzhu/grimo/memory/MemoryWriter.java`
-- Modify: `src/test/java/io/github/samzhu/grimo/memory/MemoryWriterTest.java`
-
-- [ ] **Step 1: Add failing tests for REWRITE**
-
-Append to `MemoryWriterTest`:
-
-```java
-@Test
-void rewriteBlockReplacesEntireFile() throws Exception {
-    // Pre-populate with two entries
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="append">
-            Entry one.
-            </grimo-memory>
-            """);
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="append">
-            Entry two.
-            </grimo-memory>
-            """);
-    assertThat(Files.readString(mem.userFile())).contains("Entry one.").contains("Entry two.");
-
-    // Rewrite with totally new content
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="rewrite">
-            Brand new content only.
-            </grimo-memory>
-            """);
-
-    String body = Files.readString(mem.userFile());
-    assertThat(body).contains("Brand new content only.");
-    assertThat(body).doesNotContain("Entry one.");
-    assertThat(body).doesNotContain("Entry two.");
-}
-
-@Test
-void rewriteEmptyContentSkipped() {
-    var result = writer.extractAndWrite("""
-            <grimo-memory file="user" op="rewrite">
-
-            </grimo-memory>
-            """);
-    assertThat(result.ops()).isEmpty();
-}
-```
-
-- [ ] **Step 2: Run, verify FAIL** (rewrite stub returns null)
-
-- [ ] **Step 3: Replace REWRITE stub with real implementation**
-
-Replace the `case REWRITE -> { log.warn(...); yield null; }` line with `case REWRITE -> processRewrite(target, content);` and add the method:
-
-```java
-private WriteOp processRewrite(MemoryFile target, String content) throws IOException {
-    String trimmedContent = content.strip();
-    if (trimmedContent.isEmpty()) {
-        log.warn("Skipping empty rewrite block (file={})", target);
-        return null;
-    }
-    Path path = target.resolve(grimoMemory);
-    atomicWrite(path, renderHeaderComment(target) + trimmedContent + "\n");
-    int newCharCount = trimmedContent.length();
-    warnIfOverLimit(target, newCharCount);
-    log.info("[MEMORY-WRITE] file={}, op=REWRITE, newCharCount={}/{}",
-            target, newCharCount, target.charLimit());
-    return new WriteOp(target, Op.REWRITE, trimmedContent.length(), newCharCount);
-}
-
-private void warnIfOverLimit(MemoryFile target, int newCharCount) {
-    if (newCharCount > target.charLimit()) {
-        log.warn("Memory file {} now exceeds limit: {}/{} chars (Main-agent should consolidate)",
-                target, newCharCount, target.charLimit());
-    }
-}
-```
-
-(If `warnIfOverLimit` already exists from Task 8's processAppend, leave it.)
-
-- [ ] **Step 4: Run, verify PASS**
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/main/java/io/github/samzhu/grimo/memory/MemoryWriter.java \
-        src/test/java/io/github/samzhu/grimo/memory/MemoryWriterTest.java
-git commit -m "feat(memory): MemoryWriter REWRITE op for full-file replacement
-
-Replaces the entire memory file content with new content. Used for
-consolidation when ConsolidationTrigger fires (max usage > 80%) and
-Main-agent emits a single op=\"rewrite\" block with the deduplicated
-contents.
-
-Empty content is rejected (use op=append for new entries).
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
-```
-
----
-
-### Task 10: `MemoryWriter.processReplace()` with safety rules
-
-**Files:**
-- Modify: `src/main/java/io/github/samzhu/grimo/memory/MemoryWriter.java`
-- Modify: `src/test/java/io/github/samzhu/grimo/memory/MemoryWriterTest.java`
-
-- [ ] **Step 1: Add failing tests for REPLACE (5 cases)**
-
-```java
-@Test
-void replaceSuccessUpdatesEntry() throws Exception {
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="append">
-            Likes Java records.
-            **Why:** Old reason.
-            </grimo-memory>
-            """);
-
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="replace">
-            <old>
-            Likes Java records.
-            **Why:** Old reason.
-            </old>
-            <new>
-            Likes Java records.
-            **Why:** Old reason.
-            **How to apply:** when generating DTOs.
-            </new>
-            </grimo-memory>
-            """);
-
-    String body = Files.readString(mem.userFile());
-    assertThat(body).contains("**How to apply:** when generating DTOs.");
-    assertThat(body).contains("**Why:** Old reason.");
-}
-
-@Test
-void replaceOldNotFoundIsRejected() throws Exception {
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="append">
-            Some entry.
-            </grimo-memory>
-            """);
-
-    var result = writer.extractAndWrite("""
-            <grimo-memory file="user" op="replace">
-            <old>does not exist in file</old>
-            <new>replacement</new>
-            </grimo-memory>
-            """);
-
-    assertThat(result.ops()).isEmpty();
-    String body = Files.readString(mem.userFile());
-    assertThat(body).contains("Some entry.");
-    assertThat(body).doesNotContain("replacement");
-}
-
-@Test
-void replaceAmbiguousOldIsRejected() throws Exception {
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="append">
-            duplicate text
-            </grimo-memory>
-            """);
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="append">
-            duplicate text
-            </grimo-memory>
-            """);
-
-    var result = writer.extractAndWrite("""
-            <grimo-memory file="user" op="replace">
-            <old>duplicate text</old>
-            <new>NEW</new>
-            </grimo-memory>
-            """);
-
-    assertThat(result.ops()).isEmpty();
-    String body = Files.readString(mem.userFile());
-    assertThat(body).doesNotContain("NEW");
-}
-
-@Test
-void replaceEmptyOldIsRejected() throws Exception {
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="append">
-            Pre-existing entry.
-            </grimo-memory>
-            """);
-
-    var result = writer.extractAndWrite("""
-            <grimo-memory file="user" op="replace">
-            <old></old>
-            <new>completely new content</new>
-            </grimo-memory>
-            """);
-
-    assertThat(result.ops()).isEmpty();
-    String body = Files.readString(mem.userFile());
-    assertThat(body).contains("Pre-existing entry.");
-}
-
-@Test
-void replaceWithEmptyNewDeletesAndNormalizesSeparators() throws Exception {
-    // Pre-populate with three entries
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="append">
-            entry A
-            </grimo-memory>
-            """);
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="append">
-            entry B
-            </grimo-memory>
-            """);
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="append">
-            entry C
-            </grimo-memory>
-            """);
-
-    // Delete entry B
-    writer.extractAndWrite("""
-            <grimo-memory file="user" op="replace">
-            <old>entry B</old>
-            <new></new>
-            </grimo-memory>
-            """);
-
-    String body = Files.readString(mem.userFile());
-    assertThat(body).contains("entry A");
-    assertThat(body).doesNotContain("entry B");
-    assertThat(body).contains("entry C");
-    // No dangling consecutive separators
-    assertThat(body).doesNotContain("\n\n---\n\n---\n\n");
-    // No leading/trailing dangling ---
-    assertThat(body.strip()).doesNotEndWith("---");
-    assertThat(body.replaceFirst("(?s)^<!--.*?-->\\s*", "").strip()).doesNotStartWith("---");
-}
-
-@Test
-void replaceMissingOldOrNewTagIsRejected() {
-    var result = writer.extractAndWrite("""
-            <grimo-memory file="user" op="replace">
-            just some text without nested tags
-            </grimo-memory>
-            """);
-    assertThat(result.ops()).isEmpty();
-}
-```
-
-- [ ] **Step 2: Run, verify FAIL**
-
-- [ ] **Step 3: Implement `processReplace` and `normalizeAfterDelete`**
-
-Replace the `case REPLACE -> { log.warn(...); yield null; }` stub with `case REPLACE -> processReplace(target, content);` and add:
-
-```java
-/**
- * Surgical find/replace.
- * Block content must contain <old>...</old> and <new>...</new>.
- *
- * Safety rules:
- *   1. <old> must appear EXACTLY ONCE in the file (whitespace-sensitive)
- *   2. <old> must NOT be empty (use op="rewrite" for whole-file replacement)
- *   3. <new> empty means delete; surrounding "\n\n---\n\n" separators are normalized
- */
-private WriteOp processReplace(MemoryFile target, String content) throws IOException {
-    Matcher oldM = OLD_PATTERN.matcher(content);
-    Matcher newM = NEW_PATTERN.matcher(content);
-    if (!oldM.find() || !newM.find()) {
-        log.warn("Rejected replace block on {}: missing <old> or <new> tag", target);
-        return null;
-    }
-    String oldText = oldM.group(1).strip();
-    String newText = newM.group(1).strip();
-
-    if (oldText.isEmpty()) {
-        log.warn("Rejected replace on {}: <old> is empty (use op=\"rewrite\" instead)", target);
-        return null;
-    }
-
-    Path path = target.resolve(grimoMemory);
-    String existing = Files.exists(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
-    String existingBody = stripHeaderComment(existing);
-
-    int firstIdx = existingBody.indexOf(oldText);
-    int lastIdx = existingBody.lastIndexOf(oldText);
-    if (firstIdx == -1) {
-        log.warn("Rejected replace on {}: <old> text not found", target);
-        return null;
-    }
-    if (firstIdx != lastIdx) {
-        log.warn("Rejected replace on {}: <old> text appears multiple times — ambiguous, "
-                + "include more surrounding context", target);
-        return null;
-    }
-
-    String updated = existingBody.substring(0, firstIdx)
-            + newText
-            + existingBody.substring(firstIdx + oldText.length());
-
-    if (newText.isEmpty()) {
-        updated = normalizeAfterDelete(updated);
-    }
-
-    String finalBody = updated.strip();
-    atomicWrite(path, renderHeaderComment(target) + finalBody + "\n");
-    int newCharCount = finalBody.length();
-    warnIfOverLimit(target, newCharCount);
-    log.info("[MEMORY-WRITE] file={}, op=REPLACE, oldLen={}, newLen={}, fileChars={}/{}",
-            target, oldText.length(), newText.length(), newCharCount, target.charLimit());
-    return new WriteOp(target, Op.REPLACE, newText.length(), newCharCount);
-}
-
-/**
- * Normalize dangling "---" separators after a delete.
- * Handles: leading "---\n", trailing "\n---", consecutive "\n\n---\n\n---\n\n".
- */
-private static String normalizeAfterDelete(String content) {
-    return content
-        .replaceAll("(?m)\\A(?:\\s*---\\s*\\n)+", "")          // 開頭 ---
-        .replaceAll("(?:\\n---\\s*)+\\z", "")                  // 結尾 ---
-        .replaceAll("(?:\\n\\n---\\n\\n){2,}", "\n\n---\n\n"); // 連續 ---
-}
-```
-
-- [ ] **Step 4: Run, verify PASS**
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/main/java/io/github/samzhu/grimo/memory/MemoryWriter.java \
-        src/test/java/io/github/samzhu/grimo/memory/MemoryWriterTest.java
-git commit -m "feat(memory): MemoryWriter REPLACE op with surgical find/replace
-
-Implements op=\"replace\" with <old>/<new> nested tags and four safety
-rules:
-
-1. <old> must appear EXACTLY ONCE (not 0, not 2+) - reject if ambiguous
-2. <old> cannot be empty - prevents accidental whole-file clear
-3. <new> empty = delete the matched range
-4. After delete, normalizeAfterDelete() cleans up dangling --- separators
-   (leading, trailing, consecutive)
-
-Tests cover all 6 cases:
-- success: update an existing entry
-- not found: <old> doesn't match anything
-- ambiguous: <old> matches multiple places
-- empty old: rejected
-- delete (empty new): entry removed + separators cleaned
-- malformed (missing nested tags): rejected
-
-This is the third and final Op variant. MemoryWriter is now feature-complete.
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
-```
-
----
-
-### Task 11: `MainAgentMemoryAdvisor`
+**v6 simplification**: was Task 11 in v1 plan. v6 advisor has only BEFORE-hook
+(load snapshot + prefix goal); the after-hook (extractAndWrite, response
+mutation) is removed. Constructor no longer injects MemoryWriter.
 
 **Files:**
 - Create: `src/main/java/io/github/samzhu/grimo/memory/advisor/MainAgentMemoryAdvisor.java`
 - Test: `src/test/java/io/github/samzhu/grimo/memory/advisor/MainAgentMemoryAdvisorTest.java`
 
-- [ ] **Step 1: Write failing tests with mock chain**
+- [ ] **Step 1: Write the failing tests**
 
 ```java
 package io.github.samzhu.grimo.memory.advisor;
@@ -1931,26 +1476,22 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springaicommunity.agents.client.AgentClientRequest;
 import org.springaicommunity.agents.client.AgentClientResponse;
 import org.springaicommunity.agents.client.Goal;
+import org.springaicommunity.agents.client.advisor.api.AgentCallAdvisor;
 import org.springaicommunity.agents.client.advisor.api.AgentCallAdvisorChain;
 import org.springaicommunity.agents.model.AgentGeneration;
 import org.springaicommunity.agents.model.AgentResponse;
 import org.springframework.core.io.ClassPathResource;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class MainAgentMemoryAdvisorTest {
 
     private MainAgentMemoryAdvisor advisor;
-    private GrimoMemory mem;
-    private MemoryStore store;
-    private MemoryWriter writer;
 
     @BeforeEach
     void setUp(@TempDir Path tmp) throws Exception {
@@ -1958,41 +1499,46 @@ class MainAgentMemoryAdvisorTest {
         home.initialize();
         var ctx = new ProjectContext(home, tmp.resolve("workspace/p"));
         ctx.initialize();
-        mem = new GrimoMemory(home, ctx);
-        store = new MemoryStore(mem, ctx);
-        writer = new MemoryWriter(mem, store);
+        var mem = new GrimoMemory(home, ctx);
+        var store = new MemoryStore(mem, ctx);
         var trigger = new ConsolidationTrigger(Clock.systemUTC());
         var promptBuilder = new MemoryPromptBuilder(
             new ClassPathResource("prompts/memory-protocol.md"), trigger);
         promptBuilder.init();
 
-        advisor = new MainAgentMemoryAdvisor(store, promptBuilder, writer);
+        advisor = new MainAgentMemoryAdvisor(store, promptBuilder);
     }
 
-    /** Mock chain that records what request it received and returns a stub response. */
+    /** Mock chain that records the request it receives and returns a fixed text. */
     private static class MockChain implements AgentCallAdvisorChain {
         AgentClientRequest receivedRequest;
-        String responseText = "";
+        String responseText = "ok";
+        int callCount = 0;
+
+        @Override
         public AgentClientResponse nextCall(AgentClientRequest request) {
             this.receivedRequest = request;
+            this.callCount++;
             var gen = new AgentGeneration(responseText);
             var agentResp = new AgentResponse(List.of(gen));
             return new AgentClientResponse(agentResp);
         }
-        public java.util.List<org.springaicommunity.agents.client.advisor.api.AgentCallAdvisor>
-                getCallAdvisors() { return List.of(); }
+
+        @Override
+        public java.util.List<AgentCallAdvisor> getCallAdvisors() {
+            return List.of();
+        }
     }
 
     @Test
     void beforeHookPrependsMemoryToGoal() {
         var chain = new MockChain();
-        chain.responseText = "ok";
         var req = new AgentClientRequest(
             new Goal("hello"), Path.of("/tmp"), null, new HashMap<>());
 
         advisor.adviseCall(req, chain);
 
-        // Chain receives a request whose goal is the prefixed text
+        // Chain saw a request whose goal contains the prefixed memory protocol
         assertThat(chain.receivedRequest.goal().getContent())
             .contains("USER PROFILE")
             .contains("hello");
@@ -2001,64 +1547,52 @@ class MainAgentMemoryAdvisorTest {
     }
 
     @Test
-    void afterHookExtractsAndStripsBlock() throws Exception {
+    void responseIsPassedThroughUnchanged() {
         var chain = new MockChain();
-        chain.responseText = """
-                Got it!
-
-                <grimo-memory file="user" op="append">
-                Likes records.
-                </grimo-memory>
-                """;
+        chain.responseText = "Main-agent says hello back";
         var req = new AgentClientRequest(
-            new Goal("remember I like records"), Path.of("/tmp"), null, new HashMap<>());
+            new Goal("hi"), Path.of("/tmp"), null, new HashMap<>());
 
         var resp = advisor.adviseCall(req, chain);
 
-        // Visible result no longer contains the block
-        assertThat(resp.getResult()).isEqualTo("Got it!");
-        // File was written
-        assertThat(Files.readString(mem.userFile())).contains("Likes records.");
+        // v6: no after-hook, response result is exactly what the chain returned
+        assertThat(resp.getResult()).isEqualTo("Main-agent says hello back");
     }
 
     @Test
-    void responseContextIsPreserved() {
+    void chainCalledExactlyOnce() {
         var chain = new MockChain();
-        chain.responseText = "fine";
-        var contextMap = new HashMap<String, Object>();
-        contextMap.put("upstream.key", "upstream.value");
         var req = new AgentClientRequest(
-            new Goal("hi"), Path.of("/tmp"), null, contextMap);
+            new Goal("hi"), Path.of("/tmp"), null, new HashMap<>());
 
-        var resp = advisor.adviseCall(req, chain);
-
-        // Note: response.context() comes from the new AgentClientResponse we built;
-        // we should preserve the response's own context map
-        assertThat(resp.context()).isNotNull();
+        advisor.adviseCall(req, chain);
+        assertThat(chain.callCount).isEqualTo(1);
     }
 
     @Test
     void exceptionDuringPrefixFallsBackToRawChain() {
-        // Force an exception by giving null user input
         var chain = new MockChain();
-        chain.responseText = "ok raw";
         var req = new AgentClientRequest(
             new Goal((String) null), Path.of("/tmp"), null, new HashMap<>());
 
-        // Should not throw — advisor catches and falls through
+        // Should not throw — fallback path catches and uses raw chain.nextCall
         var resp = advisor.adviseCall(req, chain);
-        // We can't easily assert which path was taken, but no exception should propagate
         assertThat(resp).isNotNull();
+        assertThat(chain.callCount).isEqualTo(1);  // chain still invoked
     }
 
     @Test
-    void getOrderIsLargerThanGrimoSessionAdvisorDefault() {
-        // Memory advisor must run AFTER session advisor in before-hook
-        // Session advisor convention: HIGHEST + 300
-        // Memory advisor: HIGHEST + 400 → larger order = later before
+    void getOrderIsAfterDefaultGrimoSessionAdvisorOrder() {
+        // Memory advisor's BEFORE-hook should run AFTER session advisor's BEFORE-hook
+        // so session sees raw input. Larger order = later before-hook execution.
+        // Session advisor convention: HIGHEST_PRECEDENCE + 300
         assertThat(advisor.getOrder())
-            .isGreaterThan(org.springaicommunity.agents.client.advisor.api.AgentCallAdvisor
-                .DEFAULT_AGENT_PRECEDENCE_ORDER + 300);
+            .isGreaterThan(AgentCallAdvisor.DEFAULT_AGENT_PRECEDENCE_ORDER + 300);
+    }
+
+    @Test
+    void getNameIsStable() {
+        assertThat(advisor.getName()).isEqualTo("main-agent-memory");
     }
 }
 ```
@@ -2067,218 +1601,294 @@ class MainAgentMemoryAdvisorTest {
 
 - [ ] **Step 3: Implement `MainAgentMemoryAdvisor.java`**
 
-Use the verified-API code sample from spec §元件 #7 `MainAgentMemoryAdvisor` (the corrected version after we fixed the SDK API). Key parts:
+Use the verbatim sample from spec §元件 #8 (the v6 version). Key parts:
 
 - Package: `io.github.samzhu.grimo.memory.advisor`
-- Imports: `Goal`, `AgentClientRequest`, `AgentClientResponse`, `AgentGeneration`, `AgentResponse`, `AgentCallAdvisor`, `AgentCallAdvisorChain`
-- Constructor injects `MemoryStore`, `MemoryPromptBuilder`, `MemoryWriter`
+- Implements `org.springaicommunity.agents.client.advisor.api.AgentCallAdvisor`
+- Constructor takes `MemoryStore` + `MemoryPromptBuilder` (NO `MemoryWriter`)
 - `getName()` returns `"main-agent-memory"`
 - `getOrder()` returns `AgentCallAdvisor.DEFAULT_AGENT_PRECEDENCE_ORDER + 400`
-- `adviseCall()`:
+- `adviseCall(request, chain)`:
   - try block:
     - load snapshot
     - build prefixed goal
-    - construct new `Goal` (preserving working dir + options)
-    - construct new `AgentClientRequest` (preserving working dir + options + context)
-    - call `chain.nextCall(newRequest)`
-    - call `memoryWriter.extractAndWrite(response.getResult())`
-    - construct new `AgentGeneration` with visibleText (preserving metadata)
-    - construct new `AgentResponse` (preserving metadata)
-    - construct new `AgentClientResponse` (preserving context)
-    - return new response
-  - catch block: log warn + `return chain.nextCall(request)` (raw fallback)
+    - construct new `Goal` (preserving wd + options)
+    - construct new `AgentClientRequest` (preserving wd + options + context map)
+    - return `chain.nextCall(newRequest)` directly — no after-hook
+  - catch block: log warn + return `chain.nextCall(request)` (raw fallback)
 
 - [ ] **Step 4: Run, verify PASS**
-
-Run: `./gradlew test --tests "io.github.samzhu.grimo.memory.advisor.MainAgentMemoryAdvisorTest"`
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/main/java/io/github/samzhu/grimo/memory/advisor/MainAgentMemoryAdvisor.java \
         src/test/java/io/github/samzhu/grimo/memory/advisor/MainAgentMemoryAdvisorTest.java
-git commit -m "feat(memory): MainAgentMemoryAdvisor wrapping load+prepend/extract+strip
+git commit -m "feat(memory): MainAgentMemoryAdvisor (v6 — only BEFORE-hook)
 
 Implements org.springaicommunity.agents.client.advisor.api.AgentCallAdvisor.
-The around-style adviseCall() does:
+v6 simplification: only does the BEFORE-hook (load snapshot + prefix
+goal). No AFTER-hook because Main-agent writes memory directly via
+native Edit/Write inside the subprocess — Java side doesn't need to
+parse the response.
 
-BEFORE:
+BEFORE-hook:
 - memoryStore.loadSnapshot()
 - memoryPromptBuilder.build(snapshot, request.goal().getContent())
 - Construct new Goal with prefixed content (preserving wd + options)
-- Construct new AgentClientRequest (preserving wd + options + context map)
+- Construct new AgentClientRequest (preserving wd + options + context)
+- chain.nextCall(newRequest) — return directly, no after-hook
 
-CALL: chain.nextCall(newRequest) — actual subprocess invocation
+Constructor injects only MemoryStore + MemoryPromptBuilder (NOT
+MemoryWriter — that class doesn't exist in v6).
 
-AFTER:
-- memoryWriter.extractAndWrite(response.getResult())
-- Construct new AgentGeneration with visibleText (preserving metadata)
-- Construct new AgentResponse (preserving metadata)
-- Construct new AgentClientResponse (preserving context map)
+getOrder() = DEFAULT_AGENT_PRECEDENCE_ORDER + 400, ensuring session
+advisor runs before-hook first (so session JSONL writes raw input).
 
-Critical: SDK uses Java records with no mutate() builder. Modification
-requires explicit construction of new instances, preserving all fields
-except the one being changed. Verified against
-github.com/spring-ai-community/agent-client/main source.
-
-Catches all exceptions and falls back to chain.nextCall(request) — memory
-must never block dispatch.
-
-getOrder() = DEFAULT_AGENT_PRECEDENCE_ORDER + 400 (after GrimoSessionAdvisor's
-+300, so session writes raw user input not prefixed goal).
+Catches all exceptions and falls back to chain.nextCall(request) raw
+— memory must never block dispatch.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 12: `ChatDispatcher` integration via advisor
+### Task 10: `TierOptionsFactory` PLAN mode loosening
+
+**v6 critical change**: Main-agent must have native Edit/Write to manage
+memory files. Drop the strict Plan Mode disallowedTools.
+
+**Files:**
+- Modify: `src/main/java/io/github/samzhu/grimo/agent/tier/TierOptionsFactory.java`
+- Modify: `src/test/java/io/github/samzhu/grimo/agent/tier/TierOptionsFactoryTest.java` (if exists; else create)
+
+- [ ] **Step 1: Read current source**
+
+```bash
+grep -n "ExecutionMode\|disallowedTools\|yolo" src/main/java/io/github/samzhu/grimo/agent/tier/TierOptionsFactory.java
+```
+
+You should see (from v5):
+- `buildClaude` with `if (mode == ExecutionMode.PLAN) { builder.disallowedTools(List.of("Edit","Write","MultiEdit")); }`
+- `buildGemini` with `.yolo(mode == ExecutionMode.DEV)`
+
+- [ ] **Step 2: Write failing test (or read existing)**
+
+If `TierOptionsFactoryTest` exists, add a v6 test. If not, create:
+
+```java
+package io.github.samzhu.grimo.agent.tier;
+
+import org.junit.jupiter.api.Test;
+import org.springaicommunity.agents.claude.ClaudeAgentOptions;
+import org.springaicommunity.agents.gemini.GeminiAgentOptions;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class TierOptionsFactoryTest {
+
+    private final TierOptionsFactory factory = new TierOptionsFactory();
+
+    @Test
+    void planModeForClaudeDoesNotDisallowEditOrWrite() {
+        // v6: Plan Mode no longer restricts Edit/Write/MultiEdit
+        // (Main-agent uses native Edit to manage memory files)
+        var options = (ClaudeAgentOptions) factory.build("claude", "claude-sonnet-4-6",
+                TierOptionsFactory.ExecutionMode.PLAN);
+
+        assertThat(options.getDisallowedTools())
+            .as("v6: Plan Mode should not disallow Edit/Write/MultiEdit")
+            .isNullOrEmpty();
+    }
+
+    @Test
+    void planModeForGeminiHasYoloEnabled() {
+        // v6: Plan Mode equals Dev Mode for gemini (yolo=true)
+        var options = (GeminiAgentOptions) factory.build("gemini", "gemini-2.5-flash",
+                TierOptionsFactory.ExecutionMode.PLAN);
+        assertThat(options.isYolo()).isTrue();
+    }
+
+    @Test
+    void devModeForClaudeIsAlsoUnrestricted() {
+        var options = (ClaudeAgentOptions) factory.build("claude", "claude-sonnet-4-6",
+                TierOptionsFactory.ExecutionMode.DEV);
+        assertThat(options.getDisallowedTools()).isNullOrEmpty();
+    }
+}
+```
+
+- [ ] **Step 3: Run, verify FAIL** — current `buildClaude` still sets disallowedTools when PLAN
+
+- [ ] **Step 4: Modify `TierOptionsFactory.java`**
+
+Apply two changes:
+
+(a) `buildClaude` — remove the `if` block:
+
+```java
+private ClaudeAgentOptions buildClaude(String model, ExecutionMode mode) {
+    // v6: PLAN equals DEV — Main-agent gets full Edit/Write access
+    // for native memory file management. v5's disallowedTools restriction
+    // is removed. ExecutionMode enum kept for future divergence.
+    return ClaudeAgentOptions.builder()
+            .model(model)
+            .yolo(true)
+            .timeout(DEFAULT_TIMEOUT)
+            .build();
+}
+```
+
+(b) `buildGemini` — change `yolo(mode == ExecutionMode.DEV)` to `yolo(true)`:
+
+```java
+private GeminiAgentOptions buildGemini(String model, ExecutionMode mode) {
+    // v6: PLAN equals DEV
+    return GeminiAgentOptions.builder()
+            .model(model)
+            .yolo(true)
+            .timeout(DEFAULT_TIMEOUT)
+            .build();
+}
+```
+
+(c) Update class-level Javadoc:
+
+```java
+ * v6: PLAN equals DEV (both yolo, no disallowedTools).
+ * v6 之前 PLAN 是嚴格 mode 限制 Main-agent file modification，但 v6 改用
+ * native Edit/Write 管 memory，嚴格限制反而妨礙 memory 寫入。
+ * 兩個 enum 值 (PLAN / DEV) 保留以利未來可能的差異化升級 (v2+)。
+```
+
+- [ ] **Step 5: Run, verify PASS**
+
+```bash
+./gradlew test --tests "io.github.samzhu.grimo.agent.tier.TierOptionsFactoryTest"
+```
+
+> **Note**: There may be a pre-existing failing test `TierOptionsFactoryTest.planModeShouldRestrictCodex()` that asserts the v5 behavior. **Update or delete that test** — its assumption is invalid in v6. Replace with a test that verifies codex's PLAN mode also has fullAuto=true (which matches v5 behavior since codex never had disallowedTools).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/main/java/io/github/samzhu/grimo/agent/tier/TierOptionsFactory.java \
+        src/test/java/io/github/samzhu/grimo/agent/tier/TierOptionsFactoryTest.java
+git commit -m "feat(tier): v6 — drop Plan Mode strict restrictions
+
+Main conversation memory v6 design requires Main-agent to have native
+Edit/Write tools for managing memory files (~/.grimo/memory/*.md).
+Strict Plan Mode disallowedTools=[Edit,Write,MultiEdit] would block
+this entirely.
+
+Changes:
+- buildClaude: remove the 'if (mode == PLAN) disallowedTools(...)'
+  block. Plan Mode and Dev Mode produce identical ClaudeAgentOptions.
+- buildGemini: change 'yolo(mode == DEV)' to 'yolo(true)'.
+- Codex: no change (was already fullAuto=true in both modes).
+- ExecutionMode enum kept (PLAN / DEV) for future re-divergence.
+
+Trade-off: Main-agent could theoretically Edit src/ files unintentionally.
+Mitigation: system prompt strongly warns against it; user can git revert.
+See spec section 'R1.5: Main-agent 誤改 src/ 風險'.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+### Task 11: `ChatDispatcher` integration via advisor (v6 — same as v1 plan task 12)
+
+**v6 note**: This task is mostly unchanged from v1 plan. The advisor wiring
+pattern is the same; only the advisor itself is simpler (no after-hook).
+The visible-text stripping that v1 plan mentioned no longer happens — the
+response from `client.run()` is the raw Main-agent text.
 
 **Files:**
 - Modify: `src/main/java/io/github/samzhu/grimo/ChatDispatcher.java`
-- Test: `src/test/java/io/github/samzhu/grimo/ChatDispatcherMemoryIntegrationTest.java` (new)
-- Test: `src/test/java/io/github/samzhu/grimo/memory/SubAgentExclusionTest.java` (new)
+- Test: `src/test/java/io/github/samzhu/grimo/ChatDispatcherMemoryIntegrationTest.java`
+- Test: `src/test/java/io/github/samzhu/grimo/memory/SubAgentExclusionTest.java`
 
-- [ ] **Step 1: Read current ChatDispatcher source to understand the existing builder pattern**
+- [ ] **Step 1: Read current ChatDispatcher**
 
 ```bash
 grep -n "AgentClient.builder\|defaultAdvisor\|defaultMcpServers\|defaultWorkingDirectory" \
     src/main/java/io/github/samzhu/grimo/ChatDispatcher.java
 ```
 
-You should see calls like `AgentClient.builder(agentModel).mcpServerCatalog(...).defaultMcpServers(...).defaultWorkingDirectory(...).build()` in `dispatch(String,callback)`, `dispatchTo(...)`, and `doDispatch(...)`. There may be 3 separate inline build sites.
+- [ ] **Step 2: Write failing tests**
 
-- [ ] **Step 2: Write failing integration tests**
-
-Create `src/test/java/io/github/samzhu/grimo/ChatDispatcherMemoryIntegrationTest.java`:
-
-```java
-package io.github.samzhu.grimo;
-
-// Spring Boot test that wires up the full memory chain + ChatDispatcher
-// Uses @MockitoBean for AgentModel so we can stub agent.run() responses
-
-@SpringBootTest
-@TestPropertySource(properties = {
-    "grimo.home.root=${java.io.tmpdir}/grimo-memory-test-${random.uuid}"
-})
-class ChatDispatcherMemoryIntegrationTest {
-
-    @MockitoBean AgentModel mockAgentModel;
-    @Autowired ChatDispatcher chatDispatcher;
-    @Autowired GrimoMemory grimoMemory;
-
-    @Test
-    void mainAgentDispatchPrependsMemoryAndExtractsBlock() throws Exception {
-        // Set up mock agent to return a response that includes a memory block
-        when(mockAgentModel.run(any())).thenAnswer(inv -> {
-            return new AgentResponse(List.of(new AgentGeneration("""
-                Sure, will remember.
-
-                <grimo-memory file="user" op="append">
-                Likes Java records.
-                </grimo-memory>
-                """)));
-        });
-
-        // Trigger a callback-based dispatch (easiest to invoke from test)
-        var resultRef = new AtomicReference<String>();
-        chatDispatcher.dispatch("I like records", (text, success) -> resultRef.set(text));
-
-        // Wait for virtual thread to complete
-        // ... (use CountDownLatch in the callback)
-
-        // Visible text was stripped
-        assertThat(resultRef.get()).isEqualTo("Sure, will remember.");
-        // File was written
-        assertThat(Files.readString(grimoMemory.userFile()))
-            .contains("Likes Java records.");
-    }
-}
-```
-
-> **Note**: This test is integration-flavored. If running a full Spring context is too heavy, you can write a focused unit test that constructs `ChatDispatcher` directly with mocked dependencies and verifies the `buildMainAgentClient()` helper registers the advisor.
-
-Create `src/test/java/io/github/samzhu/grimo/memory/SubAgentExclusionTest.java`:
+Create `SubAgentExclusionTest.java`:
 
 ```java
 package io.github.samzhu.grimo.memory;
 
 import org.junit.jupiter.api.Test;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Compile-time test that sub-agent components do NOT depend on memory beans.
- *
- * If anyone adds a `MainAgentMemoryAdvisor` field to SkillExecutor, DevModeRunner,
- * or SkillAnalyzer, this test will document the violation.
+ * Reflection-based test that sub-agent components do NOT depend on
+ * MainAgentMemoryAdvisor. If anyone adds a memory advisor field to
+ * SkillExecutor / DevModeRunner / SkillAnalyzer, this test fails immediately.
  */
 class SubAgentExclusionTest {
 
+    private static final String ADVISOR_CLASS =
+        "io.github.samzhu.grimo.memory.advisor.MainAgentMemoryAdvisor";
+
     @Test
     void skillExecutorDoesNotDependOnMemoryAdvisor() throws Exception {
-        var clazz = Class.forName("io.github.samzhu.grimo.SkillExecutor");
-        for (var field : clazz.getDeclaredFields()) {
-            assertThat(field.getType().getName())
-                .as("SkillExecutor should not depend on MainAgentMemoryAdvisor")
-                .isNotEqualTo("io.github.samzhu.grimo.memory.advisor.MainAgentMemoryAdvisor");
-        }
+        verifyNoFieldOfType("io.github.samzhu.grimo.SkillExecutor", ADVISOR_CLASS);
     }
 
     @Test
     void devModeRunnerDoesNotDependOnMemoryAdvisor() throws Exception {
-        var clazz = Class.forName("io.github.samzhu.grimo.agent.DevModeRunner");
-        for (var field : clazz.getDeclaredFields()) {
-            assertThat(field.getType().getName())
-                .as("DevModeRunner should not depend on MainAgentMemoryAdvisor")
-                .isNotEqualTo("io.github.samzhu.grimo.memory.advisor.MainAgentMemoryAdvisor");
-        }
+        verifyNoFieldOfType("io.github.samzhu.grimo.agent.DevModeRunner", ADVISOR_CLASS);
     }
 
     @Test
     void skillAnalyzerDoesNotDependOnMemoryAdvisor() throws Exception {
-        var clazz = Class.forName("io.github.samzhu.grimo.agent.tier.SkillAnalyzer");
+        verifyNoFieldOfType("io.github.samzhu.grimo.agent.tier.SkillAnalyzer", ADVISOR_CLASS);
+    }
+
+    private void verifyNoFieldOfType(String className, String forbiddenType) throws Exception {
+        var clazz = Class.forName(className);
         for (var field : clazz.getDeclaredFields()) {
             assertThat(field.getType().getName())
-                .as("SkillAnalyzer should not depend on MainAgentMemoryAdvisor")
-                .isNotEqualTo("io.github.samzhu.grimo.memory.advisor.MainAgentMemoryAdvisor");
+                .as("%s must not depend on %s", className, forbiddenType)
+                .isNotEqualTo(forbiddenType);
         }
     }
 }
 ```
 
-- [ ] **Step 3: Run, verify FAIL or COMPILE ERROR (since ChatDispatcher hasn't been modified yet)**
+- [ ] **Step 3: Modify `ChatDispatcher.java`**
 
-- [ ] **Step 4: Modify `ChatDispatcher` — add memory advisor wiring**
-
-Apply these changes to `src/main/java/io/github/samzhu/grimo/ChatDispatcher.java`:
-
-(a) Add field + constructor parameter:
+Add field + constructor parameter:
 
 ```java
 private final MainAgentMemoryAdvisor memoryAdvisor;
 
 public ChatDispatcher(
     // ... existing params ...
-    MainAgentMemoryAdvisor memoryAdvisor    // ← NEW (add at end)
+    MainAgentMemoryAdvisor memoryAdvisor    // ← NEW
 ) {
     // ... existing assignments ...
     this.memoryAdvisor = memoryAdvisor;
 }
 ```
 
-(b) Add helper method (place near doDispatch or other private helpers):
+Add `buildMainAgentClient` helper:
 
 ```java
 /**
  * Build an AgentClient for Main-agent dispatches with memory advisor registered.
- *
- * 設計說明：
- * - Main-agent 入口（dispatch / dispatch+callback / dispatchTo）統一呼叫這個 helper
- * - 加上 MainAgentMemoryAdvisor → memory READ + WRITE 自動處理
- * - sub-agent 路徑（doDispatch、SkillExecutor、DevModeRunner、SkillAnalyzer）
- *   **絕對不**呼叫這個 helper — 它們建自己的 client 不註冊 memory advisor
+ * 
+ * 設計說明（v6）：
+ * - 三個 main-agent entry (dispatch / dispatch+callback / dispatchTo) 共用此 helper
+ * - 註冊 MainAgentMemoryAdvisor → memory READ 自動處理（advisor 在 BEFORE-hook prefix goal）
+ * - Main-agent 用 native Edit/Write 自己寫 memory，advisor 沒有 after-hook
+ * - sub-agent 路徑（doDispatch）**不**呼叫此 helper — 不該看 memory
  *
  * @see io.github.samzhu.grimo.memory.advisor.MainAgentMemoryAdvisor
  */
@@ -2292,15 +1902,13 @@ private AgentClient buildMainAgentClient(AgentModel agentModel, java.nio.file.Pa
 }
 ```
 
-(c) Modify the three Main-agent entries to use the helper. Find each `AgentClient.builder(...)...build()` chain in `dispatch(String,callback)`, `dispatchTo(...)`, and the relevant call site of `doDispatch(...)`. Replace with `buildMainAgentClient(agentModel, projectDir)`.
+Modify the three Main-agent entries:
 
-For `dispatch(String userInput)` (TUI), it currently delegates to `doDispatch(userInput, tier)`. Since `doDispatch` builds its own client (without the memory advisor — the sub-agent path), we need a different approach for the TUI entry: have it build its own main-agent client and call `client.run()` directly, NOT delegate to `doDispatch`.
-
-Restructure `dispatch(String userInput)`:
+(a) `dispatch(String userInput)` — restructure to use helper instead of delegating to doDispatch:
 
 ```java
 public void dispatch(String userInput) {
-    // ... existing checks ...
+    // ... existing checks + tier routing + events ...
     eventPublisher.publishEvent(new DispatchQueuedEvent(userInput));
     try {
         var tierSelection = resolveTier(userInput);
@@ -2308,25 +1916,24 @@ public void dispatch(String userInput) {
         agentState.agentThread = Thread.startVirtualThread(() -> {
             long startMs = System.currentTimeMillis();
             try {
-                eventPublisher.publishEvent(new DispatchThinkingStartedEvent(
-                    tierSelection.agentId(), tierSelection.model()));
+                eventPublisher.publishEvent(new DispatchThinkingStartedEvent(...));
 
                 var agentModel = agentModelRegistry.get(tierSelection.agentId());
                 var projectDir = java.nio.file.Path.of(System.getProperty("user.dir"));
-                var client = buildMainAgentClient(agentModel, projectDir);  // ← USES HELPER
+                var client = buildMainAgentClient(agentModel, projectDir);  // ← NEW: helper
                 var tierOptions = tierOptionsFactory.build(
                     tierSelection.agentId(), tierSelection.model(),
                     TierOptionsFactory.ExecutionMode.PLAN);
 
                 var response = client.run(userInput, tierOptions);
-                String visibleResult = response.getResult();  // already stripped by advisor
+                String result = response.getResult();  // raw — no stripping
                 long duration = System.currentTimeMillis() - startMs;
 
                 eventPublisher.publishEvent(new DispatchResponseReceivedEvent(...));
-                if (visibleResult != null && !visibleResult.isBlank()) {
-                    contentView.appendAiReply(visibleResult);
+                if (result != null && !result.isBlank()) {
+                    contentView.appendAiReply(result);
                 }
-                sessionManager.getWriter().writeAssistantMessage(visibleResult);
+                sessionManager.getWriter().writeAssistantMessage(result);
                 eventPublisher.publishEvent(new DispatchCompletedEvent(...));
             } catch (Exception e) {
                 // ... existing error handling ...
@@ -2340,44 +1947,43 @@ public void dispatch(String userInput) {
 }
 ```
 
-`dispatch(String,callback)` and `dispatchTo(...)` likewise: replace their inline `AgentClient.builder(...)...build()` chain with `buildMainAgentClient(agentModel, projectDir)`.
+(b) `dispatch(String userInput, callback)` — replace inline `AgentClient.builder(...)` with `buildMainAgentClient(...)`.
 
-`doDispatch(String, TierSelection)` is left **unchanged** — it keeps building its own client without the memory advisor. This preserves the sub-agent exclusion (SkillExecutor calls `doDispatch` which produces a memory-free client).
+(c) `dispatchTo(...)` — same.
 
-Add a clarifying comment to `doDispatch`:
+(d) `doDispatch(...)` — **leave unchanged**. Add a clarifying comment:
 
 ```java
 /**
  * 純粋 AI 呼び出しロジック (sub-agent path).
  *
- * 設計說明：
- * - 本方法被 SkillExecutor (inline) 共用 — **不要**在這裡註冊 MainAgentMemoryAdvisor
- * - Main-agent 路徑請走 buildMainAgentClient() helper（在 dispatch* entries 內）
- * - 改動本方法時請保留此規則，否則 sub-agent 會誤吃 memory
- *
- * @see #buildMainAgentClient
+ * 設計說明 (v6)：
+ * - 本方法被 SkillExecutor (inline) 共用 — **不要**呼叫 buildMainAgentClient
+ *   helper，也**不要**註冊 MainAgentMemoryAdvisor
+ * - Main-agent 路徑請走 buildMainAgentClient() (在 dispatch* entries 內)
+ * - sub-agent 不該看到 memory
  */
 String doDispatch(String userInput, TierSelection tierSelection) throws Exception {
-    // ... unchanged ...
+    // ... unchanged existing code that builds its own client without advisor ...
 }
 ```
 
-- [ ] **Step 5: Run all memory tests + ChatDispatcher tests**
+- [ ] **Step 4: Run all tests**
 
 ```bash
-./gradlew test --tests "io.github.samzhu.grimo.memory.*" \
-              --tests "io.github.samzhu.grimo.ChatDispatcher*"
+./gradlew test --tests "io.github.samzhu.grimo.memory.SubAgentExclusionTest" \
+              --tests "io.github.samzhu.grimo.memory.*" \
+              --tests "io.github.samzhu.grimo.agent.tier.*"
 ```
 
-Expected: PASS (the integration test may be skipped if Spring context startup is too heavy — at minimum the SubAgentExclusionTest must pass).
+Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/main/java/io/github/samzhu/grimo/ChatDispatcher.java \
-        src/test/java/io/github/samzhu/grimo/ChatDispatcherMemoryIntegrationTest.java \
         src/test/java/io/github/samzhu/grimo/memory/SubAgentExclusionTest.java
-git commit -m "feat(memory): wire MainAgentMemoryAdvisor into ChatDispatcher
+git commit -m "feat(memory): wire MainAgentMemoryAdvisor into ChatDispatcher (v6)
 
 ChatDispatcher gains:
 - MainAgentMemoryAdvisor constructor dependency
@@ -2385,21 +1991,28 @@ ChatDispatcher gains:
   the advisor on the AgentClient builder
 
 The three Main-agent entries (dispatch / dispatch+callback / dispatchTo)
-all use the helper. doDispatch (called by SkillExecutor inline path)
-deliberately does NOT use the helper - it builds its own client without
-the memory advisor, preserving sub-agent exclusion.
+all use the helper. doDispatch (sub-agent path) deliberately does NOT
+use the helper — it builds its own client without the memory advisor,
+preserving sub-agent exclusion.
 
-SubAgentExclusionTest is a reflection-based compile-time check that
+v6 vs v1 plan: ChatDispatcher no longer needs to handle visibleText
+stripping. The advisor has only a BEFORE-hook (prefix goal); response
+from client.run() is the raw Main-agent text (which may or may not
+contain mentions of memory operations Main-agent did via native Edit).
+
+SubAgentExclusionTest: reflection-based check that
 SkillExecutor / DevModeRunner / SkillAnalyzer do not declare a field
-of type MainAgentMemoryAdvisor. If anyone adds memory access to those
-classes in the future, this test fails immediately.
+of type MainAgentMemoryAdvisor.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 13: User-facing slash commands
+### Task 12: `MemoryCommands` (v6 — uses MemoryAppender, no MemoryWriter)
+
+**v6 simplification**: was Task 13 in v1 plan. Commands now use the lightweight
+`MemoryAppender` (Task 8) for writes instead of v1's MemoryWriter parser.
 
 **Files:**
 - Create: `src/main/java/io/github/samzhu/grimo/command/MemoryCommands.java`
@@ -2413,9 +2026,7 @@ ls src/main/java/io/github/samzhu/grimo/command/
 cat src/main/java/io/github/samzhu/grimo/command/BuiltinCommandRegistrar.java | head -50
 ```
 
-Find an existing simple command class (e.g. `AgentCommands.java` if it exists) to mirror its style.
-
-- [ ] **Step 2: Write failing tests for MemoryCommands**
+- [ ] **Step 2: Write failing tests**
 
 ```java
 package io.github.samzhu.grimo.command;
@@ -2437,7 +2048,7 @@ class MemoryCommandsTest {
     private MemoryCommands commands;
     private GrimoMemory mem;
     private MemoryStore store;
-    private MemoryWriter writer;
+    private MemoryAppender appender;
 
     @BeforeEach
     void setUp(@TempDir Path tmp) {
@@ -2447,34 +2058,28 @@ class MemoryCommandsTest {
         ctx.initialize();
         mem = new GrimoMemory(home, ctx);
         store = new MemoryStore(mem, ctx);
-        writer = new MemoryWriter(mem, store);
-        commands = new MemoryCommands(mem, store, writer);
+        appender = new MemoryAppender(mem);
+        commands = new MemoryCommands(mem, store, appender);
     }
 
     @Test
-    void memoryListShowsThreeFilesWithUsage() {
-        store.loadSnapshot();  // ensure files exist
-        String output = commands.memoryList();
-        assertThat(output).contains("USER");
-        assertThat(output).contains("GLOBAL");
-        assertThat(output).contains("PROJECT");
-        assertThat(output).contains("0%");
-        assertThat(output).contains("/1,500 chars");
-    }
-
-    @Test
-    void memoryShowReturnsContentOfNamedFile() throws Exception {
+    void memoryListShowsThreeFiles() {
         store.loadSnapshot();
-        Files.writeString(mem.userFile(), "<!-- header -->\n\nMy content here");
+        String output = commands.memoryList();
+        assertThat(output).contains("USER").contains("GLOBAL").contains("PROJECT");
+        assertThat(output).contains("0%").contains("/1,500 chars");
+    }
 
-        String output = commands.memoryShow("user");
-        assertThat(output).contains("My content here");
+    @Test
+    void memoryShowReturnsContent() throws Exception {
+        store.loadSnapshot();
+        Files.writeString(mem.userFile(), "<!-- header -->\n\nMy content");
+        assertThat(commands.memoryShow("user")).contains("My content");
     }
 
     @Test
     void memoryShowRejectsInvalidName() {
-        String output = commands.memoryShow("src");
-        assertThat(output).contains("Invalid").contains("user").contains("global").contains("project");
+        assertThat(commands.memoryShow("src")).contains("Invalid");
     }
 
     @Test
@@ -2482,41 +2087,32 @@ class MemoryCommandsTest {
         store.loadSnapshot();
         String output = commands.memoryAdd("user", "I love type safety.");
         assertThat(output).contains("Appended");
-
-        String body = Files.readString(mem.userFile());
-        assertThat(body).contains("I love type safety.");
+        assertThat(Files.readString(mem.userFile())).contains("I love type safety.");
     }
 
     @Test
-    void memoryClearWipesNamedFile() throws Exception {
+    void memoryClearWipesContent() throws Exception {
         store.loadSnapshot();
-        Files.writeString(mem.userFile(), "<!-- header -->\n\nSome content");
-
+        commands.memoryAdd("user", "Some content");
         commands.memoryClear("user");
-        String body = Files.readString(mem.userFile());
-        // Body still has header but no content
-        assertThat(MemoryStore.class.getDeclaredMethods()).isNotNull();  // sanity
         var snap = store.loadSnapshot();
         assertThat(snap.user().isEmpty()).isTrue();
     }
 }
 ```
 
-- [ ] **Step 3: Run, verify FAIL**
-
-- [ ] **Step 4: Implement `MemoryCommands.java`**
+- [ ] **Step 3: Implement `MemoryCommands.java`**
 
 ```java
 package io.github.samzhu.grimo.command;
 
 import io.github.samzhu.grimo.memory.GrimoMemory;
+import io.github.samzhu.grimo.memory.MemoryAppender;
 import io.github.samzhu.grimo.memory.MemoryFile;
 import io.github.samzhu.grimo.memory.MemoryStore;
-import io.github.samzhu.grimo.memory.MemoryWriter;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Locale;
@@ -2524,26 +2120,26 @@ import java.util.Locale;
 /**
  * 使用者顯式 memory 操作指令。
  *
- * 設計說明：
- * - 跟 Main-agent 自主 emit-block 寫入互補（不互斥）
- * - 直接呼叫 MemoryStore / MemoryWriter，不經過 advisor 或 dispatch
- * - 5 個指令：list / show / add / edit / clear
- * - 名稱對齊 Grimo 慣例：hyphen-connected `/memory-xxx`
+ * 設計說明（v6）：
+ * - Main-agent 會自己用 native Edit/Write 寫 memory；本 class 是給 user 顯式操作的
+ * - /memory-add 跟 /memory-clear 透過 MemoryAppender 寫檔
+ * - /memory-list / /memory-show / /memory-edit 直接讀檔或 spawn editor
+ * - 不經過 dispatch 或 advisor
  */
 @Component
 public class MemoryCommands {
 
     private final GrimoMemory grimoMemory;
     private final MemoryStore memoryStore;
-    private final MemoryWriter memoryWriter;
+    private final MemoryAppender memoryAppender;
 
-    public MemoryCommands(GrimoMemory grimoMemory, MemoryStore memoryStore, MemoryWriter memoryWriter) {
+    public MemoryCommands(GrimoMemory grimoMemory, MemoryStore memoryStore, MemoryAppender memoryAppender) {
         this.grimoMemory = grimoMemory;
         this.memoryStore = memoryStore;
-        this.memoryWriter = memoryWriter;
+        this.memoryAppender = memoryAppender;
     }
 
-    /** /memory-list — 顯示三檔的 path、usage %、char count */
+    /** /memory-list — 顯示三檔 path、usage %、char count */
     public String memoryList() {
         var snap = memoryStore.loadSnapshot();
         return String.format("""
@@ -2556,7 +2152,7 @@ public class MemoryCommands {
                 snap.project().path(), snap.project().usagePercent(), snap.project().charCount(), snap.project().charLimit());
     }
 
-    /** /memory-show user|global|project — 在 ContentView 顯示內容 */
+    /** /memory-show user|global|project */
     public String memoryShow(String fileName) {
         MemoryFile target = parseFileName(fileName);
         if (target == null) return invalidFileMessage(fileName);
@@ -2567,32 +2163,20 @@ public class MemoryCommands {
         }
     }
 
-    /** /memory-add user|global|project "content..." — 顯式新增一條 entry */
+    /** /memory-add user|global|project "content" */
     public String memoryAdd(String fileName, String content) {
         MemoryFile target = parseFileName(fileName);
         if (target == null) return invalidFileMessage(fileName);
 
-        // Construct a fake emit-block and feed to MemoryWriter — reuses all the safety logic
-        String fakeResponse = """
-                <grimo-memory file="%s" op="append">
-                %s
-                </grimo-memory>
-                """.formatted(target.name().toLowerCase(Locale.ROOT), content);
-        var result = memoryWriter.extractAndWrite(fakeResponse);
-
-        if (result.ops().isEmpty()) {
+        var result = memoryAppender.append(target, content);
+        if (!result.ok()) {
             return "Failed to append (content empty?)";
         }
-        var op = result.ops().get(0);
-        return "✅ Appended to %s.md (now %d/%d chars)".formatted(
-            target.name(), op.newCharCount(), target.charLimit());
+        return "✅ Appended to %s.md (now %d%% — %d/%d chars)".formatted(
+            target.name(), result.usagePercent(), result.newCharCount(), result.charLimit());
     }
 
-    /**
-     * /memory-edit user|global|project — spawn $EDITOR.
-     * 注意：spawn editor 的具體實作要對齊 Grimo 既有 sub-process 慣例。
-     * 這個 method 回傳要使用 ContentView 通知使用者「edit complete, reload on next dispatch」。
-     */
+    /** /memory-edit user|global|project — spawn $EDITOR */
     public String memoryEdit(String fileName) {
         MemoryFile target = parseFileName(fileName);
         if (target == null) return invalidFileMessage(fileName);
@@ -2600,12 +2184,11 @@ public class MemoryCommands {
         var path = target.resolve(grimoMemory);
         String editor = System.getenv().getOrDefault("EDITOR", "vi");
         try {
-            var pb = new ProcessBuilder(editor, path.toString())
-                    .inheritIO();
-            int exitCode = pb.start().waitFor();
-            if (exitCode != 0) {
-                return "Editor exited with code " + exitCode;
-            }
+            int exitCode = new ProcessBuilder(editor, path.toString())
+                    .inheritIO()
+                    .start()
+                    .waitFor();
+            if (exitCode != 0) return "Editor exited with code " + exitCode;
             return "✅ Edited " + target.name() + ".md";
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -2613,22 +2196,12 @@ public class MemoryCommands {
         }
     }
 
-    /** /memory-clear user|global|project — clear file (互動確認由 caller 處理) */
+    /** /memory-clear user|global|project */
     public String memoryClear(String fileName) {
         MemoryFile target = parseFileName(fileName);
         if (target == null) return invalidFileMessage(fileName);
-
-        // Use op=rewrite with empty body — but rewrite rejects empty
-        // So directly write empty body (preserving header)
-        try {
-            String header = """
-                    <!-- Grimo memory file. Edited by Main-agent (via <grimo-memory> block) and (optionally) by you. Hard limit: %d characters. -->
-                    """.formatted(target.charLimit());
-            Files.writeString(target.resolve(grimoMemory), header, StandardCharsets.UTF_8);
-            return "✅ Cleared " + target.name() + ".md";
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        memoryAppender.clear(target);
+        return "✅ Cleared " + target.name() + ".md";
     }
 
     private static MemoryFile parseFileName(String name) {
@@ -2646,95 +2219,79 @@ public class MemoryCommands {
 }
 ```
 
-- [ ] **Step 5: Register in `BuiltinCommandRegistrar`**
+- [ ] **Step 4: Register in `BuiltinCommandRegistrar`**
 
-Open `src/main/java/io/github/samzhu/grimo/command/BuiltinCommandRegistrar.java` and add registrations following the existing pattern. Example (adapt to actual command-dispatch API):
+Add field + registrations matching the existing pattern. Refer to existing
+`/agent-use` or `/skill-list` registration for the right API.
 
-```java
-// Constructor injection
-private final MemoryCommands memoryCommands;
+- [ ] **Step 5: Run tests, verify PASS**
 
-// In @PostConstruct or registration method:
-commandDispatcher.register("/memory-list",   args -> memoryCommands.memoryList());
-commandDispatcher.register("/memory-show",   args -> memoryCommands.memoryShow(args.trim()));
-commandDispatcher.register("/memory-add",    args -> { /* parse "<file> <content>" */ });
-commandDispatcher.register("/memory-edit",   args -> memoryCommands.memoryEdit(args.trim()));
-commandDispatcher.register("/memory-clear",  args -> memoryCommands.memoryClear(args.trim()));
-```
-
-The exact API shape depends on `CommandDispatcher` — refer to existing `/agent-use` or `/skill-list` registration for the right pattern.
-
-- [ ] **Step 6: Run all memory + command tests**
-
-```bash
-./gradlew test --tests "io.github.samzhu.grimo.command.MemoryCommandsTest" \
-              --tests "io.github.samzhu.grimo.memory.*"
-```
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/main/java/io/github/samzhu/grimo/command/MemoryCommands.java \
         src/main/java/io/github/samzhu/grimo/command/BuiltinCommandRegistrar.java \
         src/test/java/io/github/samzhu/grimo/command/MemoryCommandsTest.java
-git commit -m "feat(memory): user-facing /memory-* slash commands
+git commit -m "feat(memory): /memory-{list,show,add,edit,clear} commands (v6)
 
-Five commands for explicit memory operations, complementing Main-agent's
-autonomous emit-block writes (not replacing them):
+Five user-facing slash commands for explicit memory operations,
+complementing Main-agent's autonomous use of native Edit/Write
+(not replacing it).
 
 - /memory-list                   show all 3 files with usage %
 - /memory-show <file>            display contents
-- /memory-add <file> <content>   user-explicit append (calls MemoryWriter)
+- /memory-add <file> <content>   user-explicit append (via MemoryAppender)
 - /memory-edit <file>            spawn \$EDITOR
-- /memory-clear <file>           wipe contents (preserve header)
+- /memory-clear <file>           wipe contents (preserve header, via MemoryAppender)
 
 All commands accept user / global / project as the file argument,
-validated via MemoryFile.valueOf() — same enum-based path sandbox
-used by Main-agent's emit-block path.
+validated via MemoryFile.valueOf().
 
-/memory-add internally constructs a fake <grimo-memory> block and
-feeds it to MemoryWriter.extractAndWrite, reusing all safety logic
-(char limit warning, atomic write, etc.).
+v6 vs v1 plan: /memory-add and /memory-clear use the lightweight
+MemoryAppender helper (~80 LOC) instead of v1's MemoryWriter parser
+(~250 LOC removed in v6).
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 14: Glossary update + final verification
+### Task 13: Glossary update + final verification (v6)
 
 **Files:**
 - Modify: `docs/glossary.md`
 
-- [ ] **Step 1: Add Memory section to glossary**
+- [ ] **Step 1: Add v6 Memory section to glossary**
 
-Edit `docs/glossary.md` and add a new section. Find the right position (after existing "對偶關係" terms like Main-agent / Sub-agent / Dispatch). Add:
+Edit `docs/glossary.md` and add a new section after the existing Main-agent /
+Sub-agent / Dispatch entries:
 
 ```markdown
-## Long-Term Memory（Spec: 2026-04-08-main-conversation-memory-design）
+## Long-Term Memory (Spec: 2026-04-08-main-conversation-memory-design v6)
 
 | 名詞 | 英文 | 說明 |
 |------|------|------|
-| **GrimoMemory** | Grimo Memory | `~/.grimo/memory/` 路徑管理 bean。`ensureExists()` lazy 建立目錄與三個空檔（含 default header comment） |
-| **MemoryFile** | Memory File | enum `USER` / `GLOBAL` / `PROJECT`，每個帶 char limit 跟 `resolve(GrimoMemory)` 返回固定 path。**Option D 路徑沙箱核心** — Main-agent emit 的 `file=` attr 必須對應這三個 enum 值 |
+| **GrimoMemory** | Grimo Memory | `~/.grimo/memory/` 路徑管理 bean。`ensureExists()` lazy 建立目錄與三個空檔（含 default header comment）|
+| **MemoryFile** | Memory File | enum `USER` / `GLOBAL` / `PROJECT`。每個帶 char limit 跟 `resolve(GrimoMemory)`。v6: 純 helper |
 | **MemoryStore** | Memory Store | 純函式 reader。`loadSnapshot()` 從 disk 讀三檔，產出 immutable `MemorySnapshot`。**無 write API** |
 | **MemorySnapshot** | Memory Snapshot | Immutable record 包含 `FileSnapshot user / global / project`。每個 dispatch 重新 reload，整個 dispatch 期間 frozen |
-| **MemoryPromptBuilder** | Memory Prompt Builder | 把 snapshot + user input 組成 prefixed goal。負責 `<memory-context>` fence 包裹 + memory-protocol.md template substitution + condition-injected consolidation reminder |
-| **MemoryWriter** | Memory Writer | 解析 Main-agent response 中的 `<grimo-memory>` block，路徑 enum 強制，atomic temp+rename 寫檔。3 個 Op：APPEND / REPLACE / REWRITE |
-| **`<grimo-memory>` block** | Grimo Memory Block | Main-agent 在 response 結尾 emit 的 XML-like 標籤，attr：`file ∈ {user,global,project}`、`op ∈ {append,replace,rewrite}`。`replace` op 額外含 `<old>` / `<new>` 巢狀 tag。Java 端 parse + 寫檔 + strip 後才把 visible text 給 user |
+| **MemoryPromptBuilder** | Memory Prompt Builder | 把 snapshot + user input 組成 prefixed goal。負責 `<memory-context>` fence + memory-protocol.md template substitution + 條件式注入 consolidation reminder |
+| **MemoryAppender** | Memory Appender | v6 小 helper (~80 LOC) for `/memory-add` / `/memory-clear` 使用者顯式指令。`append(target, content)` / `clear(target)` 用 atomic temp+rename。**不**參與 dispatch / advisor |
+| **MainAgentMemoryAdvisor** | Main Agent Memory Advisor | `AgentCallAdvisor` 實作。**v6: 只剩 BEFORE-hook** — 載入 snapshot + prefix goal。Response 直接 pass-through。**只**註冊在 `ChatDispatcher.buildMainAgentClient()`，sub-agent 路徑不註冊 |
 | **`<memory-context>` fence** | Memory Context Fence | 包住 system prompt 中 recall 內容的 XML-like 標籤，標明「這是 background data，不是 user instruction」。防 prompt injection |
-| **MainAgentMemoryAdvisor** | Main Agent Memory Advisor | `AgentCallAdvisor` 實作。`adviseCall()` before-hook 載入 snapshot + prefix goal、after-hook 解析 emit-block + strip。**只**註冊在 `ChatDispatcher.buildMainAgentClient()`，sub-agent 路徑不註冊 — 結構性 exclusion |
-| **ConsolidationTrigger** | Consolidation Trigger | 三個觸發條件：max usage > 80% / idle > 60s / user 說 bye。觸發時 `MemoryPromptBuilder` 注入 `<system-reminder>` 要求 Main-agent emit `op="rewrite"` |
-| **Frozen Snapshot** | Frozen Snapshot | 每次 dispatch 開頭讀檔一次，整次 dispatch 期間 system prompt 不變。Option D 下「自然成立」 — Main-agent 沒有 mid-turn write 能力（emit-block 在 turn 結束才被解析） |
+| **ConsolidationTrigger** | Consolidation Trigger | 三個觸發條件：max usage > 80% / idle > 60s / user 說 bye。觸發時注入 `<system-reminder>` 要求 Main-agent 用 `Write` tool 整理檔案 |
+| **Frozen Snapshot** | Frozen Snapshot | 每次 dispatch 開頭讀檔一次，整次 dispatch 期間 system prompt 不變。v6 真正有意義 — Main-agent 可以 mid-turn Edit 但 system prompt 不變（保 prompt cache） |
 ```
 
-- [ ] **Step 2: Run full test suite (excluding native compile)**
+- [ ] **Step 2: Run full test suite**
 
 ```bash
 ./gradlew test -x nativeTest
 ```
 
-Expected: All memory tests PASS. Pre-existing failures (e.g., `TierOptionsFactoryTest.planModeShouldRestrictCodex`) may remain — note them but they're not memory-related.
+Expected: All memory tests PASS. The pre-existing
+`TierOptionsFactoryTest.planModeShouldRestrictCodex` should already be
+fixed/replaced by Task 10's test changes.
 
 - [ ] **Step 3: Verify native image build**
 
@@ -2742,59 +2299,64 @@ Expected: All memory tests PASS. Pre-existing failures (e.g., `TierOptionsFactor
 ./gradlew nativeCompile
 ```
 
-Expected: BUILD SUCCESSFUL. If it fails on missing reflection / resource hints, add them to the reachability metadata file and re-run.
+Expected: BUILD SUCCESSFUL.
 
-- [ ] **Step 4: Manual smoke test (optional but recommended)**
+- [ ] **Step 4: Manual smoke test**
 
 ```bash
 ./gradlew bootRun
 # Inside Grimo TUI:
 # > 我喜歡 Java records 不喜歡 Lombok
-# (Main-agent should respond and write to USER.md)
+# (Main-agent should respond and Edit ~/.grimo/memory/USER.md directly)
 # > /memory-list
 # (Should show USER.md > 0%)
 # > /memory-show user
 # (Should show "Likes Java records..." or similar)
+# > git status
+# (Should be clean — Main-agent should NOT have edited project files)
 # > /exit
 ```
 
-Then verify: `cat ~/.grimo/memory/USER.md`
+Then verify: `cat ~/.grimo/memory/USER.md` and `git status` (clean).
 
 - [ ] **Step 5: Commit glossary**
 
 ```bash
 git add docs/glossary.md
-git commit -m "docs(memory): add Long-Term Memory glossary section
+git commit -m "docs(memory): add v6 Long-Term Memory glossary section
 
-11 new terms covering the v5 memory module: GrimoMemory, MemoryFile,
-MemoryStore, MemorySnapshot, MemoryPromptBuilder, MemoryWriter,
-<grimo-memory> block, <memory-context> fence, MainAgentMemoryAdvisor,
-ConsolidationTrigger, Frozen Snapshot.
+10 new terms covering the v6 memory module: GrimoMemory, MemoryFile,
+MemoryStore, MemorySnapshot, MemoryPromptBuilder, MemoryAppender,
+MainAgentMemoryAdvisor, <memory-context> fence, ConsolidationTrigger,
+Frozen Snapshot.
+
+(MemoryWriter and <grimo-memory> block are NOT in v6 — see commit
+history if you need the v5 design.)
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 ```
 
 ---
 
-## Verification checklist (run after all tasks complete)
+## Verification checklist (v6 — 40 ACs)
 
-These map to the 46 Acceptance Criteria in the spec. Tick each off as you confirm:
+These map to the 40 Acceptance Criteria in the spec. Tick each off:
 
 ### 結構
 - [ ] AC#1: New top-level package `io.github.samzhu.grimo.memory.*` exists
 - [ ] AC#2: `GrimoMemory` constructor injects `GrimoHome` + `ProjectContext`
 - [ ] AC#3: `MemoryStore` constructor injects `GrimoMemory` + `ProjectContext`
-- [ ] AC#4: `MemoryWriter` constructor injects `GrimoMemory` + `MemoryStore`
-- [ ] AC#5: `MainAgentMemoryAdvisor` implements `AgentCallAdvisor`, injects 3 deps
+- [ ] AC#4: `MemoryAppender` constructor injects `GrimoMemory`
+- [ ] AC#5: `MainAgentMemoryAdvisor` constructor injects `MemoryStore` + `MemoryPromptBuilder` (NO writer)
 - [ ] AC#6: `ChatDispatcher` constructor adds `MainAgentMemoryAdvisor`
 - [ ] AC#7: `MemoryFile` enum has exactly USER / GLOBAL / PROJECT
-- [ ] AC#8: `MemoryWriter.Op` enum has exactly APPEND / REPLACE / REWRITE
 
-### 結構性安全保證
-- [ ] AC#9: `processBlock()` uses `MemoryFile.valueOf()` for file attr
-- [ ] AC#10: `atomicWrite()` path comes from enum, no string concatenation
-- [ ] AC#11: Plan Mode disallowedTools unchanged
-- [ ] AC#12: Attack vector test (`file="src/Main.java"`) passes
+### Plan Mode 調整
+- [ ] AC#8: `TierOptionsFactory.buildClaude()` removed `disallowedTools` block
+- [ ] AC#9: `TierOptionsFactory.buildGemini()` uses `yolo(true)` unconditionally
+- [ ] AC#10: ExecutionMode enum kept with both values + Javadoc updated
+- [ ] AC#11: TierOptionsFactoryTest verifies PLAN mode no longer restricts Edit
+- [ ] AC#12: ChatDispatcher comments updated to reflect v6
 
 ### Lazy bootstrap
 - [ ] AC#13: First `loadSnapshot()` creates dirs + files with header
@@ -2802,70 +2364,60 @@ These map to the 46 Acceptance Criteria in the spec. Tick each off as you confir
 
 ### Advisor pattern integration
 - [ ] AC#15: Three Main-agent entries use `buildMainAgentClient()`
-- [ ] AC#16: `doDispatch(...)` overloads do NOT register memory advisor
-- [ ] AC#17: Advisor before/after hooks construct new request/response correctly
+- [ ] AC#16: `doDispatch(...)` does NOT register memory advisor
+- [ ] AC#17: Advisor only has BEFORE-hook (no after-hook)
 - [ ] AC#18: `getOrder()` larger than session advisor's order
 - [ ] AC#19: Advisor try/catch falls back to raw chain on error
 
 ### Sub-agent exclusion
-- [ ] AC#20: SkillExecutor inline path receives raw goal + raw response
-- [ ] AC#21: DevModeRunner / SkillAnalyzer don't depend on advisor (reflection test)
+- [ ] AC#20: SkillExecutor inline path receives raw goal
+- [ ] AC#21: Reflection test verifies SkillExecutor / DevModeRunner / SkillAnalyzer don't depend on advisor
 
-### `op="replace"` behavior
-- [ ] AC#22: Success case
-- [ ] AC#23: Not found rejection
-- [ ] AC#24: Ambiguous rejection
-- [ ] AC#25: Empty `<old>` rejection
-- [ ] AC#26: Delete (empty `<new>`) with normalize
-
-### 一般行為
-- [ ] AC#27: Frozen snapshot (trivially true under Option D)
-- [ ] AC#28: 100% usage shown without truncation
-- [ ] AC#29: `<memory-context>` fence sanitize works
-- [ ] AC#30: Consolidation trigger 3 conditions
-- [ ] AC#31: IO error doesn't block dispatch
-- [ ] AC#32: Block parse failure stripped from visible
+### 行為
+- [ ] AC#22: Frozen snapshot — system prompt stays stable mid-turn
+- [ ] AC#23: 100% usage shown without truncation
+- [ ] AC#24: `<memory-context>` fence sanitize works
+- [ ] AC#25: Consolidation trigger 3 conditions, asks for `Write` rewrite
+- [ ] AC#26: IO error doesn't block dispatch
 
 ### 指令
-- [ ] AC#33: `/memory-list` works
-- [ ] AC#34: `/memory-show` works
-- [ ] AC#35: `/memory-add` works
-- [ ] AC#36: `/memory-edit` works
-- [ ] AC#37: `/memory-clear` works
+- [ ] AC#27: `/memory-list` works
+- [ ] AC#28: `/memory-show` works
+- [ ] AC#29: `/memory-add` works (via MemoryAppender)
+- [ ] AC#30: `/memory-edit` works
+- [ ] AC#31: `/memory-clear` works
 
 ### 人工驗收
-- [ ] AC#38: 5-turn conversation appends to USER.md
-- [ ] AC#39: Next session sees previous memory
-- [ ] AC#40: Visible response has no `<grimo-memory>` tags
-- [ ] AC#41: "Forget X" → entry removed via op=replace empty new
+- [ ] AC#32: 5-turn conversation appends to USER.md (via Main-agent native Edit)
+- [ ] AC#33: Next session sees previous memory
+- [ ] AC#34: "Forget X" → entry removed via Main-agent native Edit
+- [ ] AC#35: Main-agent does NOT edit src/ during normal memory operations (1-week observation)
 
 ### Build
-- [ ] AC#42: `./gradlew test -x nativeTest` passes
-- [ ] AC#43: `./gradlew nativeCompile` passes
-- [ ] AC#44: native-image resource-config.json includes prompts/memory-protocol.md
+- [ ] AC#36: `./gradlew test -x nativeTest` passes
+- [ ] AC#37: `./gradlew nativeCompile` passes
+- [ ] AC#38: native-image resource-config.json includes prompts/memory-protocol.md
 
 ### 文件
-- [ ] AC#45: glossary.md updated with 11 memory terms
-- [ ] AC#46: CLAUDE.md unchanged (memory/ is top-level, no shared/ violation)
+- [ ] AC#39: glossary.md updated with 10 v6 memory terms
+- [ ] AC#40: CLAUDE.md unchanged
 
 ---
 
-## Notes for the implementer
+## Notes for the implementer (v6)
 
-1. **Read the spec first.** This plan is dense; the spec has the full context at `docs/superpowers/specs/2026-04-08-main-conversation-memory-design.md`. When in doubt, the spec wins.
+1. **Read the spec first.** This plan is dense; the spec has the full v6 context at `docs/superpowers/specs/2026-04-08-main-conversation-memory-design.md`. When in doubt, the spec wins.
 
 2. **TDD strictly.** Write the failing test first, run it, see RED, then implement to GREEN. Don't skip the failing-test step.
 
 3. **Frequent commits.** Each task should produce one commit. Don't batch.
 
-4. **SDK API is unforgiving.** `AgentClientRequest` and `AgentClientResponse` are records — there is no `mutate()` method. Construct new instances explicitly, preserving `context` map and other fields. Sample code in spec §元件 #7 (post-correction).
+4. **SDK API is unforgiving.** `AgentClientRequest` and `AgentClientResponse` are records — there is no `mutate()` method. Construct new instances explicitly, preserving `context` map and other fields.
 
-5. **Sub-agent exclusion is structural.** If a test fails because `SkillExecutor` or `DevModeRunner` accidentally got memory wired, **don't fix the test by adding memory to them** — fix the wiring instead. Memory must only be on Main-agent paths.
+5. **Plan Mode change is REQUIRED for v6.** Don't skip Task 10. Without it, Main-agent won't be able to Edit memory files and the whole feature won't work. Update / replace the pre-existing `TierOptionsFactoryTest.planModeShouldRestrictCodex` test as part of Task 10.
 
-6. **Plan Mode is sacred.** Do NOT change `disallowedTools=["Edit","Write","MultiEdit"]` in `TierOptionsFactory`. The whole emit-block design depends on Main-agent NOT having Edit access.
+6. **Sub-agent exclusion is structural.** If a test fails because `SkillExecutor` or `DevModeRunner` accidentally got memory wired, **don't fix the test by adding memory to them** — fix the wiring instead.
 
-7. **Native image hints.** The `memory-protocol.md` resource is the only known native-image gotcha. If `nativeCompile` fails after Task 14, look for missing reflection metadata — the advisor / writer Java code should be reachable without extra hints since it uses standard Spring DI.
+7. **No emit-block parser.** v6 has NO `MemoryWriter`, NO `<grimo-memory>` block, NO Op enum, NO regex parsing. Main-agent uses native Edit/Write. The Java side only does READ injection (advisor) + `MemoryAppender` for user commands.
 
-8. **Existing failing tests.** `TierOptionsFactoryTest.planModeShouldRestrictCodex` was failing pre-spec. Ignore it for memory work; don't try to "fix" it as part of this plan.
-
-9. **The 46 AC items are the truth.** If you can't tick all of them off, you're not done.
+8. **The 40 AC items are the truth.** If you can't tick all of them off, you're not done.
