@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add file-based long-term memory to Grimo's main conversation. Main-agent reads three memory files (USER / GLOBAL / PROJECT) injected into the system prompt, and writes via emit-block (`<grimo-memory>`) parsed by Grimo Java side. Sub-agents are excluded by design.
+**Goal:** Add file-based long-term memory to Grimo's main conversation. Main-agent reads three memory files (USER / GLOBAL / PROJECT) injected into the system prompt, and writes via native `Edit` / `Write` tools directly. Sub-agents are excluded by advisor registration boundary. (v6 design — see spec for v5→v6 transition rationale.)
 
-**Architecture:** Top-level `io.github.samzhu.grimo.memory` module containing path management (`GrimoMemory`), enum-based path sandbox (`MemoryFile`), immutable snapshot (`MemorySnapshot` + `FileSnapshot`), reader (`MemoryStore`), prompt builder with `<memory-context>` fence (`MemoryPromptBuilder`), consolidation trigger (`ConsolidationTrigger`), and the 3-op writer (`MemoryWriter`: APPEND / REPLACE / REWRITE). Cross-cutting wiring via a single `MainAgentMemoryAdvisor` (implements `AgentCallAdvisor`) registered on the main-agent `AgentClient` builder. Sub-agent dispatches (`SkillExecutor`, `DevModeRunner`, `SkillAnalyzer`) build their own clients without registering this advisor — exclusion is structural.
+**Architecture (v6):** Top-level `io.github.samzhu.grimo.memory` module containing path management (`GrimoMemory`), helper enum (`MemoryFile`), immutable snapshot (`MemorySnapshot` + `FileSnapshot`), reader (`MemoryStore`), prompt builder with `<memory-context>` fence (`MemoryPromptBuilder`), consolidation trigger (`ConsolidationTrigger`), and a small append helper (`MemoryAppender`, ~80 LOC for `/memory-add` and `/memory-clear` user commands only). Cross-cutting wiring via a single `MainAgentMemoryAdvisor` (implements `AgentCallAdvisor`, only BEFORE-hook) registered on the main-agent `AgentClient` builder. Main-agent uses native `Edit` / `Write` tools to manage memory files inside the CLI subprocess — Java side does not parse responses. Sub-agent dispatches (`SkillExecutor`, `DevModeRunner`, `SkillAnalyzer`) build their own clients without registering this advisor — exclusion is structural. Plan Mode `disallowedTools` is removed in v6 to give Main-agent native Edit/Write access.
 
 **Tech Stack:** Java 25 (records, sealed types, switch expressions), Spring Boot 4.0.x (`@Component`, constructor DI), Spring AI Community Agent Client 0.11.0 (`AgentCallAdvisor` API — verified against [agent-client source](https://github.com/spring-ai-community/agent-client/tree/main/agent-client-core)), JUnit 5 + AssertJ, GraalVM 25 native image.
 
@@ -38,7 +38,7 @@
 | `src/main/java/io/github/samzhu/grimo/memory/MemoryStore.java` | Stateless reader. `loadSnapshot()` |
 | `src/main/java/io/github/samzhu/grimo/memory/ConsolidationTrigger.java` | Decides when to inject `<system-reminder>` |
 | `src/main/java/io/github/samzhu/grimo/memory/MemoryPromptBuilder.java` | Renders memory block + fence + protocol prompt + reminder |
-| `src/main/java/io/github/samzhu/grimo/memory/MemoryWriter.java` | Parses `<grimo-memory>` blocks, enforces enum, atomic writes |
+| `src/main/java/io/github/samzhu/grimo/memory/MemoryAppender.java` | Small ~80 LOC helper for `/memory-add` / `/memory-clear`. Atomic temp+rename writes |
 | `src/main/java/io/github/samzhu/grimo/memory/advisor/MainAgentMemoryAdvisor.java` | `AgentCallAdvisor` wrapping load+prepend / extract+strip |
 | `src/main/java/io/github/samzhu/grimo/command/MemoryCommands.java` | `/memory-list` / `/memory-show` / `/memory-add` / `/memory-edit` / `/memory-clear` |
 | `src/main/resources/prompts/memory-protocol.md` | LLM-facing protocol template (~250 lines, taught via system prompt) |
@@ -48,7 +48,7 @@
 | `src/test/java/io/github/samzhu/grimo/memory/MemoryStoreTest.java` | |
 | `src/test/java/io/github/samzhu/grimo/memory/ConsolidationTriggerTest.java` | |
 | `src/test/java/io/github/samzhu/grimo/memory/MemoryPromptBuilderTest.java` | |
-| `src/test/java/io/github/samzhu/grimo/memory/MemoryWriterTest.java` | |
+| `src/test/java/io/github/samzhu/grimo/memory/MemoryAppenderTest.java` | |
 | `src/test/java/io/github/samzhu/grimo/memory/advisor/MainAgentMemoryAdvisorTest.java` | |
 | `src/test/java/io/github/samzhu/grimo/memory/SubAgentExclusionTest.java` | Compile-time/integration check that sub-agent paths don't see memory |
 
@@ -72,7 +72,7 @@ io.github.samzhu.grimo/
 │   ├── MemoryStore.java
 │   ├── ConsolidationTrigger.java
 │   ├── MemoryPromptBuilder.java
-│   ├── MemoryWriter.java
+│   ├── MemoryAppender.java
 │   └── advisor/
 │       └── MainAgentMemoryAdvisor.java
 ├── home/            ← existing
@@ -203,7 +203,7 @@ import java.nio.file.Path;
 public class GrimoMemory {
 
     private static final String DEFAULT_HEADER_FORMAT =
-        "<!-- Grimo memory file. Edited by Main-agent (via <grimo-memory> block) "
+        "<!-- Grimo memory file. Edited by Main-agent (via native Edit/Write) "
         + "and (optionally) by you. Hard limit: %d characters. -->\n\n";
 
     private final GrimoHome home;
@@ -363,14 +363,15 @@ import java.nio.file.Path;
 /**
  * Memory file enum — Path sandbox core for Option D.
  *
- * 設計說明：
- * - Main-agent 在 emit-block 中提供的 file= attr 必須對應到這三個 enum 之一
- * - MemoryFile.valueOf("SRC/MAIN.JAVA") 直接 throw IllegalArgumentException
- * - 路徑由 resolve(GrimoMemory) 從 GrimoMemory bean 取出，**沒有任何字串拼接**
- * - 結構性鎖死 — Main-agent 完全沒有機會寫入 memory 以外的路徑
+ * 設計說明（v6 — 純 helper）：
+ * - 列舉三個 memory file 的 char limit + path resolve
+ * - 路徑由 resolve(GrimoMemory) 從 GrimoMemory bean 取出
+ * - v6 不擔任 path sandbox 角色（v5 曾是；v6 主對話用 native Edit/Write 寫檔，
+ *   不依賴 Java 端 enum 強制）
  *
  * @see GrimoMemory 提供實際的 Path
- * @see MemoryWriter#processBlock 透過 valueOf() 攔截非法 file 值
+ * @see MemoryStore 用此 enum 取得每個檔的 limit
+ * @see MemoryAppender 用此 enum 解析 /memory-add 的目標
  */
 public enum MemoryFile {
     USER(1500),
@@ -705,7 +706,9 @@ import java.nio.file.Path;
  * 設計說明：
  * - loadSnapshot() 是 pure function — 每次呼叫從 disk 讀取，產出 immutable MemorySnapshot
  * - 無 instance state（不 cache），多個 Virtual Thread 同時呼叫互不干擾
- * - 寫入動作由 MemoryWriter 處理，本 class 沒有 write API
+ * - v6 寫入由 Main-agent 用 native Edit/Write 在 subprocess 內做；
+ *   /memory-add 跟 /memory-clear 指令的寫入由 MemoryAppender 處理。
+ *   本 class 沒有 write API
  */
 @Component
 public class MemoryStore {
@@ -949,9 +952,9 @@ Three trigger conditions:
 3. User input contains end keyword (bye/再見/掰/exit)
 
 When any condition is true, MemoryPromptBuilder will inject a
-<system-reminder> asking Main-agent to emit op=\"rewrite\" block to
-consolidate. Trigger uses AtomicReference for thread-safe
-lastInteraction tracking across concurrent dispatches.
+<system-reminder> asking Main-agent to use the Write tool to
+consolidate the file that exceeds 80%. Trigger uses AtomicReference
+for thread-safe lastInteraction tracking across concurrent dispatches.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 ```
@@ -1191,13 +1194,15 @@ public class MemoryPromptBuilder {
 
     private static final String CONSOLIDATION_REMINDER = """
             <system-reminder>
-            Long-term memory needs consolidation. Before responding to the user, review
-            the memory blocks above and emit a <grimo-memory> block with op="rewrite"
-            for the file that exceeds 80%:
-            - Dedupe similar entries.
-            - Remove stale or contradicted entries.
-            - Compress multi-line entries that no longer need full context.
-            - Aim to bring usage below 60%.
+            Long-term memory needs consolidation. Before adding any new entries this turn,
+            review the memory files above and use your `Write` tool to recreate the file
+            that exceeds 80% with deduped content:
+            - Read the current file (or trust the snapshot above)
+            - Dedupe similar entries
+            - Remove stale or contradicted entries
+            - Compress multi-line entries that no longer need full context
+            - Aim to bring usage below 60%
+            - Use Write (not Edit) for the full-file replacement — it's atomic
             Do not mention this consolidation to the user unless asked.
             </system-reminder>
             """;
