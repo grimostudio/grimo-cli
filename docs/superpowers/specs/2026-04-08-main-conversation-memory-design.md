@@ -574,8 +574,10 @@ Emit a block at the END of your response, AFTER your visible reply to the user:
 Where:
 - `file`: one of `user` / `global` / `project` (the File ID column above) — Grimo
   enforces this enum; any other value is rejected.
-- `op`: one of `append` (add new entry, most common) or `rewrite` (replace whole
-  file, only for consolidation).
+- `op`: one of three operations:
+  - `append` — add a new entry at the end (most common)
+  - `replace` — surgical find/replace a specific entry (update or delete)
+  - `rewrite` — replace the entire file (consolidation only)
 
 **Multiple blocks per response are allowed** (e.g. one for `user` + one for `project`).
 
@@ -601,7 +603,90 @@ content, not the separator.
 When you `op="rewrite"`, you emit the full new contents of the file, including
 all separators between entries. Use this only for consolidation.
 
-## Examples
+When you `op="replace"`, you provide BOTH `<old>` (exact text to find) and `<new>`
+(replacement text) inside the block. See the dedicated section below.
+
+## `op="replace"` — surgical find / replace
+
+Use `replace` when you want to update or delete ONE specific entry without
+re-emitting the entire file. Format:
+
+```
+<grimo-memory file="<file-id>" op="replace">
+<old>
+exact text currently in the file (must appear exactly once, whitespace-sensitive)
+</old>
+<new>
+replacement text (use empty content to DELETE the matched entry)
+</new>
+</grimo-memory>
+```
+
+### Safety rules (Grimo enforces these — your block will be rejected otherwise)
+
+1. **`<old>` must appear EXACTLY ONCE in the target file.** If it appears 0 times
+   or 2+ times, Grimo rejects the block. **To disambiguate, include MORE
+   surrounding context** in `<old>` (e.g. include the preceding `**Why:**` line).
+2. **Whitespace and newlines in `<old>` must match the file exactly.**
+3. **`<old>` cannot be empty** — that would clear the whole file. Use `op="rewrite"`
+   for whole-file replacement.
+4. **`<new>` empty = delete.** Grimo automatically cleans up any dangling `---`
+   separators around the deleted region (no need to include separators in your
+   `<old>` text — just match the entry body).
+
+### Examples
+
+**Update an entry's `**Why:**` line with more detail:**
+
+```
+<grimo-memory file="user" op="replace">
+<old>
+Prefers Java records over Lombok for DTOs.
+**Why:** User said "I prefer records over Lombok" on 2026-04-08.
+</old>
+<new>
+Prefers Java records over Lombok for DTOs.
+**Why:** User said so on 2026-04-08, prefers records for value-object pattern.
+**How to apply:** when generating DTOs / value objects in any project.
+</new>
+</grimo-memory>
+```
+
+**Delete an obsolete entry:**
+
+```
+<grimo-memory file="project" op="replace">
+<old>
+Uses Spring Modulith 1.4 with experimental events module.
+</old>
+<new>
+</new>
+</grimo-memory>
+```
+
+After this, the entry plus its surrounding `---` separators are gone. Other
+entries are untouched.
+
+**Update a fact (Spring Modulith version bump):**
+
+```
+<grimo-memory file="project" op="replace">
+<old>
+Uses Spring Modulith 1.4
+</old>
+<new>
+Uses Spring Modulith 2.0 (upgraded 2026-04-08)
+</new>
+</grimo-memory>
+```
+
+### When to use `replace` vs `rewrite`
+
+- **One entry to update/delete** → `replace` (surgical, ~120 tokens)
+- **Multiple entries to dedupe / file > 80%** → `rewrite` (whole new file)
+- **Adding a new fact** → `append` (not `replace`)
+
+## Examples (general)
 
 To remember a user preference (most common case):
 
@@ -683,18 +768,22 @@ Save proactively when you learn:
 
 Save **fewer, better** entries. Every char counts against the limit.
 
-If the user explicitly says "remember this" → emit a block immediately. If they
-say "forget this" → emit a `rewrite` block with the offending entry removed.
+If the user explicitly says "remember this" → emit an `append` block immediately.
+If they say "forget X" → emit a `replace` block with `<old>` matching the entry
+and `<new>` empty (delete).
 
 ## Before recommending from memory
 
 A memory that names a file, function, or flag is a claim about how things were
 **when the memory was written**. Verify before acting:
-- Memory mentions a file path → use your read tools to confirm it exists.
-- Memory mentions a function or flag → search for it.
+- Memory mentions a file path → use your `Read` tool (you have it in Plan Mode)
+  to confirm the file exists.
+- Memory mentions a function or flag → use your search tools (`Grep` / `Glob`,
+  available in Plan Mode) to find it.
 
-If a memory contradicts current code, **trust the code** and emit a `rewrite`
-block to update the memory. Stale entries are worse than no entry.
+If a memory contradicts current code, **trust the code** and emit a `replace`
+block to update the entry (or `rewrite` if you want to restructure the whole
+file). Stale entries are worse than no entry.
 
 ## Keeping memory clean
 
@@ -1009,6 +1098,13 @@ public class MemoryWriter {
     private static final Pattern ATTR_PATTERN = Pattern.compile(
         "(\\w+)\\s*=\\s*\"([^\"]*)\""
     );
+    /** Nested tags inside op="replace" content. Non-greedy + DOTALL. */
+    private static final Pattern OLD_PATTERN = Pattern.compile(
+        "<old>(.*?)</old>", Pattern.DOTALL
+    );
+    private static final Pattern NEW_PATTERN = Pattern.compile(
+        "<new>(.*?)</new>", Pattern.DOTALL
+    );
 
     private final GrimoMemory grimoMemory;
     private final MemoryStore memoryStore;  // for re-checking limits after write
@@ -1075,46 +1171,129 @@ public class MemoryWriter {
         try {
             op = Op.valueOf(opAttr.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException | NullPointerException e) {
-            log.warn("Rejected <grimo-memory> block: invalid op='{}'. Allowed: append|rewrite", opAttr);
-            return null;
-        }
-
-        Path path = target.resolve(grimoMemory);
-        String trimmedContent = content.strip();
-        if (trimmedContent.isEmpty()) {
-            log.warn("Skipping empty <grimo-memory> block (file={}, op={})", target, op);
+            log.warn("Rejected <grimo-memory> block: invalid op='{}'. Allowed: append|replace|rewrite", opAttr);
             return null;
         }
 
         // 確保父目錄存在
         grimoMemory.ensureExists();
 
-        int newCharCount;
-        if (op == Op.REWRITE) {
-            String full = renderHeaderComment(target) + trimmedContent + "\n";
-            atomicWrite(path, full);
-            newCharCount = trimmedContent.length();
-        } else {
-            // op == APPEND
-            String existing = Files.exists(path) ? Files.readString(path, UTF_8) : "";
-            String existingBody = stripHeaderComment(existing).strip();
-            String newBody = existingBody.isEmpty()
-                    ? trimmedContent
-                    : existingBody + "\n\n---\n\n" + trimmedContent;
-            String full = renderHeaderComment(target) + newBody + "\n";
-            atomicWrite(path, full);
-            newCharCount = newBody.length();
+        return switch (op) {
+            case APPEND -> processAppend(target, content);
+            case REPLACE -> processReplace(target, content);
+            case REWRITE -> processRewrite(target, content);
+        };
+    }
+
+    private WriteOp processAppend(MemoryFile target, String content) throws IOException {
+        String trimmedContent = content.strip();
+        if (trimmedContent.isEmpty()) {
+            log.warn("Skipping empty append block (file={})", target);
+            return null;
         }
 
-        int limit = target.charLimit();
-        if (newCharCount > limit) {
+        Path path = target.resolve(grimoMemory);
+        String existing = Files.exists(path) ? Files.readString(path, UTF_8) : "";
+        String existingBody = stripHeaderComment(existing).strip();
+        String newBody = existingBody.isEmpty()
+                ? trimmedContent
+                : existingBody + "\n\n---\n\n" + trimmedContent;
+
+        atomicWrite(path, renderHeaderComment(target) + newBody + "\n");
+        int newCharCount = newBody.length();
+        warnIfOverLimit(target, newCharCount);
+        log.info("[MEMORY-WRITE] file={}, op=APPEND, newCharCount={}/{}", target, newCharCount, target.charLimit());
+        return new WriteOp(target, Op.APPEND, trimmedContent.length(), newCharCount);
+    }
+
+    private WriteOp processRewrite(MemoryFile target, String content) throws IOException {
+        String trimmedContent = content.strip();
+        if (trimmedContent.isEmpty()) {
+            log.warn("Skipping empty rewrite block (file={})", target);
+            return null;
+        }
+
+        Path path = target.resolve(grimoMemory);
+        atomicWrite(path, renderHeaderComment(target) + trimmedContent + "\n");
+        int newCharCount = trimmedContent.length();
+        warnIfOverLimit(target, newCharCount);
+        log.info("[MEMORY-WRITE] file={}, op=REWRITE, newCharCount={}/{}", target, newCharCount, target.charLimit());
+        return new WriteOp(target, Op.REWRITE, trimmedContent.length(), newCharCount);
+    }
+
+    /**
+     * Surgical find/replace. Block content must contain <old>...</old> and <new>...</new>.
+     * Safety rules:
+     *   1. <old> must appear EXACTLY ONCE in the file (whitespace-sensitive)
+     *   2. <old> must NOT be empty (would clear file - use op="rewrite" instead)
+     *   3. <new> empty means delete the matched range; surrounding "\n\n---\n\n"
+     *      separators are normalized away to avoid dangling separators
+     */
+    private WriteOp processReplace(MemoryFile target, String content) throws IOException {
+        Matcher oldM = OLD_PATTERN.matcher(content);
+        Matcher newM = NEW_PATTERN.matcher(content);
+        if (!oldM.find() || !newM.find()) {
+            log.warn("Rejected replace block on {}: missing <old> or <new> tag", target);
+            return null;
+        }
+        String oldText = oldM.group(1).strip();
+        String newText = newM.group(1).strip();
+
+        if (oldText.isEmpty()) {
+            log.warn("Rejected replace on {}: <old> is empty (would clear file - use op=\"rewrite\" instead)", target);
+            return null;
+        }
+
+        Path path = target.resolve(grimoMemory);
+        String existing = Files.exists(path) ? Files.readString(path, UTF_8) : "";
+        String existingBody = stripHeaderComment(existing);
+
+        int firstIdx = existingBody.indexOf(oldText);
+        int lastIdx = existingBody.lastIndexOf(oldText);
+        if (firstIdx == -1) {
+            log.warn("Rejected replace on {}: <old> text not found", target);
+            return null;
+        }
+        if (firstIdx != lastIdx) {
+            log.warn("Rejected replace on {}: <old> text appears multiple times — ambiguous, "
+                    + "include more surrounding context", target);
+            return null;
+        }
+
+        String updated = existingBody.substring(0, firstIdx)
+                + newText
+                + existingBody.substring(firstIdx + oldText.length());
+
+        // 如果是 delete (newText 為空)，清理可能殘留的 dangling "---" 分隔
+        if (newText.isEmpty()) {
+            updated = normalizeAfterDelete(updated);
+        }
+
+        String finalBody = updated.strip();
+        atomicWrite(path, renderHeaderComment(target) + finalBody + "\n");
+        int newCharCount = finalBody.length();
+        warnIfOverLimit(target, newCharCount);
+        log.info("[MEMORY-WRITE] file={}, op=REPLACE, oldLen={}, newLen={}, fileChars={}/{}",
+                target, oldText.length(), newText.length(), newCharCount, target.charLimit());
+        return new WriteOp(target, Op.REPLACE, newText.length(), newCharCount);
+    }
+
+    private void warnIfOverLimit(MemoryFile target, int newCharCount) {
+        if (newCharCount > target.charLimit()) {
             log.warn("Memory file {} now exceeds limit: {}/{} chars (Main-agent should consolidate)",
-                    target, newCharCount, limit);
+                    target, newCharCount, target.charLimit());
         }
+    }
 
-        log.info("[MEMORY-WRITE] file={}, op={}, newCharCount={}/{}",
-                target, op, newCharCount, limit);
-        return new WriteOp(target, op, trimmedContent.length(), newCharCount);
+    /**
+     * Normalize dangling "---" separators after a delete operation.
+     * Handles: leading "---\n", trailing "\n---", consecutive "\n\n---\n\n---\n\n".
+     */
+    private static String normalizeAfterDelete(String content) {
+        return content
+            .replaceAll("(?m)\\A(?:\\s*---\\s*\\n)+", "")
+            .replaceAll("(?:\\n---\\s*)+\\z", "")
+            .replaceAll("(?:\\n\\n---\\n\\n){2,}", "\n\n---\n\n");
     }
 
     private static Map<String, String> parseAttrs(String attrs) {
@@ -1156,7 +1335,7 @@ public class MemoryWriter {
 
     public record WriteOp(MemoryFile file, Op op, int contentLen, int newCharCount) {}
 
-    public enum Op { APPEND, REWRITE }
+    public enum Op { APPEND, REPLACE, REWRITE }
 }
 ```
 
@@ -1194,7 +1373,88 @@ public enum MemoryFile {
 - LLM emit `file="../../etc/passwd"` → 同上拒
 - **沒有任何 path 字串會到達 `Files.writeString()`**，全部由 enum 對應的 hardcoded path 決定
 
-### 7. Resource: `memory-protocol.md`
+### 7. `MainAgentMemoryAdvisor`（cross-cutting wrapper）
+
+把 memory 注入跟 emit-block 解析包成一個 `AgentCallAdvisor`，**取代**之前在 `ChatDispatcher` 三個 entry 各自手動 prepend / extract 的程式碼。
+
+```java
+package io.github.samzhu.grimo.memory.advisor;
+
+import org.springaicommunity.agents.client.advisor.api.AgentCallAdvisor;
+import org.springaicommunity.agents.client.advisor.api.AgentCallAdvisorChain;
+import org.springaicommunity.agents.client.AgentClientRequest;
+import org.springaicommunity.agents.client.AgentClientResponse;
+
+@Component
+public class MainAgentMemoryAdvisor implements AgentCallAdvisor {
+    private static final Logger log = LoggerFactory.getLogger(MainAgentMemoryAdvisor.class);
+
+    private final MemoryStore memoryStore;
+    private final MemoryPromptBuilder promptBuilder;
+    private final MemoryWriter memoryWriter;
+
+    public MainAgentMemoryAdvisor(MemoryStore memoryStore,
+                                  MemoryPromptBuilder promptBuilder,
+                                  MemoryWriter memoryWriter) {
+        this.memoryStore = memoryStore;
+        this.promptBuilder = promptBuilder;
+        this.memoryWriter = memoryWriter;
+    }
+
+    @Override
+    public String getName() {
+        return "main-agent-memory";
+    }
+
+    @Override
+    public int getOrder() {
+        // 設計說明：晚於 GrimoSessionAdvisor 執行 before-hook，
+        // 確保 session JSONL 寫入的是 raw user input 而非 prefixed goal。
+        // GrimoSessionAdvisor 預設 order = HIGHEST_PRECEDENCE + 300，
+        // memory advisor 用 + 400 確保 session 先看到 request。
+        return AgentCallAdvisor.DEFAULT_AGENT_PRECEDENCE_ORDER + 400;
+    }
+
+    @Override
+    public AgentClientResponse adviseCall(AgentClientRequest request,
+                                          AgentCallAdvisorChain chain) {
+        // === BEFORE: load snapshot + prepend memory protocol ===
+        MemorySnapshot snapshot = memoryStore.loadSnapshot();
+        String prefixedGoal = promptBuilder.build(snapshot, request.goal());
+        AgentClientRequest newRequest = request.mutate()
+                .goal(prefixedGoal)
+                .build();
+
+        log.debug("[MEMORY-ADVISOR] prefixed goal: orig={} chars, prefixed={} chars",
+                request.goal().length(), prefixedGoal.length());
+
+        // === CALL ===
+        AgentClientResponse response = chain.nextCall(newRequest);
+
+        // === AFTER: extract <grimo-memory> blocks, write, return stripped ===
+        String rawResult = response.getResult();
+        var writeResult = memoryWriter.extractAndWrite(rawResult);
+        if (writeResult.hasWrites()) {
+            log.info("[MEMORY-ADVISOR] {} block(s) written this turn", writeResult.ops().size());
+        }
+
+        // 回傳 stripped visibleText，下游（contentView/callback/sessionWriter）看不到 block
+        return response.mutate()
+                .result(writeResult.visibleText())
+                .build();
+    }
+}
+```
+
+**設計重點**：
+1. **單一進入點封裝整個 cross-cutting concern**：load → prepend → call → extract → strip
+2. **`getOrder()` 排在 `GrimoSessionAdvisor` 之後**（更高 order = before-hook 後執行 = session 先看到 raw goal），確保 session JSONL 寫的是原始 user input
+3. **不依賴 `ChatDispatcher`**：advisor 是純 SDK 介面，可以掛在任何 `AgentClient` builder 上
+4. **Sub-agent 自動排除**：advisor 只 inject 到 `ChatDispatcher` 的 client builder，sub-agent 元件（SkillExecutor、DevModeRunner、SkillAnalyzer）建自己的 client 時**不**註冊這個 advisor → **編譯期保證不會誤吃**
+
+**參考**：[Spring AI Community Agent Client Advisors](https://spring-ai-community.github.io/agent-client/api/advisors.html)
+
+### 8. Resource: `memory-protocol.md`
 
 放在 `src/main/resources/prompts/memory-protocol.md`。內容如本 spec「Memory System Prompt Template」段落所示。
 
@@ -1228,135 +1488,106 @@ public enum MemoryFile {
 
 **重要觀察**：`doDispatch` 是 mixed-use（Main-agent TUI 跟 Sub-agent SkillExecutor 共用）。**不能在 `doDispatch` 裡注入 memory，否則 SkillExecutor 也會誤吃**。
 
-### 注入策略：三個 entry 都做「prepend goal + extract response」雙向 wrap
+### 注入策略：advisor pattern（取代手動 prepend/extract）
 
-每個主對話 entry 加兩個動作：
-1. **dispatch 前**：`memoryStore.loadSnapshot()` → `memoryPromptBuilder.build()` → 把 prefixed goalText 傳給底層
-2. **dispatch 後**：`memoryWriter.extractAndWrite(rawResponse)` → 解析 + 寫檔 → 拿 stripped visibleText 給 contentView
-
-```java
-// === Entry 1: dispatch(userInput) — TUI 主對話 ===
-public void dispatch(String userInput) {
-    // ... existing checks ...
-
-    // === NEW: prepare prefixed goal ===
-    MemorySnapshot snapshot = memoryStore.loadSnapshot();
-    String goalText = memoryPromptBuilder.build(snapshot, userInput);
-
-    eventPublisher.publishEvent(new DispatchQueuedEvent(userInput));  // ← raw userInput, not prefixed
-    var tierSelection = resolveTier(userInput);  // ← tier 用原始 userInput
-
-    agentState.agentThread = Thread.startVirtualThread(() -> {
-        // ... thinking event ...
-        String rawResult = doDispatch(goalText, tierSelection);
-
-        // === NEW: extract <grimo-memory> blocks + write + strip ===
-        var writeResult = memoryWriter.extractAndWrite(rawResult);
-        if (writeResult.hasWrites()) {
-            log.info("[MEMORY-WRITE] {} block(s) written this turn", writeResult.ops().size());
-        }
-        String visibleResult = writeResult.visibleText();
-
-        // 剩下的 response 處理流程跟原本一樣
-        if (!visibleResult.isBlank()) contentView.appendAiReply(visibleResult);
-        sessionManager.getWriter().writeAssistantMessage(visibleResult);  // session 紀錄也是 stripped 版
-        // ... DispatchCompletedEvent / ReactionIndicator update ...
-    });
-}
-
-// === Entry 2: dispatch(userInput, callback) — LINE / Discord 主對話 ===
-public void dispatch(String userInput, InputPort.ResponseCallback callback) {
-    Thread.startVirtualThread(() -> {
-        // ... resolve agentId/model existing ...
-
-        // === NEW: prefix goal ===
-        MemorySnapshot snapshot = memoryStore.loadSnapshot();
-        String goalText = memoryPromptBuilder.build(snapshot, userInput);
-
-        var client = AgentClient.builder(agentModel)... .build();
-        var rawResponse = client.run(goalText, options).getResult();
-
-        // === NEW: extract + strip ===
-        var writeResult = memoryWriter.extractAndWrite(rawResponse);
-        callback.onResponse(writeResult.visibleText());  // ← 給 channel adapter 的是 stripped 版
-    });
-}
-
-// === Entry 3: dispatchTo(agentId, text, callback) — @agent Main-agent ===
-public void dispatchTo(String agentId, String text, InputPort.ResponseCallback callback) {
-    Thread.ofVirtual().name("grimo-chat-" + agentId).start(() -> {
-        // ... resolve agentModel existing ...
-
-        // === NEW: prefix goal ===
-        MemorySnapshot snapshot = memoryStore.loadSnapshot();
-        String goalText = memoryPromptBuilder.build(snapshot, text);
-
-        var client = AgentClient.builder(agentModel)... .build();
-        var rawResponse = client.run(goalText, options).getResult();
-
-        // === NEW: extract + strip ===
-        var writeResult = memoryWriter.extractAndWrite(rawResponse);
-        callback.onResponse(writeResult.visibleText());
-    });
-}
-```
-
-**`doDispatch(...)` 兩個 overload 完全不改**。`SkillExecutor` 呼叫 `doDispatch(fullGoal)` 時：
-1. fullGoal 是 `/skillName args`，**不會** prepend memory
-2. doDispatch 回傳值不會經過 `MemoryWriter.extractAndWrite()` — 即使 Sub-agent 故意 emit `<grimo-memory>` block，**沒人會 parse 它**，block 原封不動回給 SkillExecutor 的呼叫方
-3. 結論：Sub-agent 完全無法寫 memory（沒有 prepend、沒有 extract）
-
-### Sub-agent / system-internal 元件 — 不需要任何修改
-
-下表的「自動排除」是指：這些元件根本不依賴 `MemoryStore` / `MemoryPromptBuilder` bean，編譯期就保證不會誤注入 memory。
-
-| 元件 | 為什麼自動排除 |
-|---|---|
-| **`SkillExecutor` (inline 模式)** | 走 `chatDispatcher.doDispatch(fullGoal)` — `doDispatch` 不注入 memory，所以 fullGoal 維持 raw |
-| **`SkillExecutor` (isolated 模式)** | 走 `devModeRunner.run(...)` — DevModeRunner 完全不依賴 ChatDispatcher |
-| **`DevModeRunner`** | 自建 `AgentClient` (line 119–124)，**不經過** `ChatDispatcher` 任何方法。完全獨立 |
-| **`SkillAnalyzer`** | 自建 `AgentClient`，完全獨立 |
-| **`TierRouter`** | 不呼叫 agent，只算 routing |
-
-→ **結構性保證**：`MemoryStore` 只 inject 到 `ChatDispatcher`，其他三個 Sub-agent / system-internal 元件**根本不依賴** `MemoryStore` 或 `MemoryPromptBuilder`。即使日後有新人想把 memory 加進 `DevModeRunner`，需要明確 import + constructor 改動，等於主動破壞排除規則 — code review 自然攔截。
-
-### `ChatDispatcher` 構造子的新依賴
-
-新增三個 constructor parameter：
+**核心**：所有 cross-cutting memory 邏輯封裝在 `MainAgentMemoryAdvisor`（見 §元件 #7）。三個 main-agent entry 只需要在建 `AgentClient` 時 register 這個 advisor，**不再需要手動 prepend / extract**。
 
 ```java
 @Component
 public class ChatDispatcher {
     // ... existing fields ...
-    private final MemoryStore memoryStore;                    // ← NEW (read)
-    private final MemoryPromptBuilder memoryPromptBuilder;    // ← NEW (prefix prompt)
-    private final MemoryWriter memoryWriter;                  // ← NEW (parse + write)
+    private final MainAgentMemoryAdvisor memoryAdvisor;  // ← 唯一新增的 dependency
 
     public ChatDispatcher(
         // ... existing params ...
-        MemoryStore memoryStore,                                // ← NEW
-        MemoryPromptBuilder memoryPromptBuilder,                // ← NEW
-        MemoryWriter memoryWriter                               // ← NEW
-    ) {
-        // ...
-        this.memoryStore = memoryStore;
-        this.memoryPromptBuilder = memoryPromptBuilder;
-        this.memoryWriter = memoryWriter;
+        MainAgentMemoryAdvisor memoryAdvisor                    // ← NEW
+    ) { /* ... */ }
+
+    /**
+     * Helper：所有 main-agent 入口共用的 client builder。
+     * 加上 MainAgentMemoryAdvisor，sub-agent 路徑（doDispatch）不要呼叫這個。
+     */
+    private AgentClient buildMainAgentClient(AgentModel agentModel, Path projectDir) {
+        return AgentClient.builder(agentModel)
+            .defaultAdvisor(memoryAdvisor)               // ← 唯一變動：加 advisor
+            .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
+            .defaultMcpServers(mcpCatalogBuilder.getServerNames())
+            .defaultWorkingDirectory(projectDir)
+            .build();
+    }
+
+    // === Entry 1: dispatch(userInput) — TUI Main-agent ===
+    public void dispatch(String userInput) {
+        // ... existing checks + tier routing + events ...
+        agentState.agentThread = Thread.startVirtualThread(() -> {
+            var client = buildMainAgentClient(agentModel, projectDir);
+            // 直接傳原始 userInput，advisor 內部會 prepend memory + extract response
+            var response = client.run(userInput, options);
+            String visibleText = response.getResult();  // 已是 stripped 版（advisor after-hook 處理過）
+
+            if (!visibleText.isBlank()) contentView.appendAiReply(visibleText);
+            sessionManager.getWriter().writeAssistantMessage(visibleText);
+            // ... events ...
+        });
+    }
+
+    // === Entry 2: dispatch(userInput, callback) — LINE / Discord Main-agent ===
+    public void dispatch(String userInput, InputPort.ResponseCallback callback) {
+        Thread.startVirtualThread(() -> {
+            // ... resolve agentId/model existing ...
+            var client = buildMainAgentClient(agentModel, projectDir);
+            var response = client.run(userInput, options);
+            callback.onResponse(response.getResult());  // 已是 stripped 版
+        });
+    }
+
+    // === Entry 3: dispatchTo(agentId, text, callback) — @agent Main-agent ===
+    public void dispatchTo(String agentId, String text, InputPort.ResponseCallback callback) {
+        Thread.ofVirtual().name("grimo-chat-" + agentId).start(() -> {
+            // ... resolve agentModel existing ...
+            var client = buildMainAgentClient(agentModel, projectDir);
+            var response = client.run(text, options);
+            callback.onResponse(response.getResult());  // 已是 stripped 版
+        });
+    }
+
+    // === doDispatch (for SkillExecutor sub-agent inline path) — 不變 ===
+    String doDispatch(String userInput, TierSelection tier) throws Exception {
+        var client = AgentClient.builder(agentModel)
+            // ⚠️ 注意：這裡刻意不加 MainAgentMemoryAdvisor — sub-agent 不該寫 memory
+            .mcpServerCatalog(mcpCatalogBuilder.getCatalog())
+            .defaultMcpServers(mcpCatalogBuilder.getServerNames())
+            .defaultWorkingDirectory(projectDir)
+            .build();
+        var response = client.run(userInput, options);
+        return response.getResult();  // raw response，沒經過 MemoryWriter
     }
 }
 ```
 
-**不**直接注入 `ProjectContext` — 已被封裝在 `MemoryStore` / `GrimoMemory` 內部。
+**對比 v3 手動方案的優勢**：
+- 三個 entry 只多 1 行（`buildMainAgentClient` 的 `defaultAdvisor` call），不需要在每個 entry 重複 `loadSnapshot → build → extract → strip` 4 步
+- Cross-cutting 邏輯統一在 `MainAgentMemoryAdvisor.adviseCall()` 一個地方
+- 想新增第四個 main-agent entry（例如未來的 Email channel）只要呼 `buildMainAgentClient`，自動 inherit memory 行為
+- doDispatch（sub-agent path）刻意**不**呼叫 helper，刻意**不**加 advisor → 結構性隔離
 
-### 在三個 entry 加上「memory 是 background data」的 sanity 檢查
+### Sub-agent / system-internal 元件 — 不需要任何修改
 
-由於 entry 收到的是 `userInput`，prefix 是 Grimo 自己組的，這裡不需要驗證 — `MemoryPromptBuilder.sanitizeForFence()` 已經處理 fence escape。
+| 元件 | 為什麼自動排除 |
+|---|---|
+| **`SkillExecutor` (inline 模式)** | 走 `chatDispatcher.doDispatch(fullGoal)` — `doDispatch` 內建 client **不**註冊 `MainAgentMemoryAdvisor`，所以 fullGoal 不會被 prefix、response 不會被 parse |
+| **`SkillExecutor` (isolated 模式)** | 走 `devModeRunner.run(...)` — DevModeRunner 完全不依賴 ChatDispatcher |
+| **`DevModeRunner`** | 自建 `AgentClient`，**不註冊** `MainAgentMemoryAdvisor`，完全獨立 |
+| **`SkillAnalyzer`** | 自建 `AgentClient`，**不註冊** `MainAgentMemoryAdvisor`，完全獨立 |
+| **`TierRouter`** | 不呼叫 agent，只算 routing |
+
+→ **結構性保證**：`MainAgentMemoryAdvisor` 只在 `ChatDispatcher.buildMainAgentClient()` 被註冊，其他三個 Sub-agent / system-internal 元件建 client 時都**沒有**這行 `.defaultAdvisor(memoryAdvisor)`。即使日後有新人想讓 `DevModeRunner` 寫 memory，需要明確 import `MainAgentMemoryAdvisor` + 加 constructor 參數 + 加 `.defaultAdvisor()` 呼叫 — 三個明顯的改動，code review 自然攔截。
 
 ### Log / Event payload 注意事項
 
 - `DispatchQueuedEvent` 帶的是 **原始 userInput**（給 ReactionIndicator 顯示），不是 prefixed goalText
 - `[DISPATCH-RUN] goalLen=...` log 帶 prefixed goalText 長度，方便 debug token 用量
-- Session JSONL 寫入的是 **原始 userInput**，不是 prefixed goalText（不要污染對話歷史）
+- Session JSONL 寫入的是 **原始 userInput**（advisor `getOrder()` 排在 `GrimoSessionAdvisor` 之後，session 的 before-hook 先看到 raw request）
 
 ---
 
@@ -1466,6 +1697,12 @@ Option D 的關鍵特性：**所有 memory 寫入都在 Java 端透過 `MemoryWr
 | 檔案內容超過 char limit | 仍完整注入，usage % 顯示 > 100%，不截斷 |
 | `memory-protocol.md` resource 載入失敗 | `@PostConstruct` 失敗 → 整個 bean 啟動失敗 → 整個 app 啟動失敗（fast fail，這是設計檔不該丟） |
 | Variable placeholder 缺值 | `replace()` 不替換 → 注入 raw `{{...}}` 字串 → agent 看到會困惑但不會 crash |
+| **`<grimo-memory>` block 解析失敗**（malformed XML、無效 attr） | log warn + 從 visible response strip 掉（避免使用者看到內部 protocol）+ dispatch 不阻斷 |
+| **`op="replace"` `<old>` not found** | log warn + skip 該 block + 其他 block 照常處理 |
+| **`op="replace"` `<old>` 出現多次（ambiguous）** | log warn + skip + 訊息提示「include more surrounding context」 |
+| **`op="replace"` `<old>` 為空** | log warn + skip（防止意外整檔清空）|
+| **`op="replace"` `<new>` 為空** | 視為 delete — 移除匹配範圍 + `normalizeAfterDelete()` 清掉 dangling `---` |
+| **`MainAgentMemoryAdvisor` 內 IO error**（讀檔失敗 / 寫檔失敗）| advisor 內部 try/catch → log warn → 仍呼叫 `chain.nextCall()` → response 直接 pass through 給下游 |
 
 **整體原則**：memory 是輔助功能，**永遠不能阻斷主對話**。任何錯誤都 fallback 到「這次 dispatch 沒有記憶」，user 還是能正常對話。
 
@@ -1565,6 +1802,7 @@ PROJECT MEMORY: grimo-cli [0% — 0/2,500 chars]
 |---|---|
 | `/memory-list` | 顯示 3 個檔的 path、usage %、總字數 |
 | `/memory-show <user\|global\|project>` | 在 ContentView 顯示指定檔案內容 |
+| `/memory-add <user\|global\|project> <content>` | 使用者**顯式**新增一條 entry（不依賴 Main-agent 自主判斷）。內部呼叫 `MemoryWriter` 用 `Op.APPEND` 寫入 |
 | `/memory-edit <user\|global\|project>` | spawn `$EDITOR` 編輯指定檔案（暫停 TUI） |
 | `/memory-clear <user\|global\|project>` | 清空指定檔案（互動確認） |
 
@@ -1576,9 +1814,16 @@ GLOBAL   ~/.grimo/memory/GLOBAL.md                  18% — 360/2,000 chars
 PROJECT  ~/.grimo/projects/{...}/memory/PROJECT.md  55% — 1,375/2,500 chars
 ```
 
-**指令實作**：依 Grimo 既有的 `CommandDispatcher` + `BuiltinCommandRegistrar` pattern 註冊。
+`/memory-add` 範例：
 
-**為什麼不做 `/memory-add`**：那是 agent 的工作。使用者要直接寫 → 用 `/memory-edit` 開 `$EDITOR`。
+```
+> /memory-add user "Prefers Java records over Lombok for DTOs"
+✅ Appended to USER.md (now 45% — 670/1,500 chars)
+```
+
+**`/memory-add` 跟 Main-agent 自主寫入的關係**：互補不互斥。Main-agent 會在 turn 中自動偵測值得記的事 emit `<grimo-memory>` block；`/memory-add` 是給使用者「我現在就要存這條」的明確強制路徑（不用對 Main-agent 說「請記住」再期待它偵測）。
+
+**指令實作**：依 Grimo 既有的 `CommandDispatcher` + `BuiltinCommandRegistrar` pattern 註冊。所有指令直接呼叫 `MemoryWriter` 對應方法（不經過 dispatch / advisor）。
 
 ---
 
@@ -1734,61 +1979,78 @@ v1 完工的判定條件：
 2. ✅ `GrimoMemory` 構造子注入 `GrimoHome` + `ProjectContext`
 3. ✅ `MemoryStore` 構造子注入 `GrimoMemory` + `ProjectContext`
 4. ✅ `MemoryWriter` 構造子注入 `GrimoMemory` + `MemoryStore`
-5. ✅ `ChatDispatcher` 構造子新增 `MemoryStore` + `MemoryPromptBuilder` + `MemoryWriter` 依賴
-6. ✅ `MemoryFile` enum 包含且只包含 `USER` / `GLOBAL` / `PROJECT` 三個值
+5. ✅ `MainAgentMemoryAdvisor` 構造子注入 `MemoryStore` + `MemoryPromptBuilder` + `MemoryWriter`，並實作 `AgentCallAdvisor` 介面
+6. ✅ `ChatDispatcher` 構造子新增 **單一** dependency: `MainAgentMemoryAdvisor`
+7. ✅ `MemoryFile` enum 包含且只包含 `USER` / `GLOBAL` / `PROJECT` 三個值
+8. ✅ `MemoryWriter.Op` enum 包含且只包含 `APPEND` / `REPLACE` / `REWRITE` 三個值
 
 ### 結構性安全保證（核心）
 
-7. ✅ `MemoryWriter.processBlock()` 對 `file` attr 用 `MemoryFile.valueOf()` 做 enum 解析；任何不在 enum 內的值（含 src/、`../`、絕對路徑）一律 reject + log warn + skip
-8. ✅ `MemoryWriter.atomicWrite()` 寫入路徑來自 `MemoryFile.resolve(grimoMemory)` enum 對應的固定 method，**沒有**任何字串拼接路徑的程式碼
-9. ✅ Plan Mode `disallowedTools=["Edit","Write","MultiEdit"]` **維持原狀** — Main-agent 在 Plan Mode 下沒有 native Edit tool
-10. ✅ Unit test：丟一個 `<grimo-memory file="src/Main.java" op="append">malicious</grimo-memory>` 給 `MemoryWriter.extractAndWrite()`，驗證磁碟上的 `src/Main.java` **沒有被建立或修改**，且回傳的 `WriteResult.ops` 為空
+9. ✅ `MemoryWriter.processBlock()` 對 `file` attr 用 `MemoryFile.valueOf()` 做 enum 解析；任何不在 enum 內的值（含 src/、`../`、絕對路徑）一律 reject + log warn + skip
+10. ✅ `MemoryWriter.atomicWrite()` 寫入路徑來自 `MemoryFile.resolve(grimoMemory)` enum 對應的固定 method，**沒有**任何字串拼接路徑的程式碼
+11. ✅ Plan Mode `disallowedTools=["Edit","Write","MultiEdit"]` **維持原狀** — Main-agent 在 Plan Mode 下沒有 native Edit tool
+12. ✅ Unit test (attack vector)：丟一個 `<grimo-memory file="src/Main.java" op="append">malicious</grimo-memory>` 給 `MemoryWriter.extractAndWrite()`，驗證磁碟上的 `src/Main.java` **沒有被建立或修改**，且回傳的 `WriteResult.ops` 為空
 
 ### Lazy bootstrap
 
-11. ✅ 第一次 `loadSnapshot()` 自動 lazy 建立 `~/.grimo/memory/` + USER.md / GLOBAL.md，以及 `~/.grimo/projects/{cwd}/memory/PROJECT.md`（含 default header comment）
-12. ✅ `GrimoHome.initialize()` **不**修改（不強迫它認識 memory 模組）
+13. ✅ 第一次 `loadSnapshot()` 自動 lazy 建立 `~/.grimo/memory/` + USER.md / GLOBAL.md，以及 `~/.grimo/projects/{cwd}/memory/PROJECT.md`（含 default header comment）
+14. ✅ `GrimoHome.initialize()` **不**修改（不強迫它認識 memory 模組）
 
-### Dispatch 整合
+### Advisor pattern 整合
 
-13. ✅ `ChatDispatcher.dispatch(String)`、`dispatch(String, callback)`、`dispatchTo(String, String, callback)` 三個 entry 都在呼叫 `client.run(...)` / `doDispatch(...)` 前 prepend memory prefix
-14. ✅ 上述三個 entry 在 dispatch 完成後對 `rawResponse` 呼叫 `memoryWriter.extractAndWrite()`，把 `visibleText` 而不是 `rawResponse` 給 contentView / callback / `sessionManager.getWriter().writeAssistantMessage()`（unit test 驗證 session JSONL 內**不含** `<grimo-memory>` 字串）
-15. ✅ `ChatDispatcher.doDispatch(String)` 與 `doDispatch(String, TierSelection)` 兩個 overload **完全不**讀 `MemoryStore` 也**完全不**呼叫 `MemoryWriter`（unit test 確保）
-16. ✅ `SkillExecutor` 走 inline 路徑時，`doDispatch` 收到的 goal **不含** memory prefix；Sub-agent 回傳的 response **沒有**經過 `MemoryWriter` 處理（即使 Sub-agent 故意 emit `<grimo-memory>` block 也不會被寫入磁碟，unit test 驗證）
-17. ✅ `DevModeRunner` 與 `SkillAnalyzer` 不依賴 `MemoryStore` / `MemoryPromptBuilder` / `MemoryWriter`（編譯期保證）
+15. ✅ `ChatDispatcher.dispatch(String)`、`dispatch(String, callback)`、`dispatchTo(...)` 三個 entry 都透過 helper method `buildMainAgentClient()` 建立 `AgentClient`，該 helper 用 `.defaultAdvisor(memoryAdvisor)` 註冊 `MainAgentMemoryAdvisor`
+16. ✅ `ChatDispatcher.doDispatch(...)` 兩個 overload 建立的 `AgentClient` **完全不**註冊 `MainAgentMemoryAdvisor`（unit test 確保 builder chain 不含這個 advisor）
+17. ✅ `MainAgentMemoryAdvisor.adviseCall()` 在 before-hook 呼叫 `loadSnapshot()` + `MemoryPromptBuilder.build()`，after-hook 呼叫 `MemoryWriter.extractAndWrite()`，回傳 `response.mutate().result(visibleText).build()`
+18. ✅ `MainAgentMemoryAdvisor.getOrder()` 大於 `GrimoSessionAdvisor` 的 order，確保 session JSONL 寫入的是 raw user input（unit test 驗證 session 寫入的字串不含 `<grimo-memory>`）
+19. ✅ `MainAgentMemoryAdvisor` 的 IO 例外 try/catch 包住，**不阻斷** `chain.nextCall()` — 即使 memory 讀寫失敗，dispatch 仍能完成
 
-### 行為
+### Sub-agent exclusion
 
-18. ✅ Frozen snapshot：同一次 dispatch 內 system prompt 不變（trivially true，因為 Main-agent 沒有 mid-turn write 能力）
-19. ✅ Char limit 100% 時 agent 看到 `[100% — N/N chars]`，**不截斷**使用者資料
-20. ✅ `<memory-context>` fence 含 sanitize（test 驗證 `</memory-context>` 字串會被 strip）
-21. ✅ Consolidation trigger 在 max usage > 80% / idle > 60s / 結束關鍵字時注入 reminder（reminder 文字要求 `op="rewrite"`）
-22. ✅ Memory file IO error → log warn，dispatch 不阻斷（fallback 到 empty memory）
-23. ✅ `<grimo-memory>` block 解析失敗（malformed XML / 無效 attr）→ log warn + 從 visible response 裡 strip 掉（避免使用者看到 internal protocol）
+20. ✅ `SkillExecutor` 走 inline 路徑時，`doDispatch` 建立的 `AgentClient` 不註冊 `MainAgentMemoryAdvisor`（goal 不會被 prefix、response 不會被 parse）。Unit test：mock agent 回傳含 `<grimo-memory>` block 的 response，驗證磁碟 memory 檔**沒有變化**
+21. ✅ `DevModeRunner`、`SkillAnalyzer` 不依賴 `MainAgentMemoryAdvisor`（編譯期保證 — 沒有 import / constructor 參數）
+
+### `op="replace"` 行為
+
+22. ✅ 成功 case：`<grimo-memory file=user op=replace><old>...</old><new>...</new></grimo-memory>`，`<old>` 在檔案中 exact 匹配且唯一 → 寫入新內容，其他 entry 不變
+23. ✅ Not found case：`<old>` 在檔案中找不到 → reject + log warn + skip + 其他 block 照常處理
+24. ✅ Ambiguous case：`<old>` 出現多次 → reject + log warn 提示「include more surrounding context」+ skip
+25. ✅ Empty `<old>` case：reject + log warn（防止意外整檔清空）
+26. ✅ Delete case：`<new>` 為空 → 移除匹配範圍 + `normalizeAfterDelete()` 清掉 dangling `---`，產出乾淨檔案（unit test 驗證沒有殘留 `\n\n---\n\n---\n\n` 或開頭尾 `---`）
+
+### 行為（一般）
+
+27. ✅ Frozen snapshot：同一次 dispatch 內 system prompt 不變（trivially true，因為 Main-agent 沒有 mid-turn write 能力）
+28. ✅ Char limit 100% 時 agent 看到 `[100% — N/N chars]`，**不截斷**使用者資料
+29. ✅ `<memory-context>` fence 含 sanitize（test 驗證 `</memory-context>` 字串會被 strip）
+30. ✅ Consolidation trigger 在 max usage > 80% / idle > 60s / 結束關鍵字時注入 reminder（reminder 文字要求 `op="rewrite"`）
+31. ✅ Memory file IO error → log warn，dispatch 不阻斷（fallback 到 empty memory）
+32. ✅ `<grimo-memory>` block 解析失敗（malformed XML / 無效 attr）→ log warn + 從 visible response 裡 strip 掉
 
 ### 指令
 
-24. ✅ `/memory-list` 顯示 3 個檔的 path、usage %、char count
-25. ✅ `/memory-show <user|global|project>` 在 ContentView 顯示內容
-26. ✅ `/memory-edit <user|global|project>` spawn `$EDITOR`
-27. ✅ `/memory-clear <user|global|project>` 互動確認後清空
+33. ✅ `/memory-list` 顯示 3 個檔的 path、usage %、char count
+34. ✅ `/memory-show <user|global|project>` 在 ContentView 顯示內容
+35. ✅ `/memory-add <user|global|project> <content>` 直接呼叫 `MemoryWriter` 用 `Op.APPEND` 寫入，回傳新 usage 顯示給使用者
+36. ✅ `/memory-edit <user|global|project>` spawn `$EDITOR`
+37. ✅ `/memory-clear <user|global|project>` 互動確認後清空
 
 ### 人工驗收
 
-28. ✅ 使用者跟主對話對話 5 輪、講「我喜歡 records 不喜歡 lombok」之後 → `cat ~/.grimo/memory/USER.md` 應該看到對應 entry（來自 Main-agent emit 的 block）
-29. ✅ 上述條目在下一次新 session 仍然出現在 system prompt 裡
-30. ✅ Main-agent 的 visible response 裡**看不到** `<grimo-memory>` 標籤（block 已被 strip）
+38. ✅ 使用者跟主對話對話 5 輪、講「我喜歡 records 不喜歡 lombok」之後 → `cat ~/.grimo/memory/USER.md` 應該看到對應 entry（來自 Main-agent emit 的 block）
+39. ✅ 上述條目在下一次新 session 仍然出現在 system prompt 裡
+40. ✅ Main-agent 的 visible response 裡**看不到** `<grimo-memory>` 標籤（block 已被 strip）
+41. ✅ 對 Main-agent 說「忘掉 records 那條」→ 下次 dispatch 該 entry 已從 USER.md 移除（透過 `op="replace"` `<new>` 為空 path 達成）
 
 ### Build & Native Image
 
-31. ✅ Build pass：`./gradlew test -x nativeTest`
-32. ✅ Native image build pass：`./gradlew nativeCompile`
-33. ✅ `src/main/resources/META-INF/native-image/.../resource-config.json` 新增 `prompts/memory-protocol.md` entry
+42. ✅ Build pass：`./gradlew test -x nativeTest`
+43. ✅ Native image build pass：`./gradlew nativeCompile`
+44. ✅ `src/main/resources/META-INF/native-image/.../resource-config.json` 新增 `prompts/memory-protocol.md` entry
 
 ### 文件
 
-34. ✅ `docs/glossary.md` 新增 Memory 區塊（GrimoMemory / MemoryStore / MemorySnapshot / MemoryPromptBuilder / MemoryWriter / `<grimo-memory>` block / Frozen Snapshot / `<memory-context>` fence / ConsolidationTrigger）
-35. ✅ `CLAUDE.md` 不需要修改 — `memory/` 是新 top-level 模組，沒有違反 `shared/` 規則
+45. ✅ `docs/glossary.md` 新增 Memory 區塊（GrimoMemory / MemoryFile / MemoryStore / MemorySnapshot / MemoryPromptBuilder / MemoryWriter / MainAgentMemoryAdvisor / `<grimo-memory>` block / Frozen Snapshot / `<memory-context>` fence / ConsolidationTrigger）
+46. ✅ `CLAUDE.md` 不需要修改 — `memory/` 是新 top-level 模組，沒有違反 `shared/` 規則
 
 ---
 
@@ -1809,6 +2071,8 @@ v1 完工的判定條件：
 | Sub-agent exclusion 結構性保證 | **Grimo 自選**（user 明確要求） |
 | **`<grimo-memory>` emit-block + Java parser** | **Grimo 原創**（不是抄哪一家） — 由 Grimo 對話模型推導：Main-agent 是唯一的對話 endpoint、Sub-agent 不參與對話、寫入邊界自然落在 response 結尾。詳見「為什麼選 Option D」 |
 | `MemoryFile` enum 強制路徑沙箱 | **Grimo 原創** — 結構性鎖死「Main-agent 只能異動自己的設定」原則 |
+| `op="replace"` 用 `<old>` / `<new>` 巢狀 tag | **抄 SDK 跟 Hermes 的 surgical replace 觀念**（Hermes `replace(old_text, new_content)`、SDK `MemoryStrReplace(old_str, new_str)`），但用 emit-block syntax 表達 |
+| `MainAgentMemoryAdvisor`（cross-cutting wrapper） | **抄 Spring AI Community Agent Client `AgentCallAdvisor` pattern**（[advisors docs](https://spring-ai-community.github.io/agent-client/api/advisors.html)）— 對齊 SDK 慣例 |
 
 ---
 
@@ -1827,9 +2091,10 @@ v1 完工的判定條件：
 | **MemoryStore** | Memory Store | 純函式 reader。`loadSnapshot()` 從 disk 讀取三檔，產出 immutable `MemorySnapshot`。**無 write API** — 寫入交給 `MemoryWriter` |
 | **MemorySnapshot** | Memory Snapshot | Frozen immutable record，整個 dispatch 期間共享給 system prompt 使用。下次 dispatch 才重新 reload |
 | **MemoryPromptBuilder** | Memory Prompt Builder | 把 snapshot + user input 組成完整 goal text。負責 `<memory-context>` fence 包裹 + memory-protocol.md template substitution + condition-injected consolidation `<system-reminder>` |
-| **MemoryWriter** | Memory Writer | **Option D 核心**。`extractAndWrite(rawResponse)` 從 Main-agent response 中 regex 抓出所有 `<grimo-memory file="..." op="...">...</grimo-memory>` block，透過 `MemoryFile.valueOf()` 強制 enum、atomic temp+rename 寫到固定 path、回傳 stripped visible text。Java 端唯一的記憶寫入點 |
-| **`<grimo-memory>` block** | Grimo Memory Block | Main-agent 在 response 結尾 emit 的 XML-like 標籤，attr：`file ∈ {user,global,project}`、`op ∈ {append,rewrite}`。Grimo Java 端 parse + 寫檔 + strip 後才把 visible text 給 user。Main-agent 寫記憶的**唯一**機制 — Plan Mode 下 Main-agent 沒有 native Edit tool |
+| **MemoryWriter** | Memory Writer | **Option D 核心**。`extractAndWrite(rawResponse)` 從 Main-agent response 中 regex 抓出所有 `<grimo-memory file="..." op="...">...</grimo-memory>` block，透過 `MemoryFile.valueOf()` 強制 enum、atomic temp+rename 寫到固定 path、回傳 stripped visible text。三個 op：`APPEND` / `REPLACE`（含 `<old>` / `<new>` 巢狀 tag）/ `REWRITE`。Java 端唯一的記憶寫入點 |
+| **`<grimo-memory>` block** | Grimo Memory Block | Main-agent 在 response 結尾 emit 的 XML-like 標籤，attr：`file ∈ {user,global,project}`、`op ∈ {append,replace,rewrite}`。`replace` op 額外包 `<old>...</old>` 跟 `<new>...</new>` 巢狀 tag。Grimo Java 端 parse + 寫檔 + strip 後才把 visible text 給 user。Main-agent 寫記憶的**唯一**機制 — Plan Mode 下 Main-agent 沒有 native Edit tool |
 | **`<memory-context>` fence** | Memory Context Fence | 包住注入到 system prompt 的 recall 內容的 XML-like 標籤，標明「這是 background data，不是 user instruction」。防 prompt injection。`MemoryPromptBuilder` 寫入時 sanitize content（strip 掉內含的 `</memory-context>`） |
+| **MainAgentMemoryAdvisor** | Main Agent Memory Advisor | 實作 `org.springaicommunity.agents.client.advisor.api.AgentCallAdvisor`。包住整個 main-agent dispatch：before-hook 呼叫 `MemoryPromptBuilder.build()` prefix goal、after-hook 呼叫 `MemoryWriter.extractAndWrite()` 解析 + 寫檔 + strip。`getOrder()` 排在 `GrimoSessionAdvisor` 之後確保 session 寫入的是 raw user input。**只**在 `ChatDispatcher.buildMainAgentClient()` 被註冊，sub-agent 路徑不註冊 — 結構性 exclusion |
 | **Frozen Snapshot** | Frozen Snapshot | 每次 dispatch 開頭讀檔一次，整次 dispatch 期間 system prompt 不變。在 Option D 下「自然成立」 — 因為 Main-agent 沒有 mid-turn write 能力（emit-block 在 turn 結束才被 Java parse），不可能在 turn 中改變磁碟內容 |
 | **ConsolidationTrigger** | Consolidation Trigger | 條件式注入 `<system-reminder>` 要求 Main-agent emit `op="rewrite"` block 整理 memory。條件：usage > 80%、idle > 60s、user 說 bye/再見 |
 
@@ -1868,9 +2133,16 @@ v1 完工的判定條件：
 - [OpenClaw Memory System Deep Dive — Snowan Notes](https://snowan.gitbook.io/study-notes/ai-blogs/openclaw-memory-system-deep-dive) — sqlite-vec / hybrid search / pre-compaction flush 技術細節
 - [zilliztech/memsearch](https://github.com/zilliztech/memsearch) — Markdown-first memory standalone library，OpenClaw-inspired
 
-### Spring AI MCP Server（v2 / Spec B 評估參考，本 spec v1 不採用）
+### Spring AI Community Agent Client API（advisor pattern 的依據）
+
+- [AgentClient API](https://spring-ai-community.github.io/agent-client/api/agentclient.html) — `AgentClient.builder().defaultAdvisor(...)` 註冊 advisor
+- [Advisors API](https://spring-ai-community.github.io/agent-client/api/advisors.html) — `AgentCallAdvisor` 介面定義、`adviseCall(request, chain)` around-style 攔截、order / chain 機制。本 spec 的 `MainAgentMemoryAdvisor` 對齊這個 pattern
+- [Context Engineering](https://spring-ai-community.github.io/agent-client/api/context-engineering.html) — `VendirContextAdvisor` 範例（檔案層級 context），跟本 spec 的 prompt 注入是不同層級
+
+### Spring AI MCP Server（Future Extensions 評估參考，本 spec v1 不採用）
 
 - [Spring AI MCP Server Boot Starter 官方文件](https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html) — `@McpTool` annotation、stdio / SSE 兩種 transport
+- [MCP Java SDK Server](https://java.sdk.modelcontextprotocol.io/latest-snapshot/server/) — raw MCP SDK，`StdioServerTransportProvider` / `HttpServletStreamableServerTransportProvider`，無 Spring 依賴的最小 MCP server 寫法
 
 ### Grimo 內部文件
 
@@ -1886,3 +2158,5 @@ v1 完工的判定條件：
 - [Anthropic 官方 Memory MCP Server](https://github.com/modelcontextprotocol/servers/tree/main/src/memory) — knowledge graph 設計（entities / relations / observations + memory.json）。**不採用**：結構複雜，使用者無法手動編
 - [`coleam00/mcp-mem0`](https://github.com/coleam00/mcp-mem0) — Mem0 後端的 MCP server template。**不採用**：cloud 依賴
 - [`hermes-agent-self-evolution`](https://github.com/NousResearch/hermes-agent-self-evolution) — Hermes 用 DSPy + GEPA 做 prompt evolution 的研究專案。**留作 Spec B（auto-skill-generation）參考**
+- [Spring AI 2.0 Tool Calling — `ToolCallAdvisor`](https://docs.spring.io/spring-ai/reference/2.0/api/tools.html) — Spring AI 主線（**ChatClient**）的 advisor，wrap LLM 的 tool calling loop。**不採用**：跟 Grimo 不在同一個 API 世界 — Grimo 走 `AgentClient`（CLI subprocess），LLM 的 tool call loop 在 subprocess 內部，Grimo 看不到也插不進去。要用 `ToolCallAdvisor` 必須改用 `ChatClient` 直接呼叫 LLM API，等於放棄 Grimo「沿用使用者既有 CLI 訂閱、不另外付 API key」的核心 USP
+- [Spring AI Agent Sandbox — `LocalSandbox`](https://springaicommunity.mintlify.app/projects/incubating/agent-sandbox) — Spring AI Community 的 sandbox 抽象。**不採用**：source code 自己 log warn `"NO ISOLATION PROVIDED"`，本質上只是 `ProcessBuilder.directory()` wrapper，沒有 path 沙箱能力
