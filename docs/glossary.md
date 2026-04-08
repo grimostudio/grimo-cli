@@ -109,7 +109,8 @@
 
 | 名詞 | 英文 | 說明 |
 |------|------|------|
-| **Sub-agent** | Sub-agent | Grimo 派遣的獨立 CLI agent 實例。擁有獨立 context，不共享主對話歷史。接收明確的 goal，完成後回傳摘要結果。程式碼中使用 `SubAgent`（CamelCase），metadata key 使用 `subagents`（無連字號）。 |
+| **Main-agent** | Main-agent | Grimo 主對話派遣的 CLI agent 實例（claude / gemini / codex）。由 `ChatDispatcher` 的三個主對話 entry 啟動：`dispatch(String)`（TUI）、`dispatch(String, callback)`（LINE/Discord）、`dispatchTo(agentId, text, callback)`（`@agent` / `/agent`）。直接面對使用者，**注入 long-term memory**，使用自己的 native `Read` / `Edit` / `Write` tool 管理 memory 檔案。Main-agent 是**角色**（跨多次 dispatch 持續），不是單一 process — 每次 dispatch 都是一個 fresh CLI subprocess。對偶於 Sub-agent。 |
+| **Sub-agent** | Sub-agent | Grimo 派遣的獨立 CLI agent 實例，由 `SkillExecutor`（inline 或 isolated 模式）/ `DevModeRunner` 啟動。Fire-and-forget worker — **不**注入 long-term memory、**不**共享主對話歷史。接收明確的 goal，完成後回傳摘要結果給 Main-agent，使用者跟 Main-agent 溝通結果（即使 sub-agent 做不好也是跟 Main-agent 講）。程式碼中使用 `SubAgent`（CamelCase），metadata key 使用 `subagents`（無連字號）。對偶於 Main-agent。 |
 | **Tier** | Tier | 任務執行的能力等級。三級：`lite`（快速便宜）、`std`（日常主力）、`pro`（深度推理）。每級對應一個 agent+model fallback list，定義於 `application.yaml` `grimo.tier-models`，使用者可在 `config.yaml` `tier-models` 覆寫。 |
 | **Grimo Skill** | Grimo Skill | 放在 `~/.grimo/skills/` 的 SKILL.md，格式對齊 Agent Skills 開放標準（[agentskills.io](https://agentskills.io/specification)）。定義 Grimo 的調度指令（派誰、怎麼分工）。Grimo 擴充欄位放在 `metadata` map 裡（`grimo.tier`、`grimo.subagents`、`grimo.execution`）。第三方 Skill 直接安裝不會解析失敗。 |
 | **Agent Skill** | Agent Skill | 各 CLI agent 自己的 skill（如 `.claude/skills/`、`.gemini/agents/`）。由 agent 自己讀取和執行，Grimo 不介入。 |
