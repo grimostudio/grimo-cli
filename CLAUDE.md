@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+注重使用者體驗
 
 遵循 First Principles Thinking 思考根本問題, 不是只解決表面狀況
 
